@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Centrum Unity - Wellness Marketplace</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Unity" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Forum&family=Inter:wght@100..900&family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400;1,700;1,900&family=Poppins:wght@100;200;300;400;500;600;700;800;900&family=Cinzel:wght@400;500;600;700;800;900&family=Cormorant+Garamond:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <script>
+      // Konfigurace prostředí pro aplikaci
+      window.process = {
+        env: {
+          API_KEY: '', 
+          // POZOR: V produkci tento klíč schovejte na backend!
+          RESEND_API_KEY: 're_UtXgBDG2_A8mb6jtVTCisW6M5AHGCdoeu',
+          NODE_ENV: 'development'
+        }
+      };
+
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              unity: {
+                beige: '#f1e9dc',
+                white: '#ffffff',
+              },
+              sage: {
+                50: '#fdf9f2', 100: '#f9f0e0', 200: '#f2dec0', 300: '#eac598',
+                400: '#e0a86d', 500: '#d4a574', 600: '#ba8a5b', 700: '#956b46',
+                800: '#7a573d', 900: '#634734', 950: '#35251a',
+              },
+              stone: {
+                50: '#f1e9dc', /* Changed to RGB 241, 233, 220 (Studio Unity theme background) */
+                100: '#ede9de', 200: '#dcd7cc', 300: '#c5c0b5',
+                400: '#a8a29a', 500: '#8c877f', 600: '#706b65', 700: '#5a5550',
+                800: '#484440', 900: '#3c3835', 950: '#252220',
+              }
+            },
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              heading: ['Poppins', 'sans-serif'],
+              serif: ['Merriweather', 'serif'],
+              logo: ['"Forum"', 'serif'],
+            }
+          }
+        }
+      }
+    </script>
+    
+    <style>
+      .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+      .scrollbar-hide::-webkit-scrollbar { display: none; }
+      
+      /* Make HTML native date picker indicator cover the whole transparent input so that clicking anywhere triggers it natively */
+      .date-overlay-input::-webkit-calendar-picker-indicator {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          opacity: 0;
+          cursor: pointer;
+      }
+      
+      #root:empty {
+        display: flex; justify-content: center; align-items: center;
+        height: 100vh; background-color: #f1e9dc;
+      }
+      #root:empty::after {
+        content: "Načítám Centrum Unity...";
+        font-family: 'Poppins', sans-serif; font-size: 1.2rem;
+        color: #7a573d; font-weight: 600;
+      }
+    </style>
+    
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "recharts": "https://esm.sh/recharts@^3.7.0",
+    "firebase/": "https://esm.sh/firebase@^12.9.0/",
+    "react-router-dom": "https://esm.sh/react-router-dom@^7.13.0",
+    "@google/genai": "https://esm.sh/@google/genai@^1.40.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0"
+  }
+}
+</script>
+</head>
+  <body class="bg-[#f1e9dc] text-stone-800 antialiased font-sans">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

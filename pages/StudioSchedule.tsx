@@ -1,0 +1,907 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { Booking, Practitioner, GroupEvent, Role } from '../types';
+import { GENERATED_TIMES, BUFFER_SAME_USER, BUFFER_DIFF_USER, RENTAL_PRICING } from '../constants';
+import Button from '../components/Button';
+import { MiniCalendar } from '../components/MiniCalendar';
+import { Calendar, ChevronLeft, ChevronRight, Clock, User, Check, AlertCircle, Info, Lock, Zap, LogOut, Loader2, Bed, Layers, Sparkles, History, Monitor, Smartphone, Mail, Phone, X, LayoutDashboard } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { useToast } from '../contexts/ToastContext';
+import { useStore } from '../store/useStore';
+import { checkBookingCollision, calculateRentalPrice, timeToMinutes } from '../utils/scheduler';
+import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements } from '@stripe/react-stripe-js';
+import { StripeCheckout } from '../components/StripeCheckout';
+
+const stripePubKey = import.meta.env.VITE_STRIPE_PUBLIC_KEY;
+const stripePromise = stripePubKey ? loadStripe(stripePubKey) : Promise.resolve(null);
+
+
+interface StudioScheduleProps {
+  currentUser: Practitioner;
+  allBookings: Booking[];
+  groupEvents?: GroupEvent[];
+  onBook: (bookingData: Partial<Booking>) => Promise<void>;
+  onCancel: (bookingId: string) => Promise<void>;
+  onLogout: () => void;
+}
+
+const DAYS_MAP = ['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'];
+
+const StudioSchedule: React.FC<StudioScheduleProps> = ({ 
+    currentUser, 
+    allBookings, 
+    groupEvents = [],
+    onBook, 
+    onCancel,
+    onLogout
+}) => {
+    // Hooks
+    const { token, practitionersList } = useStore();
+    const { addToast } = useToast();
+
+    // View State
+    const [viewMode, setViewMode] = useState<'day' | 'week'>('week');
+    const [currentDate, setCurrentDate] = useState(new Date()); 
+    const [showCalendarPicker, setShowCalendarPicker] = useState(false);
+    
+    // Check screen size on mount and resize
+    useEffect(() => {
+        const handleResize = () => {
+            if (window.innerWidth < 768) {
+                setViewMode('day');
+            } else {
+                setViewMode('week');
+            }
+        };
+        handleResize();
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
+    const [selectedSlot, setSelectedSlot] = useState<{date: string, time: string, room: 1 | 2} | null>(null);
+    const [bookingToCancel, setBookingToCancel] = useState<Booking | null>(null);
+    
+    // Booking Form State
+    const [duration, setDuration] = useState<number>(60);
+    const [clientName, setClientName] = useState(''); 
+    const [equipment, setEquipment] = useState<'table' | 'futon'>('table'); 
+    const [isProcessing, setIsProcessing] = useState(false);
+
+    // STRIPE STATE
+    const [clientSecret, setClientSecret] = useState<string | null>(null);
+
+    // GUEST SPECIFIC STATE
+    const [guestName, setGuestName] = useState('');
+    const [guestEmail, setGuestEmail] = useState('');
+    const [guestPhone, setGuestPhone] = useState('');
+    const [isTestPayment, setIsTestPayment] = useState(false);
+    const [paymentMethod, setPaymentMethod] = useState<'invoice' | 'online'>('online');
+    const [paymentIntentIdState, setPaymentIntentIdState] = useState<string | null>(null);
+
+    const isGuest = currentUser.id === 'guest';
+
+    // Reset fields when modal opens/closes
+    useEffect(() => {
+        if (selectedSlot) {
+            setDuration(60);
+            setClientName('');
+            setEquipment('table');
+            setGuestName('');
+            setGuestEmail('');
+            setGuestPhone('');
+            setIsTestPayment(false);
+            setPaymentMethod(isGuest ? 'online' : 'invoice');
+        }
+    }, [selectedSlot, isGuest]);
+
+    // --- CALENDAR LOGIC ---
+    
+    const handleNavigate = (offset: number) => {
+        const newDate = new Date(currentDate);
+        if (viewMode === 'day') {
+            newDate.setDate(newDate.getDate() + offset);
+        } else {
+            newDate.setDate(newDate.getDate() + (offset * 7));
+        }
+        setCurrentDate(newDate);
+    };
+
+    const visibleDays = useMemo(() => {
+        if (viewMode === 'day') {
+            return [new Date(currentDate)];
+        } else {
+            return Array.from({ length: 7 }, (_, i) => {
+                const d = new Date(currentDate);
+                const day = d.getDay();
+                const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+                d.setDate(diff + i);
+                return d;
+            });
+        }
+    }, [currentDate, viewMode]);
+
+    const formatDate = (date: Date) => date.toISOString().split('T')[0];
+
+    const combinedBookings = useMemo(() => {
+        const mappedEvents: Booking[] = groupEvents.map(event => {
+            const duration = timeToMinutes(event.endTime) - timeToMinutes(event.startTime);
+            return {
+                id: `event-${event.id}`,
+                bookedByUserId: event.practitionerId,
+                bookedByName: 'Skupinová Událost',
+                date: event.date,
+                time: event.startTime,
+                durationMinutes: duration > 0 ? duration : 60,
+                room: 2, // Group events are in room 2
+                price: 0,
+                status: 'confirmed',
+                paymentStatus: 'paid',
+                paymentMethod: 'invoice',
+                createdAt: event.createdAt || new Date().toISOString(),
+                note: `Skupinová událost: ${event.title}`
+            } as Booking;
+        });
+        return [...allBookings, ...mappedEvents];
+    }, [allBookings, groupEvents]);
+
+    // Note: getSlotStatus remains here as it's purely view logic (rendering the grid)
+    const getSlotStatus = (date: Date, time: string, room: 1 | 2) => {
+        const dateStr = formatDate(date);
+        const slotStart = timeToMinutes(time);
+        const slotEnd = slotStart + 30; 
+
+        const now = new Date();
+        const slotDateTime = parseLocalDate(dateStr, time);
+        
+        // Past check logic...
+
+        const overlap = combinedBookings.find(b => {
+            if (b.date !== dateStr || b.status !== 'confirmed' || b.room !== room) return false;
+            
+            const bStart = timeToMinutes(b.time);
+            const bEnd = bStart + b.durationMinutes;
+            
+            const bufferDuration = (b.bookedByUserId === currentUser.id) ? BUFFER_SAME_USER : BUFFER_DIFF_USER;
+            const bBufferEnd = bEnd + bufferDuration;
+
+            const isBooking = (slotStart < bEnd && slotEnd > bStart);
+            const isBuffer = (slotStart < bBufferEnd && slotEnd > bEnd);
+
+            return isBooking || isBuffer;
+        });
+
+        if (!overlap) {
+            if (slotDateTime < now) return { status: 'past' as const };
+            return { status: 'free' as const };
+        }
+
+        const bStart = timeToMinutes(overlap.time);
+        const bEnd = bStart + overlap.durationMinutes;
+        const isBuffer = slotStart >= bEnd; 
+        const isMine = overlap.bookedByUserId === currentUser.id || currentUser.role === Role.ADMIN;
+
+        return {
+            status: isBuffer ? 'cleaning' as const : (isMine ? 'mine' as const : 'occupied' as const),
+            booking: overlap,
+            bufferUsed: (overlap.bookedByUserId === currentUser.id) ? BUFFER_SAME_USER : BUFFER_DIFF_USER
+        };
+    };
+
+    // --- HANDLERS ---
+
+    const handleSlotClick = async (date: Date, time: string, room: 1 | 2, statusData: ReturnType<typeof getSlotStatus>) => {
+        if (statusData.status === 'past') {
+            addToast('info', 'Minulost', 'Nelze rezervovat termíny v minulosti.');
+            return;
+        }
+        
+        if (statusData.status === 'free') {
+            setSelectedSlot({
+                date: formatDate(date),
+                time,
+                room
+            });
+        } else if (statusData.status === 'mine' && statusData.booking) {
+            if (statusData.booking.id.startsWith('event-')) {
+                addToast('info', 'Skupinová událost', 'Skupinové události nelze zrušit z kalendáře. Přejděte do Admin panelu.');
+                return;
+            }
+
+            setBookingToCancel(statusData.booking);
+        } else if (statusData.status === 'occupied') {
+            addToast('info', 'Obsazeno', 'Tento termín je již rezervován jiným lektorem.');
+        } else if (statusData.status === 'cleaning') {
+            addToast('info', 'Technická pauza', 'Čas na úklid a větrání po předchozí rezervaci.');
+        }
+    };
+
+    const handleConfirmCancel = async () => {
+        if (!bookingToCancel) return;
+        
+        setIsProcessing(true);
+        if (bookingToCancel.stripePaymentIntentId) {
+            try {
+                const res = await fetch('/api/refund', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ paymentIntentId: bookingToCancel.stripePaymentIntentId })
+                });
+                
+                const data = await res.json();
+                
+                if (!res.ok) {
+                    throw new Error(data.error || 'Refund failed');
+                }
+                
+                addToast('success', 'Refundace zadána', 'Platba byla úspěšně zrušena ve Stripe.');
+                onCancel(bookingToCancel.id);
+                addToast('success', 'Rezervace zrušena', 'Termín byl uvolněn.');
+            } catch (err: any) {
+                addToast('error', 'Chyba storna', err.message || 'Nastala chyba při vracení platby ze Stripe. Obraťte se prosím na podporu.');
+            }
+        } else {
+            onCancel(bookingToCancel.id);
+            addToast('success', 'Rezervace zrušena', 'Termín byl uvolněn.');
+        }
+        
+        setIsProcessing(false);
+        setBookingToCancel(null);
+    };
+
+    const handleConfirmBooking = async () => {
+        if (!selectedSlot) return;
+
+        // Validation for Guest
+        if (isGuest) {
+            if (!guestName.trim() || !guestEmail.trim() || !guestPhone.trim()) {
+                addToast('error', 'Chybí údaje', 'Jako host musíte vyplnit jméno, email a telefon.');
+                return;
+            }
+        }
+
+        // --- NEW UTILITY USAGE FOR COLLISION CHECK ---
+        const { hasCollision, reason } = checkBookingCollision({
+            newDate: selectedSlot.date,
+            newTime: selectedSlot.time,
+            durationMinutes: duration,
+            room: selectedSlot.room,
+            userId: currentUser.id,
+            allBookings: combinedBookings
+        });
+
+        if (hasCollision) {
+            addToast('error', 'Nelze rezervovat', reason);
+            return;
+        }
+
+        setIsProcessing(true);
+        const finalPrice = calculateRentalPrice(duration, selectedSlot.room);
+
+        if (paymentMethod === 'online') {
+            try {
+                const response = await fetch('/api/create-payment-intent', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ 
+                        amount: finalPrice * 100, 
+                        currency: 'czk',
+                        reservationDate: selectedSlot.date,
+                        reservationTime: selectedSlot.time
+                    })
+                });
+                const data = await response.json();
+                if (data.error) throw new Error(data.error);
+                setClientSecret(data.clientSecret);
+                setPaymentIntentIdState(data.paymentIntentId || null);
+                setIsProcessing(false);
+            } catch (err: any) {
+                addToast('error', 'Chyba platby', err.message || 'Nepodařilo se inicializovat platbu.');
+                setIsProcessing(false);
+            }
+            return;
+        }
+
+        // For invoice payments, book immediately
+        await finalizeBooking('unpaid');
+    };
+
+    const finalizeBooking = async (paymentStatus: 'paid' | 'unpaid' = 'unpaid') => {
+        if (!selectedSlot) return;
+        setIsProcessing(true);
+        
+        const finalPrice = calculateRentalPrice(duration, selectedSlot.room);
+
+        try {
+            await onBook({
+                bookedByUserId: currentUser.id,
+                bookedByName: isGuest ? guestName : currentUser.name,
+                date: selectedSlot.date,
+                time: selectedSlot.time,
+                durationMinutes: duration,
+                room: selectedSlot.room,
+                price: finalPrice,
+                paymentStatus: paymentStatus,
+                paymentMethod: paymentMethod,
+                clientName: clientName,
+                clientEmail: isGuest ? guestEmail : undefined,
+                clientPhone: isGuest ? guestPhone : undefined,
+                equipment: equipment,
+                stripePaymentIntentId: paymentStatus === 'paid' ? (paymentIntentIdState || undefined) : undefined
+            });
+
+            // --- Send Confirmation Email ---
+            // Try to send email to the guest or the current user (fallback to a test email if missing)
+            const targetEmail = isGuest ? guestEmail : (currentUser as any).email || 'mirek.saba@gmail.com'; 
+            if (targetEmail) {
+                const dateParts = selectedSlot.date.split('-');
+                const formattedDate = `${dateParts[2]}. ${dateParts[1]}. ${dateParts[0]}`;
+                
+                const emailHtml = `
+                    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+                        <h2 style="color: #4f46e5;">Vaše rezervace je potvrzena</h2>
+                        <p>Dobrý den,</p>
+                        <p>veškeré podrobnosti o rezervaci naleznete níže</p>
+                        
+                        <div style="background-color: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                            <strong>Rezervace na ${formattedDate} v ${selectedSlot.time}</strong><br/>
+                            Sólás Holistic Studio (Centrum Unity)<br/><br/>
+                            
+                            <strong>Místnost:</strong> ${selectedSlot.room === 1 ? 'M1 (Malá)' : 'M2 (Velká)'}<br/>
+                            <strong>Datum:</strong> ${formattedDate}<br/>
+                            <strong>Čas:</strong> ${selectedSlot.time}<br/>
+                            <strong>Doba trvání:</strong> ${duration} min<br/>
+                            <strong>Cena:</strong> ${finalPrice.toFixed(2).replace('.', ',')} Kč<br/>
+                            <br/>
+                            <strong>Adresa:</strong> Na Moráni 5, Nové Město, Praha<br/>
+                            <br/>
+                            <strong>Informace o platbě:</strong><br/>
+                            ${paymentStatus === 'paid' ? 'Platba online' : 'Faktura'}<br/>
+                            ${finalPrice.toFixed(2).replace('.', ',')} Kč<br/>
+                        </div>
+                        
+                        <div style="font-size: 12px; color: #666;">
+                            <strong>Storno podmínky:</strong><br/>
+                            Vezměte prosím na vědomí, že rezervace lze zrušit maximálně 24 hodin před termínem. Pokud ji zrušíte včas, bude vám zaplacená částka vrácena.
+                        </div>
+                    </div>
+                `;
+
+                fetch('/api/send-email', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        to: targetEmail,
+                        subject: 'Potvrzení rezervace - Centrum Unity',
+                        html: emailHtml
+                    })
+                }).catch(console.error); // Do not block UI
+            }
+            // -------------------------------
+
+            addToast('success', 'Rezervace potvrzena', paymentStatus === 'paid' ? 'Platba byla úspěšná.' : `Částka k úhradě: ${finalPrice.toFixed(0)} Kč`);
+            setClientSecret(null);
+            setSelectedSlot(null);
+        } catch (e) {
+            addToast('error', 'Chyba', 'Nepodařilo se uložit rezervaci.');
+        }
+
+        setIsProcessing(false);
+    };
+
+    return (
+        <div className="min-h-screen bg-stone-50 pb-20">
+            {/* Header / Navbar */}
+            <div className="bg-white border-b border-stone-200 relative z-30 shadow-sm">
+                <div className="max-w-7xl mx-auto px-4 min-h-[4rem] py-2 flex flex-wrap lg:flex-nowrap items-center justify-between relative gap-2">
+                    <div className="flex items-center gap-3">
+                         <div className={`w-10 h-10 rounded-full overflow-hidden border ${isGuest ? 'border-amber-400' : 'border-stone-200'}`}>
+                             <img src={currentUser.imageUrl} alt="Profile" className="w-full h-full object-cover" />
+                         </div>
+                         <div>
+                             <h1 className="font-bold text-stone-900 leading-tight truncate max-w-[120px] md:max-w-none">{currentUser.name}</h1>
+                             <div className="text-xs text-stone-500 font-medium">
+                                 {isGuest ? 'Externí přístup' : 'Lektor'}
+                             </div>
+                         </div>
+                    </div>
+
+                    {/* Centered Logo */}
+                    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:flex items-center">
+                        <img 
+                            src="/logo.png?v=2" 
+                            alt="Centrum Unity Logo" 
+                            className="h-10 w-auto" 
+                        />
+                        <span className="text-xl font-bold font-logo text-stone-800 hidden md:block ml-3 mt-1">Centrum Unity</span>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                        {!isGuest && (
+                            <Link to="/dashboard" className="p-2 hover:bg-stone-100 text-stone-500 hover:text-stone-900 rounded-lg transition-colors" title="Můj přehled">
+                                <LayoutDashboard className="w-5 h-5" />
+                            </Link>
+                        )}
+                        <button onClick={onLogout} className="p-2 hover:bg-red-50 text-stone-400 hover:text-red-600 rounded-lg transition-colors">
+                            <LogOut className="w-5 h-5" />
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div className="max-w-7xl mx-auto px-2 md:px-4 py-6">
+                
+                {/* Controls */}
+                <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+                     <div className="flex items-center justify-between w-full md:w-auto gap-4">
+                        <h2 className="text-2xl font-bold font-heading text-stone-800">Rozvrh</h2>
+                        {/* View Toggle */}
+                        <div className="flex bg-stone-200 rounded-lg p-1 md:hidden">
+                            <button 
+                                onClick={() => setViewMode('day')} 
+                                className={`p-1.5 rounded-md transition-all ${viewMode === 'day' ? 'bg-white shadow-sm text-stone-900' : 'text-stone-500'}`}
+                            >
+                                <Smartphone className="w-4 h-4" />
+                            </button>
+                            <button 
+                                onClick={() => setViewMode('week')} 
+                                className={`p-1.5 rounded-md transition-all ${viewMode === 'week' ? 'bg-white shadow-sm text-stone-900' : 'text-stone-500'}`}
+                            >
+                                <Monitor className="w-4 h-4" />
+                            </button>
+                        </div>
+                     </div>
+                     
+                     <div className="flex items-center gap-2 md:gap-4 bg-white p-1.5 rounded-xl shadow-sm border border-stone-200 w-full md:w-auto justify-between md:justify-start">
+                        <button onClick={() => handleNavigate(-1)} className="p-3 md:p-2 hover:bg-stone-100 rounded-lg text-stone-600 active:scale-95 transition-transform"><ChevronLeft className="w-5 h-5" /></button>
+                        <div className="relative flex items-center gap-2 px-2 font-medium text-stone-800 hover:text-sage-700 transition-colors cursor-pointer" title="Vybrat datum">
+                            <button onClick={() => setShowCalendarPicker(!showCalendarPicker)} className="flex items-center gap-2 focus:outline-none">
+                                <Calendar className="w-4 h-4 text-sage-600 hidden md:block" />
+                                {viewMode === 'day' ? (
+                                    <span className="text-sm font-bold capitalize">
+                                        {visibleDays[0].toLocaleDateString('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long' })}
+                                    </span>
+                                ) : (
+                                    <span className="text-sm">
+                                        {visibleDays[0].getDate()}.{visibleDays[0].getMonth()+1}. – {visibleDays[6].getDate()}.{visibleDays[6].getMonth()+1}.
+                                    </span>
+                                )}
+                            </button>
+                            {showCalendarPicker && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setShowCalendarPicker(false)} />
+                                    <div className="absolute top-12 left-1/2 -translate-x-1/2 md:translate-x-0 md:left-0 z-50 origin-top animate-in fade-in zoom-in-95 duration-200">
+                                        <MiniCalendar 
+                                            selectedDate={currentDate} 
+                                            onSelectDate={(d) => { setCurrentDate(d); setShowCalendarPicker(false); }} 
+                                        />
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                        <button onClick={() => handleNavigate(1)} className="p-3 md:p-2 hover:bg-stone-100 rounded-lg text-stone-600 active:scale-95 transition-transform"><ChevronRight className="w-5 h-5" /></button>
+                     </div>
+                </div>
+
+                {/* --- THE CALENDAR GRID --- */}
+                <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
+                    <div className="overflow-x-auto scrollbar-hide">
+                        <div className={viewMode === 'week' ? 'min-w-[800px]' : ''}>
+                            {/* Header Row */}
+                            <div 
+                                className="grid border-b border-stone-200"
+                                style={{ gridTemplateColumns: viewMode === 'day' ? '60px 1fr' : '60px repeat(7, 1fr)' }}
+                            >
+                                 <div className="p-4 bg-stone-50/50 border-r border-stone-100"></div> 
+                                 {visibleDays.map(d => (
+                                     <div key={d.toISOString()} className="text-center border-r border-stone-100 last:border-0 flex flex-col h-full animate-in fade-in">
+                                         <div className="p-2 border-b border-stone-100/50 bg-white">
+                                             <div className="text-xs uppercase font-bold text-stone-400 mb-0.5">{DAYS_MAP[d.getDay()]}</div>
+                                             <div className={`font-bold text-lg ${d.toDateString() === new Date().toDateString() ? 'text-sage-700' : 'text-stone-800'}`}>
+                                                 {d.getDate()}
+                                             </div>
+                                         </div>
+                                         <div className="flex flex-1 text-[10px] font-bold uppercase tracking-wider text-stone-500">
+                                             <div className="flex-1 py-1 bg-stone-50 border-r border-stone-100 flex items-center justify-center gap-1">
+                                                 <span className="w-2 h-2 rounded-full bg-stone-300"></span> M1 <span className={`${viewMode === 'week' ? 'hidden xl:inline' : ''}`}>(Malá)</span>
+                                             </div>
+                                             <div className="flex-1 py-1 bg-indigo-50/30 flex items-center justify-center gap-1">
+                                                 <span className="w-2 h-2 rounded-full bg-indigo-200"></span> M2 <span className={`${viewMode === 'week' ? 'hidden xl:inline' : ''}`}>(Velká)</span>
+                                             </div>
+                                         </div>
+                                     </div>
+                                 ))}
+                            </div>
+
+                            {/* Time Rows */}
+                            <div className="relative">
+                                {GENERATED_TIMES.map((time, tIdx) => (
+                                    <div 
+                                        key={time} 
+                                        className="grid min-h-[50px] border-b border-stone-100 last:border-0 group"
+                                        style={{ gridTemplateColumns: viewMode === 'day' ? '60px 1fr' : '60px repeat(7, 1fr)' }}
+                                    >
+                                <div className="py-2 px-1 text-center text-xs font-medium text-stone-400 border-r border-stone-100 flex items-start justify-center pt-3 bg-stone-50/30">
+                                    {time}
+                                </div>
+                                {visibleDays.map((date, dIdx) => {
+                                    const r1 = getSlotStatus(date, time, 1);
+                                    const r2 = getSlotStatus(date, time, 2);
+                                    
+                                    const renderSubSlot = (roomNum: 1|2, data: typeof r1) => {
+                                        let bgClass = roomNum === 1 ? "bg-white hover:bg-stone-50" : "bg-indigo-50/10 hover:bg-indigo-50";
+                                        let content = null;
+                                        
+                                        if (data.status === 'past') {
+                                            bgClass = "bg-stone-100/60 cursor-not-allowed";
+                                        } else if (data.status === 'mine') {
+                                            if (data.booking?.id.startsWith('event-')) {
+                                                bgClass = "bg-indigo-500 hover:bg-indigo-600 text-white shadow-sm";
+                                                const eventName = (currentUser.role === Role.ADMIN && data.booking?.bookedByUserId !== currentUser.id) 
+                                                    ? 'Cizí akce' 
+                                                    : 'MOJE AKCE';
+                                                content = <span className="text-[10px] font-bold truncate px-1 uppercase">{eventName}</span>;
+                                            } else {
+                                                const practitioner = practitionersList.find(p => p.id === data.booking?.bookedByUserId);
+                                                const colorClass = practitioner?.colorCode ? `${practitioner.colorCode} hover:opacity-90` : 'bg-emerald-500 hover:bg-emerald-600';
+                                                bgClass = `${colorClass} text-white shadow-sm flex flex-col items-center justify-center py-1 leading-tight`;
+                                                
+                                                const displayName = (currentUser.role === Role.ADMIN && data.booking?.bookedByUserId !== currentUser.id) 
+                                                    ? (data.booking?.bookedByName || 'Obsazeno')
+                                                    : 'MOJE';
+                                                    
+                                                content = (
+                                                    <>
+                                                        <span className="text-[9px] font-bold truncate px-1 text-center uppercase">{displayName}</span>
+                                                        <div className="flex gap-1 mt-0.5">
+                                                            {data.booking?.equipment === 'table' && <Bed className="w-3 h-3 text-white/80" />}
+                                                            {data.booking?.equipment === 'futon' && <Layers className="w-3 h-3 text-white/80" />}
+                                                        </div>
+                                                    </>
+                                                );
+                                            }
+                                        } else if (data.status === 'occupied') {
+                                            if (data.booking?.id.startsWith('event-')) {
+                                                bgClass = "bg-indigo-100 cursor-not-allowed border border-indigo-200";
+                                                content = <span className="text-[9px] font-bold text-indigo-700 truncate px-1">Skupinová Událost</span>;
+                                            } else {
+                                                const practitioner = practitionersList.find(p => p.id === data.booking?.bookedByUserId);
+                                                const colorClass = practitioner?.colorCode || 'bg-stone-200';
+                                                bgClass = `${colorClass} cursor-not-allowed text-white shadow-sm flex flex-col items-center justify-center py-1 leading-tight`;
+                                                content = (
+                                                    <>
+                                                        <span className="text-[9px] font-bold truncate px-1 text-center">{data.booking?.bookedByName}</span>
+                                                        <div className="flex gap-1 mt-0.5">
+                                                            {data.booking?.equipment === 'table' && <Bed className="w-3 h-3 text-white/80" />}
+                                                            {data.booking?.equipment === 'futon' && <Layers className="w-3 h-3 text-white/80" />}
+                                                        </div>
+                                                    </>
+                                                );
+                                            }
+                                        } else if (data.status === 'cleaning') {
+                                            bgClass = "bg-amber-100 cursor-not-allowed repeating-linear-gradient-45";
+                                        }
+
+                                        return (
+                                            <div 
+                                                onClick={() => handleSlotClick(date, time, roomNum, data)}
+                                                className={`flex-1 flex items-center justify-center transition-all cursor-pointer relative ${bgClass} ${roomNum === 1 ? 'border-r border-stone-200' : ''}`}
+                                            >
+                                                {content}
+                                                {data.status === 'free' && (
+                                                    <div className="opacity-0 hover:opacity-100 absolute inset-0 flex items-center justify-center bg-sage-100/50 text-sage-700 font-bold text-xs">
+                                                        +
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    };
+
+                                    return (
+                                        <div key={`${date}-${time}`} className="border-r border-stone-100 last:border-0 flex">
+                                            {renderSubSlot(1, r1)}
+                                            {renderSubSlot(2, r2)}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ))}
+                    </div>
+                  </div>
+                </div>
+                </div>
+
+                <div className="mt-6 flex flex-col md:flex-row gap-2 md:gap-4 text-xs text-stone-400 justify-center items-center text-center">
+                    <div className="flex gap-4">
+                        <span className="flex items-center gap-2"><span className="w-3 h-3 bg-stone-50 border border-stone-200"></span> M1 (Malá)</span>
+                        <span className="text-stone-300">|</span>
+                        <span className="flex items-center gap-2"><span className="w-3 h-3 bg-indigo-50 border border-indigo-100"></span> M2 (Velká)</span>
+                    </div>
+                    <div className="flex flex-col md:flex-row gap-1 md:gap-4 md:ml-4">
+                        <span className="text-amber-600 font-bold">* Úklid: 30 min (stejný lektor) / 60 min (výměna)</span>
+                        <span className="text-red-400 font-bold">* Storno: min. 24h předem</span>
+                    </div>
+                </div>
+
+            </div>
+
+            {/* Booking Modal */}
+            {selectedSlot && (
+                <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-white w-full md:max-w-md rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 md:zoom-in-95 flex flex-col max-h-[90vh]">
+                        <div className={`text-white p-6 relative flex-shrink-0 ${isGuest ? 'bg-amber-600' : 'bg-stone-900'}`}>
+                            <h3 className="text-xl font-bold font-heading">
+                                {isGuest ? 'Jednorázová Rezervace' : 'Nová Rezervace'}
+                            </h3>
+                            <div className={`flex items-center gap-4 text-sm mt-2 ${isGuest ? 'text-amber-100' : 'text-stone-400'}`}>
+                                <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {formatLocalDate(selectedSlot.date)}</span>
+                                <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {selectedSlot.time}</span>
+                            </div>
+                            <button onClick={() => setSelectedSlot(null)} className="absolute top-4 right-4 p-2 bg-white/10 rounded-full hover:bg-white/20"><X className="w-4 h-4" /></button>
+                        </div>
+                        
+                        <div className={`p-6 space-y-6 overflow-y-auto ${clientSecret ? 'hidden' : ''}`}>
+                            {/* Room Info */}
+                            <div className="flex gap-4">
+                                <div className={`flex-1 p-3 rounded-xl border-2 text-center ${selectedSlot.room === 1 ? 'border-sage-500 bg-sage-50 text-sage-800' : 'border-stone-100 text-stone-400 bg-stone-50 opacity-50'}`}>
+                                    <div className="text-xs font-bold uppercase mb-1">Místnost 1</div>
+                                    <div className="font-bold text-sm md:text-base">Malá Terapeutovna</div>
+                                    <div className="text-xs mt-1">{RENTAL_PRICING.room1} Kč/h</div>
+                                </div>
+                                <div className={`flex-1 p-3 rounded-xl border-2 text-center ${selectedSlot.room === 2 ? 'border-sage-500 bg-sage-50 text-sage-800' : 'border-stone-100 text-stone-400 bg-stone-50 opacity-50'}`}>
+                                    <div className="text-xs font-bold uppercase mb-1">Místnost 2</div>
+                                    <div className="font-bold text-sm md:text-base">Velký Sál</div>
+                                    <div className="text-xs mt-1">{RENTAL_PRICING.room2} Kč/h</div>
+                                </div>
+                            </div>
+
+                            {/* Equipment Selection */}
+                            <div>
+                                <label className="block text-sm font-bold text-stone-700 mb-2">Jaké vybavení potřebujete?</label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
+                                        onClick={() => setEquipment('table')}
+                                        className={`p-4 rounded-xl border-2 flex flex-col items-center justify-center gap-2 transition-all ${
+                                            equipment === 'table' 
+                                            ? 'border-sage-600 bg-sage-50 text-sage-900 shadow-sm' 
+                                            : 'border-stone-200 text-stone-500 hover:border-sage-200 hover:bg-stone-50'
+                                        }`}
+                                    >
+                                        <Bed className="w-6 h-6" />
+                                        <span className="font-bold text-sm">Lehátko (Stůl)</span>
+                                    </button>
+                                    <button
+                                        onClick={() => setEquipment('futon')}
+                                        className={`p-4 rounded-xl border-2 flex flex-col items-center justify-center gap-2 transition-all ${
+                                            equipment === 'futon' 
+                                            ? 'border-sage-600 bg-sage-50 text-sage-900 shadow-sm' 
+                                            : 'border-stone-200 text-stone-500 hover:border-sage-200 hover:bg-stone-50'
+                                        }`}
+                                    >
+                                        <Layers className="w-6 h-6" />
+                                        <span className="font-bold text-sm">Futon (Země)</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Duration Slider/Select */}
+                            <div>
+                                <label className="block text-sm font-bold text-stone-700 mb-2">Délka rezervace</label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {[60, 90, 120, 150, 180, 210, 240, 270, 300, 720].map(m => (
+                                        <button
+                                            key={m}
+                                            onClick={() => setDuration(m)}
+                                            className={`py-2 rounded-lg text-sm font-bold transition-all ${duration === m ? 'bg-stone-800 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}
+                                        >
+                                            {m === 720 ? 'Celý den' : `${m} min`}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* GUEST SPECIFIC FIELDS */}
+                            {isGuest ? (
+                                <div className="space-y-4 pt-4 border-t border-amber-100 bg-amber-50 p-4 rounded-xl border">
+                                    <h4 className="font-bold text-amber-800 text-sm flex items-center gap-2">
+                                        <User className="w-4 h-4" /> Údaje o Hostovi (Povinné)
+                                    </h4>
+                                    
+                                    <div>
+                                        <label className="block text-xs font-bold text-stone-600 mb-1">Vaše Jméno a Příjmení</label>
+                                        <input 
+                                            type="text" 
+                                            className="w-full p-2 border border-stone-300 rounded-lg text-sm"
+                                            placeholder="Jan Novák"
+                                            value={guestName}
+                                            onChange={e => setGuestName(e.target.value)}
+                                        />
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                            <label className="block text-xs font-bold text-stone-600 mb-1">Email (pro fakturu)</label>
+                                            <div className="relative">
+                                                <Mail className="absolute left-2.5 top-2.5 w-4 h-4 text-stone-400" />
+                                                <input 
+                                                    type="email" 
+                                                    className="w-full pl-9 p-2 border border-stone-300 rounded-lg text-sm"
+                                                    placeholder="@"
+                                                    value={guestEmail}
+                                                    onChange={e => setGuestEmail(e.target.value)}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-stone-600 mb-1">Telefon</label>
+                                            <div className="relative">
+                                                <Phone className="absolute left-2.5 top-2.5 w-4 h-4 text-stone-400" />
+                                                <input 
+                                                    type="tel" 
+                                                    className="w-full pl-9 p-2 border border-stone-300 rounded-lg text-sm"
+                                                    placeholder="+420"
+                                                    value={guestPhone}
+                                                    onChange={e => setGuestPhone(e.target.value)}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                        {isGuest && (
+                                            <p className="text-[10px] text-amber-700 leading-tight">
+                                                * Na zadaný email vám po potvrzení dorazí informace.
+                                            </p>
+                                        )}
+                                    </div>
+                                ) : (
+                                /* Regular Client Note */
+                                <div className="mt-4">
+                                    <label className="block text-sm font-bold text-stone-700 mb-1">Klient / Poznámka (Volitelné)</label>
+                                    <input 
+                                        type="text" 
+                                        className="w-full p-3 bg-white border border-stone-200 rounded-xl text-stone-900 placeholder-stone-400 focus:ring-2 focus:ring-sage-500 outline-none"
+                                        placeholder="Jméno klienta pro vaši orientaci..."
+                                        value={clientName}
+                                        onChange={e => setClientName(e.target.value)}
+                                    />
+                                </div>
+                                )}
+
+                            {/* Payment Method Selection */}
+                            <div className="mt-4 border-t border-stone-200 pt-4">
+                                <label className="block text-sm font-bold text-stone-700 mb-2">Způsob úhrady</label>
+                                <div className="grid grid-cols-2 gap-2 mb-4">
+                                    <button 
+                                        className={`p-3 border rounded-xl text-sm font-bold ${paymentMethod === 'online' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'}`}
+                                        onClick={() => setPaymentMethod('online')}
+                                    >
+                                        Online Platba
+                                    </button>
+                                    <button 
+                                        className={`p-3 border rounded-xl text-sm font-bold ${paymentMethod === 'invoice' ? 'bg-sage-50 border-sage-200 text-sage-800' : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'} ${isGuest ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                        onClick={() => !isGuest && setPaymentMethod('invoice')}
+                                        disabled={isGuest}
+                                    >
+                                        Na fakturu
+                                    </button>
+                                </div>
+                                {paymentMethod === 'online' && (
+                                    <>
+                                        <p className="text-xs text-indigo-700 leading-tight mt-2">
+                                            Budete přesměrováni na bezpečnou platební bránu (Apple Pay, Google Pay, nebo platba kartou).
+                                        </p>
+                                    </>
+                                )}
+                            </div>
+
+                            {/* Summary & Action */}
+                            <div className="bg-stone-50 p-4 rounded-xl flex flex-col md:flex-row gap-4 md:justify-between md:items-center border border-stone-100 mt-auto">
+                                <div>
+                                    <div className="text-xs font-bold text-stone-500 uppercase">Cena celkem</div>
+                                    <div className="text-xl font-bold text-stone-900">
+                                        {calculateRentalPrice(duration, selectedSlot.room)} Kč
+                                    </div>
+                                </div>
+                                <Button 
+                                    onClick={handleConfirmBooking} 
+                                    disabled={isProcessing}
+                                    className={`text-white px-6 w-full md:w-auto ${paymentMethod === 'online' ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-black hover:bg-stone-800'}`}
+                                >
+                                    {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : (paymentMethod === 'online' ? 'Zaplatit online' : 'Potvrdit')}
+                                </Button>
+                            </div>
+                        </div>
+
+                        {clientSecret && (
+                            <div className="p-6 overflow-y-auto flex-1">
+                                {(!stripePubKey) ? (
+                                    <div className="bg-red-50 text-red-700 p-4 rounded-xl text-sm font-medium border border-red-200">
+                                        <p className="font-bold mb-1">Chybí Stripe API klíč</p>
+                                        <p>Zrušte tuto platbu a uložte správný <strong>Public Key</strong> (začíná na pk_live_ nebo pk_test_) do VITE_STRIPE_PUBLIC_KEY.</p>
+                                        <Button onClick={() => { setClientSecret(null); setIsProcessing(false); }} className="mt-4 w-full bg-stone-200 text-stone-800 hover:bg-stone-300">Zpět</Button>
+                                    </div>
+                                ) : (
+                                    <Elements stripe={stripePromise} options={{ clientSecret }}>
+                                        <StripeCheckout 
+                                            amount={calculateRentalPrice(duration, selectedSlot.room)} 
+                                            onPaymentSuccess={() => finalizeBooking('paid')}
+                                            onCancel={() => {
+                                                setClientSecret(null);
+                                                setIsProcessing(false);
+                                            }}
+                                        />
+                                    </Elements>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+        {/* Cancellation Modal */}
+            {bookingToCancel && (() => {
+                const bookingStart = parseLocalDate(bookingToCancel.date, bookingToCancel.time);
+                const now = new Date();
+                const hoursDifference = (bookingStart.getTime() - now.getTime()) / (1000 * 60 * 60);
+                const isTooLate = hoursDifference < 24;
+
+                return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-white max-w-sm w-full rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+                        <div className="p-6 text-center">
+                            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-600">
+                                <X className="w-6 h-6" />
+                            </div>
+                            <h3 className="text-xl font-bold font-heading mb-2">Zrušit rezervaci</h3>
+                            <p className="text-stone-600 mb-6">
+                                {isTooLate && (
+                                    <span className="text-red-600 font-bold block mb-2">Pozor: Zbývá méně než 24 hodin!</span>
+                                )}
+                                Opravdu chcete zrušit rezervaci z {formatLocalDate(bookingToCancel.date)} v {bookingToCancel.time}?
+                                {!isTooLate && bookingToCancel.stripePaymentIntentId && (
+                                    <span className="block mt-2 font-medium text-stone-800">
+                                        Částka bude refundována na Vaši kartu.
+                                    </span>
+                                )}
+                                {isTooLate && (
+                                    <span className="block mt-2 font-medium text-red-600">
+                                        Termín je příliš blízko, nelze jej stornovat s nárokem na vrácení peněz online. Kontaktujte prosím manažera.
+                                    </span>
+                                )}
+                            </p>
+                            <div className="flex gap-2">
+                                <Button 
+                                    variant="outline" 
+                                    className="flex-1" 
+                                    onClick={() => setBookingToCancel(null)}
+                                    disabled={isProcessing}
+                                >
+                                    Zpět
+                                </Button>
+                                <Button 
+                                    className={`flex-1 text-white ${isTooLate ? 'bg-stone-300 hover:bg-stone-300 cursor-not-allowed opacity-50' : 'bg-red-600 hover:bg-red-700'}`}
+                                    onClick={handleConfirmCancel}
+                                    disabled={isProcessing || isTooLate}
+                                >
+                                    {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Zrušit termín'}
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                );
+            })()}
+            
+        </div>
+    );
+};
+
+export default StudioSchedule;

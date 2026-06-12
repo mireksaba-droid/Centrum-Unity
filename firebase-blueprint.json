@@ -1,0 +1,36 @@
+{
+  "entities": {
+    "Practitioner": {
+      "title": "Practitioner",
+      "description": "Information about a practitioner",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "Information about a room booking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "bookedByUserId": { "type": "string" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "bookedByUserId", "date"]
+    }
+  },
+  "firestore": {
+    "/practitioners/{practitionerId}": {
+      "schema": "Practitioner",
+      "description": "Practitioner profiles"
+    },
+    "/bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "Room bookings"
+    }
+  }
+}
