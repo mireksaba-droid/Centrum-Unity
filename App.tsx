@@ -6,7 +6,10 @@ import StudioSchedule from './pages/StudioSchedule.tsx';
 import AdminDashboard from './pages/AdminDashboard.tsx';
 import PractitionerDashboard from './pages/PractitionerDashboard.tsx';
 import PublicEventPage from './pages/PublicEventPage.tsx';
+import TermsPage from './pages/TermsPage.tsx';
+import PrivacyPage from './pages/PrivacyPage.tsx';
 import AIChatBot from './components/AIChatBot.tsx';
+import { Footer } from './components/Footer.tsx';
 import { Monitoring } from './services/monitoring.ts';
 import { ToastProvider } from './contexts/ToastContext.tsx';
 import { useStore } from './store/useStore.ts';
@@ -62,7 +65,7 @@ const AppContent = () => {
   };
 
   return (
-      <div className="min-h-screen bg-[#f1e9dc] font-sans text-stone-800">
+      <div className="min-h-screen bg-[#f1e9dc] font-sans text-stone-800 flex flex-col">
           <Routes>
             <Route path="/login" element={<Login onLogin={handleLogin} />} />
             
@@ -122,8 +125,12 @@ const AppContent = () => {
                 />
             } />
 
+            <Route path="/obchodni-podminky" element={<TermsPage />} />
+            <Route path="/ochrana-udaju" element={<PrivacyPage />} />
+
             <Route path="*" element={<Navigate to={currentUser ? (currentUser.role === Role.ADMIN ? "/admin" : "/schedule") : "/login"} />} />
           </Routes>
+          <Footer />
           <AIChatBot />
       </div>
   );

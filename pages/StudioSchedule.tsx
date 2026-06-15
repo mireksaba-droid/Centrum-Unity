@@ -359,7 +359,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                             <strong>Doba trvání:</strong> ${duration} min<br/>
                             <strong>Cena:</strong> ${finalPrice.toFixed(2).replace('.', ',')} Kč<br/>
                             <br/>
-                            <strong>Adresa:</strong> Na Moráni 5, Nové Město, Praha<br/>
+                            <strong>Adresa:</strong> Šmilovského 1268/9, Vinohrady, Praha 2<br/>
                             <br/>
                             <strong>Informace o platbě:</strong><br/>
                             ${paymentStatus === 'paid' ? 'Platba online' : 'Faktura'}<br/>

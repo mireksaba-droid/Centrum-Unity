@@ -123,7 +123,7 @@ export const useStore = create<AppState>()(
                         <p><strong>Doba trvání:</strong> ${newBooking.durationMinutes} min</p>
                         <p><strong>Cena:</strong> ${newBooking.price.toLocaleString('cs-CZ')} Kč</p>
                     </div>
-                    <p><strong>Místo konání:</strong> Na Moráni 5, Nové Město, Praha</p>
+                    <p><strong>Místo konání:</strong> Šmilovského 1268/9, Vinohrady, Praha 2</p>
                     <div style="background: #fffbeb; padding: 15px; border-left: 4px solid #f59e0b; margin: 20px 0;">
                         <p style="margin: 0;"><strong>Storno podmínky:</strong><br>Vezměte prosím na vědomí, že rezervace lze zrušit maximálně 24 hodin před termínem. Pokud ji zrušíte včas, bude vám zaplacená částka vrácena.</p>
                     </div>
