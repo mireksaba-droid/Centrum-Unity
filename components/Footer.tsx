@@ -56,11 +56,7 @@ export const Footer: React.FC = () => {
                     <div className="pt-4 border-t border-[#d8cfc0] mt-4">
                         <h4 className="text-xs font-bold text-stone-500 mb-2 uppercase tracking-wider">Bezpečné online platby</h4>
                         <div className="flex gap-2">
-                            {/* Placeholder pro loga karet. Místo img můžeme dát text s icony. */}
-                            <div className="h-8 w-12 bg-white rounded shadow-sm flex items-center justify-center text-xs font-bold text-blue-800">VISA</div>
-                            <div className="h-8 w-12 bg-white rounded shadow-sm flex items-center justify-center text-xs font-bold text-red-600">MC</div>
-                            <div className="h-8 w-16 bg-white rounded shadow-sm flex items-center justify-center text-xs font-bold text-stone-700">Apple Pay</div>
-                            <div className="h-8 w-16 bg-white rounded shadow-sm flex items-center justify-center text-xs font-bold text-stone-700">G Pay</div>
+                            <img src="/240_F_576850175_DfN3gojvgeZtFxAWURuCgLUgCuRiL14F.jpg" alt="Platební metody - Apple Pay, Google Pay, Mastercard, Visa" className="h-8 object-contain rounded" />
                         </div>
                     </div>
                 </div>
