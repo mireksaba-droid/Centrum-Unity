@@ -778,28 +778,14 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                             {/* Payment Method Selection */}
                             <div className="mt-4 border-t border-stone-200 pt-4">
                                 <label className="block text-sm font-bold text-stone-700 mb-2">Způsob úhrady</label>
-                                <div className="grid grid-cols-2 gap-2 mb-4">
-                                    <button 
-                                        className={`p-3 border rounded-xl text-sm font-bold ${paymentMethod === 'online' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'}`}
-                                        onClick={() => setPaymentMethod('online')}
-                                    >
+                                <div className="grid grid-cols-1 gap-2 mb-2">
+                                    <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-sm font-bold text-indigo-700 text-center">
                                         Online Platba
-                                    </button>
-                                    <button 
-                                        className={`p-3 border rounded-xl text-sm font-bold ${paymentMethod === 'invoice' ? 'bg-sage-50 border-sage-200 text-sage-800' : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'} ${isGuest ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                        onClick={() => !isGuest && setPaymentMethod('invoice')}
-                                        disabled={isGuest}
-                                    >
-                                        Na fakturu
-                                    </button>
+                                    </div>
                                 </div>
-                                {paymentMethod === 'online' && (
-                                    <>
-                                        <p className="text-xs text-indigo-700 leading-tight mt-2">
-                                            Budete přesměrováni na bezpečnou platební bránu (Apple Pay, Google Pay, nebo platba kartou).
-                                        </p>
-                                    </>
-                                )}
+                                <p className="text-xs text-indigo-700 leading-tight mt-2 text-center">
+                                    Budete přesměrováni na bezpečnou platební bránu (Apple Pay, Google Pay, nebo platba kartou).
+                                </p>
                             </div>
 
                             {/* Summary & Action */}
@@ -813,9 +799,9 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                 <Button 
                                     onClick={handleConfirmBooking} 
                                     disabled={isProcessing}
-                                    className={`text-white px-6 w-full md:w-auto ${paymentMethod === 'online' ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-black hover:bg-stone-800'}`}
+                                    className="text-white px-6 w-full md:w-auto bg-indigo-600 hover:bg-indigo-700"
                                 >
-                                    {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : (paymentMethod === 'online' ? 'Zaplatit online' : 'Potvrdit')}
+                                    {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Zaplatit online'}
                                 </Button>
                             </div>
                         </div>
