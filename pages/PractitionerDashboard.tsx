@@ -372,16 +372,16 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`
                     },
-                    body: JSON.stringify({ paymentIntentId: bookingToCancel.stripePaymentIntentId })
+                    body: JSON.stringify({ paymentId: bookingToCancel.stripePaymentIntentId })
                 });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'Refund failed');
                 
-                addToast('success', 'Refundace zadána', 'Platba byla úspěšně zrušena ve Stripe.');
+                addToast('success', 'Refundace zadána', 'Platba byla úspěšně zrušena přes GoPay.');
                 onCancelBooking(bookingToCancel.id);
                 addToast('success', 'Rezervace zrušena', 'Termín byl uvolněn.');
             } catch (err: any) {
-                addToast('error', 'Chyba storna', err.message || 'Nastala chyba při vracení platby ze Stripe. Obraťte se prosím na podporu.');
+                addToast('error', 'Chyba storna', err.message || 'Nastala chyba při vracení platby přes GoPay. Obraťte se prosím na podporu.');
             }
         } else {
             onCancelBooking(bookingToCancel.id);

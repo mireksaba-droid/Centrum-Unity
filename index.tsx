@@ -2,23 +2,8 @@
 /// <reference types="vite/client" />
 import React, { Component, ReactNode, ErrorInfo } from 'react';
 import { createRoot } from 'react-dom/client';
-import * as Sentry from "@sentry/react";
+import './index.css';
 import App from './App.tsx';
-
-Sentry.init({
-  dsn: import.meta.env.VITE_SENTRY_DSN || "https://examplePublicKey@o0.ingest.sentry.io/0", // Placeholder pro Sentry DSN
-  integrations: [
-    Sentry.browserTracingIntegration(),
-    Sentry.replayIntegration(),
-  ],
-  // Tracing
-  tracesSampleRate: 1.0, //  Capture 100% of the transactions
-  // Set 'tracePropagationTargets' to control for which URLs distributed tracing should be enabled
-  tracePropagationTargets: ["localhost", /^https:\/\/yourserver\.io\/api/],
-  // Session Replay
-  replaysSessionSampleRate: 0.1, // This sets the sample rate at 10%. You may want to change it to 100% while in development and then sample at a lower rate in production.
-  replaysOnErrorSampleRate: 1.0, // If you're not already sampling the entire session, change the sample rate to 100% when sampling sessions where errors occur.
-});
 
 console.log("Application Starting...");
 
@@ -31,15 +16,14 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
-// Jednoduchá komponenta pro zachycení chyb (Error Boundary) - rozšířeno o Sentry
+// Jednoduchá komponenta pro zachycení chyb (Error Boundary)
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   public state: ErrorBoundaryState;
-  // Explicitly declare props to avoid TS errors in some environments
   readonly props: Readonly<ErrorBoundaryProps> & Readonly<{ children?: ReactNode }>;
 
   constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.props = props; // Ensure props are available
+    this.props = props;
     this.state = { hasError: false, error: null };
   }
 
@@ -49,7 +33,6 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("Critical Application Error:", error, errorInfo);
-    Sentry.captureException(error, { extra: errorInfo as any });
   }
 
   render() {

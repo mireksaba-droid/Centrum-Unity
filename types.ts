@@ -51,7 +51,7 @@ export interface Booking {
   
   status: 'confirmed' | 'cancelled';
   price: number; // Cena pronájmu, kterou lektor dluží studiu
-  paymentStatus: 'paid' | 'unpaid' | 'invoice_pending';
+  paymentStatus: 'paid' | 'unpaid' | 'invoice_pending' | 'pending' | 'pending_future';
   paymentMethod: 'invoice' | 'qr' | 'online';
   
   room: 1 | 2; // 1 = Malá, 2 = Velká

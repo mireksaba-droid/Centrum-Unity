@@ -8,7 +8,6 @@ import PractitionerDashboard from './pages/PractitionerDashboard.tsx';
 import PublicEventPage from './pages/PublicEventPage.tsx';
 import TermsPage from './pages/TermsPage.tsx';
 import PrivacyPage from './pages/PrivacyPage.tsx';
-import AIChatBot from './components/AIChatBot.tsx';
 import { Footer } from './components/Footer.tsx';
 import { Monitoring } from './services/monitoring.ts';
 import { ToastProvider } from './contexts/ToastContext.tsx';
@@ -131,7 +130,6 @@ const AppContent = () => {
             <Route path="*" element={<Navigate to={currentUser ? (currentUser.role === Role.ADMIN ? "/admin" : "/schedule") : "/login"} />} />
           </Routes>
           <Footer />
-          <AIChatBot />
       </div>
   );
 };

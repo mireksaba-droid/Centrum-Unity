@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Poppins", sans-serif;
+  --font-serif: "Merriweather", "Forum", serif;
+  
+  --color-unity-beige: #f1e9dc;
+  --color-unity-white: #ffffff;
+  
+  --color-sage-50: #fdf9f2;
+  --color-sage-100: #f9f0e0;
+  --color-sage-200: #f2dec0;
+  --color-sage-300: #eac598;
+  --color-sage-400: #e0a86d;
+  --color-sage-500: #d4a574;
+  --color-sage-600: #ba8a5b;
+  --color-sage-700: #956b46;
+  --color-sage-800: #7a573d;
+  --color-sage-900: #634734;
+  --color-sage-950: #35251a;
+  
+  --color-stone-50: #f1e9dc;
+  --color-stone-100: #ede9de;
+  --color-stone-200: #dcd7cc;
+  --color-stone-300: #c5c0b5;
+  --color-stone-400: #a8a29a;
+  --color-stone-500: #8c877f;
+  --color-stone-600: #706b65;
+  --color-stone-700: #5a5550;
+  --color-stone-800: #484440;
+  --color-stone-900: #3c3835;
+  --color-stone-950: #252220;
+}
+
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
+.date-overlay-input::-webkit-calendar-picker-indicator {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}

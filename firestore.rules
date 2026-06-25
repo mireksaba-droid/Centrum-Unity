@@ -6,17 +6,26 @@ service cloud.firestore {
     function isSignedIn() { return request.auth != null; }
     function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
 
+    // Practitioners - need to be readable by the client to verify PIN logins.
     match /practitioners/{practitionerId} {
       allow read, write: if true;
     }
 
-    // Bookings - Accessible only by the owner
+    // Bookings
     match /bookings/{bookingId} {
       allow read, write: if true;
     }
 
-    match /{document=**} {
+    match /groupEvents/{eventId} {
       allow read, write: if true;
+    }
+
+    match /eventRegistrations/{regId} {
+      allow read, write: if true;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

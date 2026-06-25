@@ -9,72 +9,26 @@ let db: any;
 let functions: any;
 let isFirebaseReady = false;
 
+let authInitPromise: Promise<void> | null = null;
+
 try {
   const app = initializeApp(firebaseConfig);
-  // @ts-ignore - experimentalForceLongPolling is sometimes typed differently but works in v9/v10
+  // @ts-ignore
   db = initializeFirestore(app, { experimentalForceLongPolling: true }, (firebaseConfig as any).firestoreDatabaseId);
   functions = getFunctions(app, 'europe-west1');
+  
+  // Firebase Auth is not used; we rely on JWT and public Firestore reads.
+  
   isFirebaseReady = true;
 } catch (e) {
   console.warn("Firebase failed to initialize. Running in Demo Mode.", e);
 }
 
-// --- RESEND BROWSER SDK WRAPPER ---
-// Toto nám umožní používat kód z vašeho screenshotu (Node.js styl) přímo v prohlížeči.
-// Simulujeme strukturu oficiálního SDK, ale používáme 'fetch' api prohlížeče.
-
-export class ResendBrowserClient {
-    private apiKey: string;
-
-    constructor(apiKey: string) {
-        this.apiKey = apiKey;
-    }
-
-    get emails() {
-        return {
-            send: async (payload: { from: string, to: string | string[], subject: string, html: string, text?: string }) => {
-                if (!this.apiKey) {
-                    console.warn("⚠️ Resend API Key is missing.");
-                    return { success: false, error: "Missing API Key" };
-                }
-
-                try {
-                    const response = await fetch('https://api.resend.com/emails', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${this.apiKey}`
-                        },
-                        body: JSON.stringify({
-                            from: payload.from,
-                            to: Array.isArray(payload.to) ? payload.to : [payload.to],
-                            subject: payload.subject,
-                            html: payload.html,
-                            text: payload.text
-                        })
-                    });
-
-                    if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.message || response.statusText);
-                    }
-
-                    const data = await response.json();
-                    return { data, error: null };
-                } catch (error) {
-                    console.error("Resend Send Error:", error);
-                    return { data: null, error };
-                }
-            }
-        }
-    }
-}
-
-// Inicializace klienta (stejně jako na screenshotu)
-// @ts-ignore
-const apiKey = typeof window !== 'undefined' ? window.process?.env?.RESEND_API_KEY || '' : '';
-export const resend = new ResendBrowserClient(apiKey);
-
+// Pomocná funkce pro čekání na dokončení Firebase Auth
+export const waitForAuth = async (): Promise<void> => {
+  // We cannot use anonymous auth because it's not enabled by default.
+  // The app currently relies on locally checked PINs.
+};
 
 // --- PUBLIC SERVICES ---
 
@@ -101,23 +55,38 @@ export const createStripePaymentIntent = async (amount: number, currency: string
  * Legacy wrapper to keep existing code working, but now using our new 'resend' object.
  */
 export const sendTransactionalEmail = async (payload: { to: string, subject: string, text: string, html?: string }) => {
-    console.log("🚀 Odesílám email přes Resend (Browser Wrapper)...");
+    console.log("🚀 Odesílám email přes backend API...");
     
-    // Zde používáme přesně tu syntaxi, kterou jste viděl v dokumentaci/screenshotu
-    const { data, error } = await resend.emails.send({
-        from: 'Centrum Unity <onboarding@resend.dev>', // Pro free tier musíme použít tuto doménu
-        to: payload.to,
-        subject: payload.subject,
-        html: payload.html || `<p>${payload.text}</p>`,
-        text: payload.text
-    });
+    try {
+        const { useStore } = await import('../store/useStore');
+        const token = useStore.getState().token;
 
-    if (error) {
+        const response = await fetch('/api/send-email', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            },
+            body: JSON.stringify({
+                to: payload.to,
+                subject: payload.subject,
+                html: payload.html || `<p>${payload.text}</p>`,
+                text: payload.text
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => null);
+            throw new Error(errorData?.error || response.statusText);
+        }
+
+        const data = await response.json();
+        console.log("✅ Email úspěšně odeslán:", data);
+        return { success: true, id: data?.data?.id };
+    } catch (error) {
+        console.error("Chyba při odesílání přes backend:", error);
         throw error;
     }
-
-    console.log("✅ Email úspěšně odeslán:", data);
-    return { success: true, id: data?.id };
 };
 
 export const saveBookingToFirestore = async (booking: Booking) => {
@@ -186,6 +155,7 @@ export const deleteAllEventRegistrationsFromFirestore = async () => {
 
 export const loadBookings = async () => {
     if (!isFirebaseReady) return [];
+    await waitForAuth();
     try {
         const q = query(collection(db, 'bookings'));
         const querySnapshot = await getDocs(q);
@@ -240,6 +210,7 @@ export const deleteBookingFromFirestore = async (bookingId: string) => {
 
 export const loadPractitioners = async (): Promise<Practitioner[]> => {
     if (!isFirebaseReady) return [];
+    await waitForAuth();
     try {
         const q = query(collection(db, 'practitioners'));
         const querySnapshot = await getDocs(q);

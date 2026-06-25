@@ -9,13 +9,12 @@ import { useToast } from '../contexts/ToastContext';
 import { useStore } from '../store/useStore';
 import { checkBookingCollision, calculateRentalPrice, timeToMinutes } from '../utils/scheduler';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
-import { loadStripe } from '@stripe/stripe-js';
-import { Elements } from '@stripe/react-stripe-js';
-import { StripeCheckout } from '../components/StripeCheckout';
 
-const stripePubKey = import.meta.env.VITE_STRIPE_PUBLIC_KEY;
-const stripePromise = stripePubKey ? loadStripe(stripePubKey) : Promise.resolve(null);
-
+declare global {
+  interface Window {
+    _gopay?: any;
+  }
+}
 
 interface StudioScheduleProps {
   currentUser: Practitioner;
@@ -68,8 +67,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
     const [equipment, setEquipment] = useState<'table' | 'futon'>('table'); 
     const [isProcessing, setIsProcessing] = useState(false);
 
-    // STRIPE STATE
-    const [clientSecret, setClientSecret] = useState<string | null>(null);
+    const [paymentIntentIdState, setPaymentIntentIdState] = useState<string | null>(null);
 
     // GUEST SPECIFIC STATE
     const [guestName, setGuestName] = useState('');
@@ -77,7 +75,6 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
     const [guestPhone, setGuestPhone] = useState('');
     const [isTestPayment, setIsTestPayment] = useState(false);
     const [paymentMethod, setPaymentMethod] = useState<'invoice' | 'online'>('online');
-    const [paymentIntentIdState, setPaymentIntentIdState] = useState<string | null>(null);
 
     const isGuest = currentUser.id === 'guest';
 
@@ -228,7 +225,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`
                     },
-                    body: JSON.stringify({ paymentIntentId: bookingToCancel.stripePaymentIntentId })
+                    body: JSON.stringify({ paymentId: bookingToCancel.stripePaymentIntentId })
                 });
                 
                 const data = await res.json();
@@ -237,11 +234,11 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                     throw new Error(data.error || 'Refund failed');
                 }
                 
-                addToast('success', 'Refundace zadána', 'Platba byla úspěšně zrušena ve Stripe.');
+                addToast('success', 'Refundace zadána', 'Platba byla úspěšně zrušena přes GoPay.');
                 onCancel(bookingToCancel.id);
                 addToast('success', 'Rezervace zrušena', 'Termín byl uvolněn.');
             } catch (err: any) {
-                addToast('error', 'Chyba storna', err.message || 'Nastala chyba při vracení platby ze Stripe. Obraťte se prosím na podporu.');
+                addToast('error', 'Chyba storna', err.message || 'Nastala chyba při vracení platby přes GoPay. Obraťte se prosím na podporu.');
             }
         } else {
             onCancel(bookingToCancel.id);
@@ -281,28 +278,51 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
         setIsProcessing(true);
         const finalPrice = calculateRentalPrice(duration, selectedSlot.room);
 
+        // Zjištění zda je rezervace za více než 120 dní
+        const selectedDateObj = parseLocalDate(selectedSlot.date, selectedSlot.time);
+        const daysToReservation = (selectedDateObj.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24);
+
         if (paymentMethod === 'online') {
+            if (daysToReservation > 120) {
+               addToast('info', 'Platba bude vyžadována později', 'Vaše rezervace je dále než 120 dní. Výzva k platbě vám přijde e-mailem, až se termín přiblíží.');
+               await finalizeBooking('pending_future'); 
+               return;
+            }
+
             try {
-                const response = await fetch('/api/create-payment-intent', {
+                // Místo Stripe vytváříme GoPay platbu
+                const response = await fetch('/api/create-payment', {
                     method: 'POST',
                     headers: { 
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`
                     },
                     body: JSON.stringify({ 
-                        amount: finalPrice * 100, 
-                        currency: 'czk',
+                        duration: duration,
+                        room: selectedSlot.room,
+                        currency: 'CZK',
                         reservationDate: selectedSlot.date,
-                        reservationTime: selectedSlot.time
+                        reservationTime: selectedSlot.time,
+                        returnUrl: window.location.href // Redirect back to this page
                     })
                 });
                 const data = await response.json();
                 if (data.error) throw new Error(data.error);
-                setClientSecret(data.clientSecret);
-                setPaymentIntentIdState(data.paymentIntentId || null);
-                setIsProcessing(false);
+                
+                // Uložíme rezervaci s nezaplaceným statusem a paymentId
+                setPaymentIntentIdState(data.paymentId);
+                await finalizeBooking('pending', data.paymentId);
+                
+                // Ukázání inline GoPay popupu nebo redirect
+                if (data.gwUrl) {
+                    if (window._gopay) {
+                        window._gopay.checkout({ gatewayUrl: data.gwUrl, inline: true });
+                    } else {
+                        window.location.href = data.gwUrl;
+                    }
+                }
             } catch (err: any) {
-                addToast('error', 'Chyba platby', err.message || 'Nepodařilo se inicializovat platbu.');
+                addToast('error', 'Chyba platby', err.message || 'Nepodařilo se inicializovat platbu GoPay.');
                 setIsProcessing(false);
             }
             return;
@@ -312,7 +332,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
         await finalizeBooking('unpaid');
     };
 
-    const finalizeBooking = async (paymentStatus: 'paid' | 'unpaid' = 'unpaid') => {
+    const finalizeBooking = async (paymentStatus: 'paid' | 'unpaid' | 'pending' | 'pending_future' = 'unpaid', paymentId?: string) => {
         if (!selectedSlot) return;
         setIsProcessing(true);
         
@@ -333,7 +353,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                 clientEmail: isGuest ? guestEmail : undefined,
                 clientPhone: isGuest ? guestPhone : undefined,
                 equipment: equipment,
-                stripePaymentIntentId: paymentStatus === 'paid' ? (paymentIntentIdState || undefined) : undefined
+                stripePaymentIntentId: paymentId || (paymentStatus === 'paid' ? paymentIntentIdState || undefined : undefined)
             });
 
             // --- Send Confirmation Email ---
@@ -389,7 +409,6 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
             // -------------------------------
 
             addToast('success', 'Rezervace potvrzena', paymentStatus === 'paid' ? 'Platba byla úspěšná.' : `Částka k úhradě: ${finalPrice.toFixed(0)} Kč`);
-            setClientSecret(null);
             setSelectedSlot(null);
         } catch (e) {
             addToast('error', 'Chyba', 'Nepodařilo se uložit rezervaci.');
@@ -649,7 +668,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                             <button onClick={() => setSelectedSlot(null)} className="absolute top-4 right-4 p-2 bg-white/10 rounded-full hover:bg-white/20"><X className="w-4 h-4" /></button>
                         </div>
                         
-                        <div className={`p-6 space-y-6 overflow-y-auto ${clientSecret ? 'hidden' : ''}`}>
+                        <div className={`p-6 space-y-6 overflow-y-auto`}>
                             {/* Room Info */}
                             <div className="flex gap-4">
                                 <div className={`flex-1 p-3 rounded-xl border-2 text-center ${selectedSlot.room === 1 ? 'border-sage-500 bg-sage-50 text-sage-800' : 'border-stone-100 text-stone-400 bg-stone-50 opacity-50'}`}>
@@ -806,28 +825,6 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                             </div>
                         </div>
 
-                        {clientSecret && (
-                            <div className="p-6 overflow-y-auto flex-1">
-                                {(!stripePubKey) ? (
-                                    <div className="bg-red-50 text-red-700 p-4 rounded-xl text-sm font-medium border border-red-200">
-                                        <p className="font-bold mb-1">Chybí Stripe API klíč</p>
-                                        <p>Zrušte tuto platbu a uložte správný <strong>Public Key</strong> (začíná na pk_live_ nebo pk_test_) do VITE_STRIPE_PUBLIC_KEY.</p>
-                                        <Button onClick={() => { setClientSecret(null); setIsProcessing(false); }} className="mt-4 w-full bg-stone-200 text-stone-800 hover:bg-stone-300">Zpět</Button>
-                                    </div>
-                                ) : (
-                                    <Elements stripe={stripePromise} options={{ clientSecret }}>
-                                        <StripeCheckout 
-                                            amount={calculateRentalPrice(duration, selectedSlot.room)} 
-                                            onPaymentSuccess={() => finalizeBooking('paid')}
-                                            onCancel={() => {
-                                                setClientSecret(null);
-                                                setIsProcessing(false);
-                                            }}
-                                        />
-                                    </Elements>
-                                )}
-                            </div>
-                        )}
                     </div>
                 </div>
             )}

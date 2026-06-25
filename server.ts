@@ -1,11 +1,14 @@
 import express, { Request, Response, NextFunction } from "express";
 import path from "path";
-import Stripe from "stripe";
 import { Resend } from "resend";
 import jwt from "jsonwebtoken";
 import { PRACTITIONERS } from "./constants";
+import { calculateRentalPrice } from "./utils/scheduler";
 
-const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-2026";
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET || "default_dev_secret_key";
+  return secret;
+}
 
 // Auth Middleware
 export interface AuthRequest extends Request {
@@ -20,13 +23,8 @@ function requireAuth(req: AuthRequest, res: Response, next: NextFunction) {
 
   const token = authHeader.split(" ")[1];
   
-  if (token === "null" || token === "undefined") {
-    req.user = { id: 'guest', role: 'guest' };
-    return next();
-  }
-
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, getJwtSecret());
     req.user = decoded;
     next();
   } catch (err) {
@@ -40,17 +38,33 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Stripe lazy initialization
-  let stripeClient: Stripe | null = null;
-  function getStripe(): Stripe {
-    if (!stripeClient) {
-      const key = process.env.STRIPE_SECRET_KEY;
-      if (!key) {
-        throw new Error("STRIPE_SECRET_KEY environment variable is required");
-      }
-      stripeClient = new Stripe(key);
+  // GoPay API base URL (sandbox by default)
+  const GOPAY_URL = "https://gw.sandbox.gopay.com/api";
+
+  async function getGoPayToken() {
+    const gopayId = process.env.GOPAY_GOID;
+    const clientId = process.env.GOPAY_CLIENT_ID;
+    const clientSecret = process.env.GOPAY_CLIENT_SECRET;
+    
+    if (!gopayId || !clientId || !clientSecret) {
+      throw new Error("GoPay credentials are not fully configured in environment variables.");
     }
-    return stripeClient;
+    
+    const response = await fetch(`${GOPAY_URL}/oauth2/token`, {
+      method: "POST",
+      headers: {
+        "Accept": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": "Basic " + Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
+      },
+      body: "grant_type=client_credentials&scope=payment-all"
+    });
+    
+    if (!response.ok) {
+       throw new Error("GoPay auth failed: " + response.statusText);
+    }
+    const data = await response.json();
+    return data.access_token as string;
   }
 
   // Resend lazy initialization
@@ -73,70 +87,141 @@ async function startServer() {
 
   // Login endpoint
   app.post("/api/login", (req, res) => {
-    const { userId, name, role } = req.body;
-    
-    if (!userId || !name || !role) {
-      return res.status(400).json({ error: "Chybí informace o uživateli" });
+    try {
+      const { userId, name, role } = req.body;
+      
+      if (!userId || !name || !role) {
+        return res.status(400).json({ error: "Chybí informace o uživateli" });
+      }
+
+      // PIN validity was already verified on the client safely
+      // Give signed JWT based on client claims
+      const token = jwt.sign(
+        { id: userId, role: role, name: name },
+        process.env.JWT_SECRET || "default_dev_secret_key",
+        { expiresIn: "1d" }
+      );
+
+      res.json({ success: true, token, user: { id: userId, name, role } });
+    } catch (error: any) {
+      console.error("Login Error:", error);
+      res.status(500).json({ error: error.message || "Interní chyba serveru" });
     }
-
-    // PIN validity was already verified on the client safely
-    // Give signed JWT based on client claims
-    const token = jwt.sign(
-      { id: userId, role: role, name: name },
-      JWT_SECRET,
-      { expiresIn: "1d" }
-    );
-
-    res.json({ success: true, token, user: { id: userId, name, role } });
   });
 
-  // Create a payment intent API endpoint
-  app.post("/api/create-payment-intent", requireAuth, async (req: AuthRequest, res: Response) => {
+  // Create a payment via GoPay
+  app.post("/api/create-payment", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-      const stripe = getStripe();
-      const { amount, currency, reservationDate, reservationTime } = req.body;
+      const { duration, room, currency, reservationDate, reservationTime, returnUrl } = req.body;
       
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount, 
-        currency: currency || "czk",
-        capture_method: 'manual',
-        automatic_payment_methods: {
-          enabled: true,
-        },
-        metadata: {
-          reservationDate: reservationDate || '',
-          reservationTime: reservationTime || ''
-        }
+      if (typeof duration !== 'number' || (room !== 1 && room !== 2)) {
+         return res.status(400).json({ error: "Neplatné parametry pro výpočet ceny." });
+      }
+      
+      const finalPrice = calculateRentalPrice(duration, room);
+      const amount = Math.round(finalPrice * 100); // v haléřích
+
+      const token = await getGoPayToken();
+      
+      const paymentData = {
+          payer: {
+              allowed_payment_instruments: ["PAYMENT_CARD"],
+              default_payment_instrument: "PAYMENT_CARD",
+          },
+          amount: amount,
+          currency: currency || "CZK",
+          order_number: `RES-${Date.now()}`,
+          order_description: `Rezervace místnosti ${room}`,
+          items: [{ name: `Pronájem místnosti ${room} (${duration}h)`, amount: amount, count: 1 }],
+          callback: {
+              return_url: returnUrl || "https://rezervace.centrumunity.cz/",
+              notification_url: "https://rezervace.centrumunity.cz/api/gopay/notify"
+          },
+          target: {
+              type: "ACCOUNT",
+              goid: process.env.GOPAY_GOID
+          },
+          additional_params: [
+              { name: "userId", value: req.user?.id || '' },
+              { name: "reservationDate", value: reservationDate || '' },
+              { name: "reservationTime", value: reservationTime || '' }
+          ]
+      };
+
+      const response = await fetch(`${GOPAY_URL}/payments/payment`, {
+         method: "POST",
+         headers: {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+         },
+         body: JSON.stringify(paymentData)
       });
+      
+      const data = await response.json();
+
+      if (!response.ok) {
+         throw new Error("GoPay create payment failed: " + JSON.stringify(data));
+      }
       
       res.json({ 
-        clientSecret: paymentIntent.client_secret,
-        paymentIntentId: paymentIntent.id
+        paymentId: data.id,
+        gwUrl: data.gw_url
       });
     } catch (error: any) {
-      console.error("Stripe Error:", error.message);
+      console.error("GoPay Error:", error.message);
       res.status(400).json({ error: error.message });
     }
   });
 
-  // Refund endpoint
+  // Refund endpoint for GoPay
   app.post("/api/refund", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-      const stripe = getStripe();
-      const { paymentIntentId } = req.body;
+      const { paymentId, amount } = req.body;
       
-      if (!paymentIntentId) {
-        return res.status(400).json({ error: "Missing paymentIntentId" });
+      if (!paymentId) {
+        return res.status(400).json({ error: "Missing paymentId" });
       }
 
-      const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+      const token = await getGoPayToken();
 
-      // 1. Backendové ověření 24h limitu (bezpečnostní pojistka)
-      if (paymentIntent.metadata?.reservationDate && paymentIntent.metadata?.reservationTime) {
-        const dateParts = paymentIntent.metadata.reservationDate.split('-');
-        const [hours, minutes] = paymentIntent.metadata.reservationTime.split(':').map(Number);
-        
-        // Let's build the reservation Date object
+      // Get payment status
+      const statusRes = await fetch(`${GOPAY_URL}/payments/payment/${paymentId}`, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      const paymentStatus = await statusRes.json();
+
+      // Check permissions based on additional_params
+      let paymentUserId = "";
+      let resDate = "";
+      let resTime = "";
+      if (paymentStatus.additional_params) {
+         const userParam = paymentStatus.additional_params.find((p: any) => p.name === "userId");
+         if (userParam) paymentUserId = userParam.value;
+         
+         const dateParam = paymentStatus.additional_params.find((p: any) => p.name === "reservationDate");
+         if (dateParam) resDate = dateParam.value;
+         
+         const timeParam = paymentStatus.additional_params.find((p: any) => p.name === "reservationTime");
+         if (timeParam) resTime = timeParam.value;
+      }
+
+      // Verify ownership or admin role
+      const isOwner = req.user?.id === paymentUserId;
+      const isAdmin = req.user?.role === 'admin';
+      
+      if (!isOwner && !isAdmin) {
+        return res.status(403).json({ error: "Access denied. You can only refund your own payments." });
+      }
+
+      // Backend verification of 24h limit
+      if (resDate && resTime) {
+        const dateParts = resDate.split('-');
+        const [hours, minutes] = resTime.split(':').map(Number);
         if (dateParts.length === 3) {
           const reservationDateTime = new Date(Number(dateParts[0]), Number(dateParts[1]) - 1, Number(dateParts[2]), hours, minutes);
           const now = new Date();
@@ -148,48 +233,113 @@ async function startServer() {
         }
       }
 
-      // 2. Provedení zrušení nebo refundace
-      let result;
-      if (paymentIntent.status === 'requires_capture') {
-        // Částka byla pouze zablokována, můžeme ji uvolnit bez transakčních poplatků
-        result = await stripe.paymentIntents.cancel(paymentIntentId);
-      } else if (paymentIntent.status === 'succeeded') {
-        // Částka již byla stržena, musíme provést standardní refundaci 
-        result = await stripe.refunds.create({
-          payment_intent: paymentIntentId,
-        });
-      } else if (paymentIntent.status === 'canceled') {
-        // Již bylo zrušeno
-        result = paymentIntent;
-      } else {
-         return res.status(400).json({ error: `Nelze refundovat platbu ve stavu: ${paymentIntent.status}` });
+      // Refund the payment
+      const refundRes = await fetch(`${GOPAY_URL}/payments/payment/${paymentId}/refund`, {
+         method: "POST",
+         headers: {
+           "Accept": "application/json",
+           "Content-Type": "application/x-www-form-urlencoded",
+           "Authorization": `Bearer ${token}`
+         },
+         body: `amount=${amount || paymentStatus.amount}`
+      });
+
+      const result = await refundRes.json();
+
+      if (!refundRes.ok) {
+         return res.status(400).json({ error: `Nelze refundovat platbu: ${JSON.stringify(result)}` });
       }
 
       res.json({ success: true, result });
     } catch (error: any) {
-      console.error("Stripe Refund Error:", error.message);
+      console.error("GoPay Refund Error:", error.message);
       res.status(400).json({ error: error.message });
     }
   });
 
-  // Capture endpoint (Strhnout peníze 24h předem)
+  // Capture endpoint pro GoPay - pokud by se používala preautorizace
   app.post("/api/capture-payment", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-      const stripe = getStripe();
-      const { paymentIntentId } = req.body;
+      const { paymentId } = req.body;
       
-      if (!paymentIntentId) {
-        return res.status(400).json({ error: "Missing paymentIntentId" });
+      if (!paymentId) {
+        return res.status(400).json({ error: "Missing paymentId" });
       }
 
-      // Provede finální stržení rezervovaných peněz
-      const intent = await stripe.paymentIntents.capture(paymentIntentId);
+      const token = await getGoPayToken();
+
+      const captureRes = await fetch(`${GOPAY_URL}/payments/payment/${paymentId}/capture`, {
+         method: "POST",
+         headers: {
+           "Accept": "application/json",
+           "Content-Type": "application/x-www-form-urlencoded",
+           "Authorization": `Bearer ${token}`
+         }
+      });
+      
+      const intent = await captureRes.json();
+      
+      if (!captureRes.ok) {
+         return res.status(400).json({ error: `Nelze strhnout platbu: ${JSON.stringify(intent)}` });
+      }
 
       res.json({ success: true, intent });
     } catch (error: any) {
-      console.error("Stripe Capture Error:", error.message);
+      console.error("GoPay Capture Error:", error.message);
       res.status(400).json({ error: error.message });
     }
+  });
+
+  // Webhook pro notifikace z GoPay (změna stavu platby)
+  app.get("/api/gopay/notify", async (req: Request, res: Response) => {
+      try {
+          const { id } = req.query; // GoPay posílá ID platby v query parametru
+          if (!id) {
+             return res.status(400).json({ error: "Missing payment ID" });
+          }
+
+          // V praxi byste zde zkontrolovali stav platby přes GoPay API
+          const token = await getGoPayToken();
+          const statusRes = await fetch(`${GOPAY_URL}/payments/payment/${id}`, {
+             method: "GET",
+             headers: {
+                "Accept": "application/json",
+                "Authorization": `Bearer ${token}`
+             }
+          });
+          const paymentStatus = await statusRes.json();
+
+          // Na základě paymentStatus.state (např. PAID, CANCELED, TIMEOUTED)
+          // aktualizujete stav rezervace v databázi (Firebase).
+          console.log(`GoPay Notification - Payment ID: ${id}, State: ${paymentStatus.state}`);
+
+          res.send("OK"); // GoPay očekává jakoukoliv HTTP 200 odpověď
+      } catch (error: any) {
+          console.error("GoPay Webhook Error:", error.message);
+          res.status(500).send("Error");
+      }
+  });
+
+  // Cron endpoint pro kontrolu plateb > 120 dní (spouštěn např. z Google Cloud Scheduler každý den v noci)
+  app.post("/api/cron/check-future-payments", async (req: Request, res: Response) => {
+     try {
+         // Bezpečnostní kontrola (např. custom header od Scheduleru)
+         const authHeader = req.headers.authorization;
+         if (authHeader !== `Bearer ${process.env.CRON_SECRET || "cron-secret"}`) {
+            return res.status(401).send("Unauthorized");
+         }
+
+         // 1. Zde byste načetli z Firebase všechny rezervace ve stavu 'pending_future'
+         // 2. Prošlo by se každou z nich a zjistilo by se, jestli zbývá <= 120 dní do termínu
+         // 3. Pro ty, které jsou <= 120 dní, vytvoříme GoPay platbu (podobně jako v /api/create-payment)
+         // 4. Emailem pošleme klientovi odkaz na platební bránu (gw_url) a změníme stav na 'pending' (nebo 'pending_email_sent')
+
+         console.log("Cron check-future-payments proběhl.");
+         res.json({ success: true, checked: true });
+     } catch (error: any) {
+         console.error("Cron Error:", error.message);
+         res.status(500).send("Error");
+     }
   });
 
   // Send an email
