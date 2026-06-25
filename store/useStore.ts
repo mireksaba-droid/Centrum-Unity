@@ -33,6 +33,7 @@ interface AppState {
   
   // Bookings
   addBooking: (bookingData: Partial<Booking>) => Promise<void>;
+  updateBookingPaymentStatus: (bookingId: string, status: string) => Promise<void>;
   cancelBooking: (bookingId: string) => Promise<void>;
   adminRescheduleBooking: (bookingId: string, newDate: string, newTime: string, reason?: string) => Promise<void>;
   
@@ -144,6 +145,15 @@ export const useStore = create<AppState>()(
                 })
             }).catch(console.error);
         }
+      },
+
+      updateBookingPaymentStatus: async (bookingId: string, status: any) => {
+          await updateBookingInFirestore(bookingId, { paymentStatus: status });
+          set((state) => ({
+             bookings: state.bookings.map(b => 
+                b.id === bookingId ? { ...b, paymentStatus: status } : b
+             )
+          }));
       },
 
       cancelBooking: async (bookingId) => {

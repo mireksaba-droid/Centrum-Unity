@@ -13,6 +13,7 @@ import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 declare global {
   interface Window {
     _gopay?: any;
+    gopay?: any;
   }
 }
 
@@ -36,8 +37,38 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
     onLogout
 }) => {
     // Hooks
-    const { token, practitionersList } = useStore();
+    const { token, practitionersList, updateBookingPaymentStatus } = useStore();
     const { addToast } = useToast();
+
+    // Handle Return from GoPay Redirect
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const paymentId = params.get('id');
+        if (paymentId) {
+            // Find booking with this paymentId
+            const booking = allBookings.find(b => b.stripePaymentIntentId === String(paymentId));
+            if (booking && booking.paymentStatus !== 'paid') {
+                // Verify with backend
+                fetch(`/api/gopay/status?id=${paymentId}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.state === 'PAID') {
+                            updateBookingPaymentStatus(booking.id, 'paid');
+                            addToast('success', 'Platba úspěšná', 'Vaše rezervace byla zaplacena.');
+                        } else if (data.state === 'CANCELED' || data.state === 'TIMEOUTED') {
+                            addToast('error', 'Platba neúspěšná', 'Platba byla zrušena nebo vypršela. Můžete ji zkusit znovu.');
+                        } else {
+                            addToast('info', 'Zpracováváme platbu', 'Čekáme na potvrzení platby od banky.');
+                        }
+                    })
+                    .catch(err => console.error("Error checking gopay status:", err));
+            }
+            
+            // Clean up URL
+            const newUrl = window.location.pathname;
+            window.history.replaceState({}, document.title, newUrl);
+        }
+    }, [allBookings, updateBookingPaymentStatus, addToast]);
 
     // View State
     const [viewMode, setViewMode] = useState<'day' | 'week'>('week');
@@ -68,6 +99,8 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
     const [isProcessing, setIsProcessing] = useState(false);
 
     const [paymentIntentIdState, setPaymentIntentIdState] = useState<string | null>(null);
+
+    const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
 
     // GUEST SPECIFIC STATE
     const [guestName, setGuestName] = useState('');
@@ -234,9 +267,12 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                     throw new Error(data.error || 'Refund failed');
                 }
                 
-                addToast('success', 'Refundace zadána', 'Platba byla úspěšně zrušena přes GoPay.');
+                if (data.message) {
+                    addToast('success', 'Rezervace zrušena', data.message);
+                } else {
+                    addToast('success', 'Refundace zadána', 'Platba byla úspěšně zrušena přes GoPay.');
+                }
                 onCancel(bookingToCancel.id);
-                addToast('success', 'Rezervace zrušena', 'Termín byl uvolněn.');
             } catch (err: any) {
                 addToast('error', 'Chyba storna', err.message || 'Nastala chyba při vracení platby přes GoPay. Obraťte se prosím na podporu.');
             }
@@ -311,16 +347,25 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                 
                 // Uložíme rezervaci s nezaplaceným statusem a paymentId
                 setPaymentIntentIdState(data.paymentId);
-                await finalizeBooking('pending', data.paymentId);
+                await finalizeBooking('pending', data.paymentId, false); // neuzavřít okno ještě
                 
-                // Ukázání inline GoPay popupu nebo redirect
                 if (data.gwUrl) {
-                    if (window._gopay) {
-                        window._gopay.checkout({ gatewayUrl: data.gwUrl, inline: true });
-                    } else {
-                        window.location.href = data.gwUrl;
+                    setPaymentUrl(data.gwUrl);
+                    
+                    // Pokus o otevření GoPay okna
+                    // Jelikož appka může běžet v iframe (např. AI Studio preview), 
+                    // GoPay zablokuje zobrazení kvůli X-Frame-Options. Otevřeme proto v novém panelu.
+                    try {
+                        const newWindow = window.open(data.gwUrl, '_blank');
+                        if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+                            // Popup was blocked, user will have to click the button
+                            addToast('info', 'Vyskakovací okno zablokováno', 'Prosím, klikněte na tlačítko "Pokračovat na platební bránu" pro dokončení platby.');
+                        }
+                    } catch (e) {
+                        console.error('Nepodařilo se otevřít okno platební brány:', e);
                     }
                 }
+                setIsProcessing(false);
             } catch (err: any) {
                 addToast('error', 'Chyba platby', err.message || 'Nepodařilo se inicializovat platbu GoPay.');
                 setIsProcessing(false);
@@ -332,7 +377,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
         await finalizeBooking('unpaid');
     };
 
-    const finalizeBooking = async (paymentStatus: 'paid' | 'unpaid' | 'pending' | 'pending_future' = 'unpaid', paymentId?: string) => {
+    const finalizeBooking = async (paymentStatus: 'paid' | 'unpaid' | 'pending' | 'pending_future' = 'unpaid', paymentId?: string, closeModal: boolean = true) => {
         if (!selectedSlot) return;
         setIsProcessing(true);
         
@@ -409,7 +454,9 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
             // -------------------------------
 
             addToast('success', 'Rezervace potvrzena', paymentStatus === 'paid' ? 'Platba byla úspěšná.' : `Částka k úhradě: ${finalPrice.toFixed(0)} Kč`);
-            setSelectedSlot(null);
+            if (closeModal) {
+                setSelectedSlot(null);
+            }
         } catch (e) {
             addToast('error', 'Chyba', 'Nepodařilo se uložit rezervaci.');
         }
@@ -665,7 +712,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                 <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {formatLocalDate(selectedSlot.date)}</span>
                                 <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {selectedSlot.time}</span>
                             </div>
-                            <button onClick={() => setSelectedSlot(null)} className="absolute top-4 right-4 p-2 bg-white/10 rounded-full hover:bg-white/20"><X className="w-4 h-4" /></button>
+                            <button onClick={() => { setSelectedSlot(null); setPaymentUrl(null); }} className="absolute top-4 right-4 p-2 bg-white/10 rounded-full hover:bg-white/20"><X className="w-4 h-4" /></button>
                         </div>
                         
                         <div className={`p-6 space-y-6 overflow-y-auto`}>
@@ -815,13 +862,24 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                         {calculateRentalPrice(duration, selectedSlot.room)} Kč
                                     </div>
                                 </div>
-                                <Button 
-                                    onClick={handleConfirmBooking} 
-                                    disabled={isProcessing}
-                                    className="text-white px-6 w-full md:w-auto bg-indigo-600 hover:bg-indigo-700"
-                                >
-                                    {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Zaplatit online'}
-                                </Button>
+                                {paymentUrl ? (
+                                    <a 
+                                        href={paymentUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-white px-6 w-full md:w-auto bg-emerald-600 hover:bg-emerald-700 py-2 rounded-xl font-medium text-center shadow-sm"
+                                    >
+                                        Pokračovat na platební bránu
+                                    </a>
+                                ) : (
+                                    <Button 
+                                        onClick={handleConfirmBooking} 
+                                        disabled={isProcessing}
+                                        className="text-white px-6 w-full md:w-auto bg-indigo-600 hover:bg-indigo-700"
+                                    >
+                                        {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Zaplatit online'}
+                                    </Button>
+                                )}
                             </div>
                         </div>
 

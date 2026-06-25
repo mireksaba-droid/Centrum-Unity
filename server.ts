@@ -218,6 +218,11 @@ async function startServer() {
         return res.status(403).json({ error: "Access denied. You can only refund your own payments." });
       }
 
+      // Only refund if payment was actually PAID
+      if (paymentStatus.state !== 'PAID') {
+         return res.json({ success: true, message: "Platba nebyla dokončena, storno rezervace proběhlo bez refundace." });
+      }
+
       // Backend verification of 24h limit
       if (resDate && resTime) {
         const dateParts = resDate.split('-');
@@ -317,6 +322,30 @@ async function startServer() {
       } catch (error: any) {
           console.error("GoPay Webhook Error:", error.message);
           res.status(500).send("Error");
+      }
+  });
+
+  // Endpoint pro ověření stavu platby (např. po návratu na return_url)
+  app.get("/api/gopay/status", async (req: Request, res: Response) => {
+      try {
+          const { id } = req.query;
+          if (!id) {
+             return res.status(400).json({ error: "Missing payment ID" });
+          }
+
+          const token = await getGoPayToken();
+          const statusRes = await fetch(`${GOPAY_URL}/payments/payment/${id}`, {
+             method: "GET",
+             headers: {
+                "Accept": "application/json",
+                "Authorization": `Bearer ${token}`
+             }
+          });
+          const paymentStatus = await statusRes.json();
+          res.json({ state: paymentStatus.state });
+      } catch (error: any) {
+          console.error("GoPay Status Error:", error.message);
+          res.status(500).json({ error: error.message });
       }
   });
 
