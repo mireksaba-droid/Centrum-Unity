@@ -99,7 +99,7 @@ graph TD
 - `room`: 1 (Malá) nebo 2 (Velká).
 - `status`: 'confirmed' | 'cancelled'.
 - `paymentStatus`: 'paid' | 'unpaid' | 'invoice_pending'.
-- `stripePaymentIntentId`: ID platby ve Stripe pro refundace.
+- `paymentId`: ID platby v platební bráně (GoPay) pro párování a refundace.
 - `clientEmail` / `clientPhone`: Kontaktní údaje pro hosty a jednorázové klienty.
 - `bookedByUserId`: ID terapeuta, který rezervaci vytvořil.
 
@@ -122,12 +122,13 @@ Soubor `services/firebase.ts` obsahuje logiku, která detekuje, zda je k dispozi
 - **Prod:** Používá `firebase/firestore` a `firebase/functions`.
 - **Demo:** Pokud klíč chybí, vypisuje operace do konzole a vrací mock data (`isFirebaseReady = false`).
 
-### Stripe (Platby a Storna)
+### Stripe (Platby a Storna) -> GoPay
 Systém poskytuje integrovanou platební bránu (Express/Node.js přes /api/... endpointy):
-- **Rezervace částky (Hold):** Při vytvoření rezervace hostem se peníze na kartě pouze zablokují (`capture_method: "manual"`).
-- **Finální stržení (Capture):** Částka se z karty strhne později, jakmile je jisté, že rezervace proběhne (např. po skončení lhůty storna).
-- **Stornování a Refundace:** Aplikace umožňuje zrušení rezervace do **24 hodin před jejím začátkem**. Backend přísně hlídá limit na základě dat a času (`reservationDate`, `reservationTime`) uloženého v metadatech Payment Intentu, čímž zajišťuje, že nelze API obejít a peníze vracet po limitu.
-- **Webhooks:** Systém obsahuje (nebo má obsahovat) endpoint pro příjem Stripe webhooků (např. `payment_intent.succeeded`, `payment_intent.payment_failed`). To umožňuje backendu bezpečně a asynchronně reagovat na změny stavu plateb potvrzené přímo ze strany banky (např. pokud platba selže až po úspěšném vytvoření payment intentu).
+- **GoPay Integrace:** Vytváření plateb (`/api/create-payment` a `/api/public-payment`) komunikuje s GoPay REST API.
+- **Webhooky:** Endpoint `/api/gopay/notify` slouží k asynchronnímu potvrzení zaplacení přímo ze strany platební brány.
+- **Refundace:** Zrušení rezervace do **24 hodin před začátkem** zavolá endpoint `/api/refund`, který provede storno částky v haléřích zpět klientovi.
+- **Bezpečnost endpointů:** Platební API a další citlivé operace implementují základní ochranu jako Rate Limiting (pro zamezení spamu) a striktní ověřování `bookingId`.
+- **Zpracování neznámých API cest:** Express server obsahuje 404 catch-all guard před fallbackem na React SPA (HTML), což brání vracení HTML kódu (Unexpected token < in JSON) při chybách na backendu.
 
 ### Resend a Twilio (Komunikace)
 - **E-maily (Resend):** Implementována vlastní třída `ResendBrowserClient`, která umožňuje posílat e-maily přímo z prohlížeče (pro demo účely) voláním REST API Resend.
@@ -189,6 +190,7 @@ Bez těchto pravidel by kdokoli s konfigurací Firebase mohl číst nebo měnit 
 ### Bezpečnost na úrovni Store (Zustand)
 Systém aktivně chrání integritu dat přímo ve state managementu:
 - **Zabezpečení storna (`cancelBooking`):** Lze zrušit pouze rezervaci, která buď patří aktuálně přihlášenému uživateli (`currentUser.id === bookedByUserId`), nebo pokud má uživatel administrátorská práva (`Role.ADMIN`). Pokus o neoprávněné zrušení selže a vypíše varování.
+- **Hard reset dat (`/api/admin/reset-data`):** Smazání celé databáze (všechny rezervace, události) bylo přesunuto ze strany klienta výhradně na chráněný serverový endpoint. Volání vyžaduje autorizaci (JWT token) a roli administrátora, čímž se efektivně zamezuje neúmyslnému smazání produkční databáze nepovolanou osobou.
 - **Synchronizace s databází:** Akce měnící firemní data (jako storno nebo přesun – `adminRescheduleBooking`) okamžitě synchronizují úpravy s Firestore (`updateBookingInFirestore`), což eliminuje bezpečnostní a logické chyby po reloadu stránky.
 
 ## 10. Architektura a Výkon (Optimalizace)

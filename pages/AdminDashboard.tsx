@@ -436,6 +436,67 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         return true;
     }).sort((a,b) => parseLocalDate(a.date).getTime() - parseLocalDate(b.date).getTime());
 
+    // --- FUTURE PAYMENTS LOGIC ---
+    const { updateBookingPaymentStatus, token } = useStore();
+    const [isProcessingPayments, setIsProcessingPayments] = useState(false);
+
+    const dueFutureBookings = useMemo(() => {
+        const today = new Date();
+        return allBookings.filter(b => {
+            if (b.paymentStatus !== 'pending_future') return false;
+            const bDate = parseLocalDate(b.date);
+            const daysToReservation = (bDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+            return daysToReservation <= 120;
+        });
+    }, [allBookings]);
+
+    const handleProcessFuturePayments = async () => {
+        setIsProcessingPayments(true);
+        let count = 0;
+
+        for (const booking of dueFutureBookings) {
+            const targetEmail = booking.clientEmail || 'mirek.saba@gmail.com'; // fallback
+            
+            // Note: Since we use HashRouter, the URL looks like /#/pay/ID
+            const paymentLink = `${window.location.origin}/#/pay/${booking.id}`;
+            const emailHtml = `
+                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+                    <h2 style="color: #4f46e5;">Výzva k platbě rezervace - Centrum Unity</h2>
+                    <p>Dobrý den,</p>
+                    <p>blíží se termín Vaší rezervace. Nyní je možné ji uhradit online.</p>
+                    <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                        <p><strong>Datum:</strong> ${formatLocalDate(booking.date)}</p>
+                        <p><strong>Částka k úhradě:</strong> ${booking.price} Kč</p>
+                    </div>
+                    <a href="${paymentLink}" style="display: inline-block; background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">Zaplatit online</a>
+                    <p style="margin-top: 20px;">Těšíme se na Vás,<br>Sólás Holistic Studio & Centrum Unity</p>
+                </div>
+            `;
+
+            try {
+                await fetch('/api/send-email', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        to: targetEmail,
+                        subject: 'Výzva k platbě rezervace - Centrum Unity',
+                        html: emailHtml
+                    })
+                });
+
+                await updateBookingPaymentStatus(booking.id, 'unpaid'); // update status so it doesn't get processed again
+                count++;
+            } catch (error) {
+                console.error("Failed to send payment email for booking", booking.id, error);
+            }
+        }
+
+        setIsProcessingPayments(false);
+        addToast('success', 'Výzvy odeslány', `Úspěšně odesláno ${count} výzev k platbě.`);
+    };
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500 pb-12">
@@ -710,8 +771,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 <button onClick={() => setScheduleFilter('upcoming')} className={`px-3 py-1 rounded text-xs font-bold ${scheduleFilter === 'upcoming' ? 'bg-indigo-100 text-indigo-700' : 'text-stone-500 hover:bg-stone-50'}`}>Budoucí</button>
                             </div>
                         </div>
-                        <div className="text-xs font-medium text-stone-500">
-                            Zobrazeno {filteredBookings.length} rezervací
+                        <div className="flex items-center gap-4">
+                            {dueFutureBookings.length > 0 && (
+                                <Button 
+                                    onClick={handleProcessFuturePayments}
+                                    disabled={isProcessingPayments}
+                                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs"
+                                >
+                                    {isProcessingPayments ? 'Zpracovávám...' : `Odeslat výzvy k platbě (${dueFutureBookings.length})`}
+                                </Button>
+                            )}
+                            <div className="text-xs font-medium text-stone-500">
+                                Zobrazeno {filteredBookings.length} rezervací
+                            </div>
                         </div>
                     </div>
 

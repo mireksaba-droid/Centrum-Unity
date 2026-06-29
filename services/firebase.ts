@@ -33,25 +33,6 @@ export const waitForAuth = async (): Promise<void> => {
 // --- PUBLIC SERVICES ---
 
 /**
- * Creates a Stripe Payment Intent via Firebase Cloud Functions.
- */
-export const createStripePaymentIntent = async (amount: number, currency: string = 'czk'): Promise<{ clientSecret: string }> => {
-  if (!isFirebaseReady) {
-    console.log("Mocking Cloud Function: createStripePaymentIntent");
-    return new Promise<{ clientSecret: string }>((resolve) => setTimeout(() => resolve({ clientSecret: 'mock_secret_123' }), 1000));
-  }
-
-  const createPayment = httpsCallable(functions, 'createPaymentIntent');
-  try {
-    const result = await createPayment({ amount, currency });
-    return result.data as { clientSecret: string };
-  } catch (error) {
-    console.error("Error creating payment intent:", error);
-    throw error;
-  }
-};
-
-/**
  * Legacy wrapper to keep existing code working, but now using our new 'resend' object.
  */
 export const sendTransactionalEmail = async (payload: { to: string, subject: string, text: string, html?: string }) => {
@@ -99,56 +80,6 @@ export const saveBookingToFirestore = async (booking: Booking) => {
         return true;
     } catch (error) {
         console.error("Error saving booking:", error);
-        return false;
-    }
-};
-
-export const deleteAllBookingsFromFirestore = async () => {
-    if (!isFirebaseReady) {
-        console.log("Mocking Firestore Clear (Bookings)");
-        return true;
-    }
-    try {
-        const querySnapshot = await getDocs(collection(db, 'bookings'));
-        console.log(`Found ${querySnapshot.docs.length} bookings to delete.`);
-        for (const doc of querySnapshot.docs) {
-            console.log(`Deleting doc: ${doc.id}`);
-            await deleteDoc(doc.ref);
-        }
-        console.log("Successfully cleared bookings.");
-        return true;
-    } catch (error) {
-        console.error("Error clearing bookings:", error);
-        return false;
-    }
-};
-
-export const deleteAllGroupEventsFromFirestore = async () => {
-    if (!isFirebaseReady) {
-        console.log("Mocking Firestore Clear (GroupEvents)");
-        return true;
-    }
-    try {
-        const querySnapshot = await getDocs(collection(db, 'groupEvents'));
-        await Promise.all(querySnapshot.docs.map(doc => deleteDoc(doc.ref)));
-        return true;
-    } catch (error) {
-        console.error("Error clearing groupEvents:", error);
-        return false;
-    }
-};
-
-export const deleteAllEventRegistrationsFromFirestore = async () => {
-    if (!isFirebaseReady) {
-        console.log("Mocking Firestore Clear (EventRegistrations)");
-        return true;
-    }
-    try {
-        const querySnapshot = await getDocs(collection(db, 'eventRegistrations'));
-        await Promise.all(querySnapshot.docs.map(doc => deleteDoc(doc.ref)));
-        return true;
-    } catch (error) {
-        console.error("Error clearing eventRegistrations:", error);
         return false;
     }
 };

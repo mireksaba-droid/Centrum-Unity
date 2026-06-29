@@ -40,13 +40,64 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
     const { token, practitionersList, updateBookingPaymentStatus } = useStore();
     const { addToast } = useToast();
 
+    const sendConfirmationEmail = async (booking: Booking, isPaid: boolean = false) => {
+        const targetEmail = currentUser.id === 'guest' ? booking.clientEmail : (currentUser as any).email || 'mirek.saba@gmail.com'; 
+        if (targetEmail) {
+            const dateParts = booking.date.split('-');
+            const formattedDate = `${dateParts[2]}. ${dateParts[1]}. ${dateParts[0]}`;
+            
+            const emailHtml = `
+                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+                    <h2 style="color: #4f46e5;">Vaše rezervace je potvrzena</h2>
+                    <p>Dobrý den,</p>
+                    <p>veškeré podrobnosti o rezervaci naleznete níže</p>
+                    
+                    <div style="background-color: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                        <strong>Rezervace na ${formattedDate} v ${booking.time}</strong><br/>
+                        Sólás Holistic Studio (Centrum Unity)<br/><br/>
+                        
+                        <strong>Místnost:</strong> ${booking.room === 1 ? 'M1 (Malá)' : 'M2 (Velká)'}<br/>
+                        <strong>Datum:</strong> ${formattedDate}<br/>
+                        <strong>Čas:</strong> ${booking.time}<br/>
+                        <strong>Doba trvání:</strong> ${booking.durationMinutes} min<br/>
+                        <strong>Cena:</strong> ${booking.price.toFixed(2).replace('.', ',')} Kč<br/>
+                        <br/>
+                        <strong>Adresa:</strong> Šmilovského 1268/9, Vinohrady, Praha 2<br/>
+                        <br/>
+                        <strong>Informace o platbě:</strong><br/>
+                        ${isPaid ? 'Platba online' : 'Faktura'}<br/>
+                        ${booking.price.toFixed(2).replace('.', ',')} Kč<br/>
+                    </div>
+                    
+                    <div style="font-size: 12px; color: #666;">
+                        <strong>Storno podmínky:</strong><br/>
+                        Vezměte prosím na vědomí, že rezervace lze zrušit maximálně 24 hodin před termínem. Pokud ji zrušíte včas, bude vám zaplacená částka vrácena.
+                    </div>
+                </div>
+            `;
+
+            fetch('/api/send-email', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    to: targetEmail,
+                    subject: 'Potvrzení rezervace - Centrum Unity',
+                    html: emailHtml
+                })
+            }).catch(console.error); // Do not block UI
+        }
+    };
+
     // Handle Return from GoPay Redirect
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         const paymentId = params.get('id');
         if (paymentId) {
             // Find booking with this paymentId
-            const booking = allBookings.find(b => b.stripePaymentIntentId === String(paymentId));
+            const booking = allBookings.find(b => b.paymentId === String(paymentId));
             if (booking && booking.paymentStatus !== 'paid') {
                 // Verify with backend
                 fetch(`/api/gopay/status?id=${paymentId}`)
@@ -55,8 +106,10 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                         if (data.state === 'PAID') {
                             updateBookingPaymentStatus(booking.id, 'paid');
                             addToast('success', 'Platba úspěšná', 'Vaše rezervace byla zaplacena.');
+                            sendConfirmationEmail(booking, true);
                         } else if (data.state === 'CANCELED' || data.state === 'TIMEOUTED') {
                             addToast('error', 'Platba neúspěšná', 'Platba byla zrušena nebo vypršela. Můžete ji zkusit znovu.');
+                            onCancel(booking.id);
                         } else {
                             addToast('info', 'Zpracováváme platbu', 'Čekáme na potvrzení platby od banky.');
                         }
@@ -121,7 +174,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
             setGuestEmail('');
             setGuestPhone('');
             setIsTestPayment(false);
-            setPaymentMethod(isGuest ? 'online' : 'invoice');
+            setPaymentMethod('online');
         }
     }, [selectedSlot, isGuest]);
 
@@ -250,7 +303,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
         if (!bookingToCancel) return;
         
         setIsProcessing(true);
-        if (bookingToCancel.stripePaymentIntentId) {
+        if (bookingToCancel.paymentId) {
             try {
                 const res = await fetch('/api/refund', {
                     method: 'POST',
@@ -258,10 +311,20 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`
                     },
-                    body: JSON.stringify({ paymentId: bookingToCancel.stripePaymentIntentId })
+                    body: JSON.stringify({ 
+                        paymentId: bookingToCancel.paymentId,
+                        amount: bookingToCancel.price * 100 // send amount in halers
+                    })
                 });
                 
-                const data = await res.json();
+                let data;
+                const textResponse = await res.text();
+                try {
+                    data = JSON.parse(textResponse);
+                } catch (e) {
+                    console.error("Non-JSON response from /api/refund:", textResponse);
+                    throw new Error(`Server vrátil neplatnou odpověď (kód ${res.status}). Zkuste to prosím znovu.`);
+                }
                 
                 if (!res.ok) {
                     throw new Error(data.error || 'Refund failed');
@@ -339,7 +402,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                         currency: 'CZK',
                         reservationDate: selectedSlot.date,
                         reservationTime: selectedSlot.time,
-                        returnUrl: window.location.href // Redirect back to this page
+                        returnUrl: window.location.origin + window.location.pathname
                     })
                 });
                 const data = await response.json();
@@ -398,58 +461,28 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                 clientEmail: isGuest ? guestEmail : undefined,
                 clientPhone: isGuest ? guestPhone : undefined,
                 equipment: equipment,
-                stripePaymentIntentId: paymentId || (paymentStatus === 'paid' ? paymentIntentIdState || undefined : undefined)
+                paymentId: paymentId || (paymentStatus === 'paid' ? paymentIntentIdState || undefined : undefined)
             });
 
             // --- Send Confirmation Email ---
-            // Try to send email to the guest or the current user (fallback to a test email if missing)
-            const targetEmail = isGuest ? guestEmail : (currentUser as any).email || 'mirek.saba@gmail.com'; 
-            if (targetEmail) {
-                const dateParts = selectedSlot.date.split('-');
-                const formattedDate = `${dateParts[2]}. ${dateParts[1]}. ${dateParts[0]}`;
-                
-                const emailHtml = `
-                    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
-                        <h2 style="color: #4f46e5;">Vaše rezervace je potvrzena</h2>
-                        <p>Dobrý den,</p>
-                        <p>veškeré podrobnosti o rezervaci naleznete níže</p>
-                        
-                        <div style="background-color: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                            <strong>Rezervace na ${formattedDate} v ${selectedSlot.time}</strong><br/>
-                            Sólás Holistic Studio (Centrum Unity)<br/><br/>
-                            
-                            <strong>Místnost:</strong> ${selectedSlot.room === 1 ? 'M1 (Malá)' : 'M2 (Velká)'}<br/>
-                            <strong>Datum:</strong> ${formattedDate}<br/>
-                            <strong>Čas:</strong> ${selectedSlot.time}<br/>
-                            <strong>Doba trvání:</strong> ${duration} min<br/>
-                            <strong>Cena:</strong> ${finalPrice.toFixed(2).replace('.', ',')} Kč<br/>
-                            <br/>
-                            <strong>Adresa:</strong> Šmilovského 1268/9, Vinohrady, Praha 2<br/>
-                            <br/>
-                            <strong>Informace o platbě:</strong><br/>
-                            ${paymentStatus === 'paid' ? 'Platba online' : 'Faktura'}<br/>
-                            ${finalPrice.toFixed(2).replace('.', ',')} Kč<br/>
-                        </div>
-                        
-                        <div style="font-size: 12px; color: #666;">
-                            <strong>Storno podmínky:</strong><br/>
-                            Vezměte prosím na vědomí, že rezervace lze zrušit maximálně 24 hodin před termínem. Pokud ji zrušíte včas, bude vám zaplacená částka vrácena.
-                        </div>
-                    </div>
-                `;
-
-                fetch('/api/send-email', {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
-                    },
-                    body: JSON.stringify({
-                        to: targetEmail,
-                        subject: 'Potvrzení rezervace - Centrum Unity',
-                        html: emailHtml
-                    })
-                }).catch(console.error); // Do not block UI
+            if (paymentStatus !== 'pending') {
+                sendConfirmationEmail({
+                    id: 'temp', // Not strictly needed for email
+                    bookedByUserId: currentUser.id,
+                    bookedByName: isGuest ? guestName : currentUser.name,
+                    date: selectedSlot.date,
+                    time: selectedSlot.time,
+                    durationMinutes: duration,
+                    room: selectedSlot.room,
+                    price: finalPrice,
+                    paymentStatus: paymentStatus,
+                    paymentMethod: paymentMethod,
+                    clientName: clientName,
+                    clientEmail: isGuest ? guestEmail : undefined,
+                    clientPhone: isGuest ? guestPhone : undefined,
+                    equipment: equipment,
+                    paymentId: paymentId || undefined
+                } as Booking, paymentStatus === 'paid');
             }
             // -------------------------------
 
@@ -907,7 +940,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                     <span className="text-red-600 font-bold block mb-2">Pozor: Zbývá méně než 24 hodin!</span>
                                 )}
                                 Opravdu chcete zrušit rezervaci z {formatLocalDate(bookingToCancel.date)} v {bookingToCancel.time}?
-                                {!isTooLate && bookingToCancel.stripePaymentIntentId && (
+                                {!isTooLate && bookingToCancel.paymentId && (
                                     <span className="block mt-2 font-medium text-stone-800">
                                         Částka bude refundována na Vaši kartu.
                                     </span>

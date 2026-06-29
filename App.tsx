@@ -6,6 +6,7 @@ import StudioSchedule from './pages/StudioSchedule.tsx';
 import AdminDashboard from './pages/AdminDashboard.tsx';
 import PractitionerDashboard from './pages/PractitionerDashboard.tsx';
 import PublicEventPage from './pages/PublicEventPage.tsx';
+import PaymentPage from './pages/PaymentPage.tsx';
 import TermsPage from './pages/TermsPage.tsx';
 import PrivacyPage from './pages/PrivacyPage.tsx';
 import { Footer } from './components/Footer.tsx';
@@ -123,6 +124,8 @@ const AppContent = () => {
                     onRegister={registerForEvent} 
                 />
             } />
+
+            <Route path="/pay/:bookingId" element={<PaymentPage />} />
 
             <Route path="/obchodni-podminky" element={<TermsPage />} />
             <Route path="/ochrana-udaju" element={<PrivacyPage />} />

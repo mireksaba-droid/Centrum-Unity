@@ -364,7 +364,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
   const handleConfirmCancel = async () => {
         if (!bookingToCancel) return;
         setIsProcessing(true);
-        if (bookingToCancel.stripePaymentIntentId) {
+        if (bookingToCancel.paymentId) {
             try {
                 const res = await fetch('/api/refund', {
                     method: 'POST',
@@ -372,7 +372,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`
                     },
-                    body: JSON.stringify({ paymentId: bookingToCancel.stripePaymentIntentId })
+                    body: JSON.stringify({ paymentId: bookingToCancel.paymentId })
                 });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'Refund failed');
@@ -822,7 +822,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
                               <span className="text-red-600 font-bold block mb-2">Pozor: Zbývá méně než 24 hodin!</span>
                           )}
                           Opravdu chcete zrušit tuto rezervaci z {formatLocalDate(bookingToCancel.date)} v {bookingToCancel.time}?
-                          {!isTooLate && bookingToCancel.stripePaymentIntentId && (
+                          {!isTooLate && bookingToCancel.paymentId && (
                               <span className="block mt-2 font-medium text-stone-800">
                                   Částka klienta bude refundována na jeho kartu.
                               </span>

@@ -13,10 +13,7 @@ import {
   loadBookings, 
   loadPractitioners, 
   savePractitionerToFirestore, 
-  updatePractitionerInFirestore,
-  deleteAllBookingsFromFirestore,
-  deleteAllGroupEventsFromFirestore,
-  deleteAllEventRegistrationsFromFirestore
+  updatePractitionerInFirestore
 } from '../services/firebase';
 
 interface AppState {
@@ -103,48 +100,10 @@ export const useStore = create<AppState>()(
         if (bookingData.clientEmail) newBooking.clientEmail = bookingData.clientEmail;
         if (bookingData.clientPhone) newBooking.clientPhone = bookingData.clientPhone;
         if (bookingData.equipment) newBooking.equipment = bookingData.equipment;
-        if (bookingData.stripePaymentIntentId) newBooking.stripePaymentIntentId = bookingData.stripePaymentIntentId;
+        if (bookingData.paymentId) newBooking.paymentId = bookingData.paymentId;
 
         await saveBookingToFirestore(newBooking);
         set((state) => ({ bookings: [...state.bookings, newBooking] }));
-
-        // Odeslání potvrzovacího emailu (pokud klient zadal email)
-        if (newBooking.clientEmail) {
-            const dateParts = newBooking.date.split('-');
-            const formattedDate = `${dateParts[2]}. ${dateParts[1]}. ${dateParts[0]}`;
-            const emailHtml = `
-                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
-                    <h2 style="color: #4f46e5;">Vaše rezervace je potvrzena</h2>
-                    <p>Dobrý den,</p>
-                    <p>veškeré podrobnosti o rezervaci naleznete níže:</p>
-                    <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                        <p><strong>Služba:</strong> ${bookingData.serviceName || `Pronájem místnosti č. ${newBooking.room}`}</p>
-                        <p><strong>Datum:</strong> ${formattedDate}</p>
-                        <p><strong>Čas:</strong> ${newBooking.time}</p>
-                        <p><strong>Doba trvání:</strong> ${newBooking.durationMinutes} min</p>
-                        <p><strong>Cena:</strong> ${newBooking.price.toLocaleString('cs-CZ')} Kč</p>
-                    </div>
-                    <p><strong>Místo konání:</strong> Šmilovského 1268/9, Vinohrady, Praha 2</p>
-                    <div style="background: #fffbeb; padding: 15px; border-left: 4px solid #f59e0b; margin: 20px 0;">
-                        <p style="margin: 0;"><strong>Storno podmínky:</strong><br>Vezměte prosím na vědomí, že rezervace lze zrušit maximálně 24 hodin před termínem. Pokud ji zrušíte včas, bude vám zaplacená částka vrácena.</p>
-                    </div>
-                    <p>Těšíme se na Vás,<br>Sólás Holistic Studio & Centrum Unity</p>
-                </div>
-            `;
-
-            fetch('/api/send-email', {
-                method: 'POST',
-                headers: { 
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${get().token}`
-                },
-                body: JSON.stringify({
-                    to: newBooking.clientEmail,
-                    subject: 'Potvrzení rezervace - Centrum Unity',
-                    html: emailHtml
-                })
-            }).catch(console.error);
-        }
       },
 
       updateBookingPaymentStatus: async (bookingId: string, status: any) => {
@@ -250,24 +209,33 @@ export const useStore = create<AppState>()(
       },
       
       resetData: async () => {
-        const r1 = await deleteAllBookingsFromFirestore();
-        const r2 = await deleteAllGroupEventsFromFirestore();
-        const r3 = await deleteAllEventRegistrationsFromFirestore();
-        
-        if (!r1 || !r2 || !r3) {
-            console.error("Failed to delete all data from Firebase (maybe offline). Continuing local wipe anyway.");
+        try {
+          const state = get();
+          const response = await fetch('/api/admin/reset-data', {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${state.token}`
+            }
+          });
+          
+          if (!response.ok) {
+            throw new Error("Nepodařilo se smazat data na serveru");
+          }
+          
+          // Use Zustand persist API to clear storage completely
+          useStore.persist.clearStorage();
+          
+          set({
+            bookings: [],
+            groupEvents: [],
+            eventRegistrations: []
+          });
+          
+          setTimeout(() => window.location.reload(), 100);
+        } catch (error) {
+          console.error("Chyba při resetování dat:", error);
+          alert("Nastala chyba. Zkontrolujte, že jste přihlášeni jako administrátor.");
         }
-        
-        // Use Zustand persist API to clear storage completely
-        useStore.persist.clearStorage();
-        
-        set({
-          bookings: [],
-          groupEvents: [],
-          eventRegistrations: []
-        });
-        
-        setTimeout(() => window.location.reload(), 100);
       }
     }),
     {

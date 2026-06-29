@@ -64,7 +64,7 @@ export interface Booking {
   
   cancelledAt?: string; // ISO date string
   
-  stripePaymentIntentId?: string; // Pro refundace testovacích nebo skutečných plateb před uplynutím termínu
+  paymentId?: string; // Pro refundace testovacích nebo skutečných plateb před uplynutím termínu
   
   createdAt: string;
   recurringGroupId?: string; // Phase 1.5: ID pro spojení opakujících se rezervací

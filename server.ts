@@ -2,8 +2,18 @@ import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import { Resend } from "resend";
 import jwt from "jsonwebtoken";
+import * as admin from "firebase-admin";
 import { PRACTITIONERS } from "./constants";
 import { calculateRentalPrice } from "./utils/scheduler";
+
+// Initialize Firebase Admin if not already initialized
+if (!admin.apps.length) {
+  try {
+    admin.initializeApp();
+  } catch (error) {
+    console.warn("Failed to initialize Firebase Admin:", error);
+  }
+}
 
 function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET || "default_dev_secret_key";
@@ -85,6 +95,40 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // Admin endpoint for completely resetting database data (bookings, events, registrations)
+  app.delete("/api/admin/reset-data", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      if (req.user?.role !== 'admin') {
+         return res.status(403).json({ error: "Nedostatečná oprávnění. Pouze admin." });
+      }
+
+      if (!admin.apps.length) {
+         return res.status(500).json({ error: "Firebase Admin is not initialized" });
+      }
+
+      const db = admin.firestore();
+      
+      const deleteCollection = async (collectionPath: string) => {
+         const snapshot = await db.collection(collectionPath).get();
+         const batch = db.batch();
+         snapshot.docs.forEach((doc) => {
+            batch.delete(doc.ref);
+         });
+         await batch.commit();
+      };
+
+      await deleteCollection('bookings');
+      await deleteCollection('groupEvents');
+      await deleteCollection('eventRegistrations');
+
+      console.log(`[Admin] Užitel ${req.user.name} resetoval kompletně databázi.`);
+      res.json({ success: true, message: "Všechna data o rezervacích byla vymazána." });
+    } catch (error: any) {
+      console.error("Reset Data Error:", error.message);
+      res.status(500).json({ error: "Interní chyba při mazání dat." });
+    }
+  });
+
   // Login endpoint
   app.post("/api/login", (req, res) => {
     try {
@@ -106,6 +150,105 @@ async function startServer() {
     } catch (error: any) {
       console.error("Login Error:", error);
       res.status(500).json({ error: error.message || "Interní chyba serveru" });
+    }
+  });
+
+  // Simple in-memory rate limiter for public payment endpoint
+  const paymentRateLimits = new Map<string, { count: number, resetTime: number }>();
+
+  // Create a payment via GoPay (public endpoint without auth)
+  app.post("/api/public-payment", async (req: Request, res: Response) => {
+    try {
+      const ip = req.ip || req.connection.remoteAddress || 'unknown';
+      const now = Date.now();
+      const limit = paymentRateLimits.get(ip);
+      
+      if (limit && limit.resetTime > now) {
+          if (limit.count >= 5) {
+              return res.status(429).json({ error: "Příliš mnoho pokusů o vytvoření platby. Zkuste to prosím později." });
+          }
+          limit.count++;
+      } else {
+          paymentRateLimits.set(ip, { count: 1, resetTime: now + 60000 }); // 5 requests per minute
+      }
+
+      const { duration, room, currency, reservationDate, reservationTime, returnUrl, bookingId } = req.body;
+      
+      if (!bookingId) {
+        return res.status(400).json({ error: "Chybí identifikátor rezervace (bookingId)." });
+      }
+
+      if (typeof duration !== 'number' || (room !== 1 && room !== 2)) {
+         return res.status(400).json({ error: "Neplatné parametry pro výpočet ceny." });
+      }
+
+      // 1. Ověříme, že rezervace existuje v databázi a není už zaplacená
+      if (admin.apps.length > 0) {
+        const db = admin.firestore();
+        const bookingRef = db.collection('bookings').doc(bookingId);
+        const bookingSnap = await bookingRef.get();
+        if (!bookingSnap.exists) {
+           return res.status(404).json({ error: "Rezervace nebyla nalezena." });
+        }
+        const bookingData = bookingSnap.data();
+        if (bookingData?.paymentStatus === 'paid') {
+           return res.status(400).json({ error: "Tato rezervace je již zaplacena." });
+        }
+      }
+      
+      const finalPrice = calculateRentalPrice(duration, room);
+      const amount = Math.round(finalPrice * 100);
+
+      const token = await getGoPayToken();
+      
+      const paymentData = {
+          payer: {
+              allowed_payment_instruments: ["PAYMENT_CARD"],
+              default_payment_instrument: "PAYMENT_CARD",
+          },
+          amount: amount,
+          currency: currency || "CZK",
+          order_number: `RES-${Date.now()}`,
+          order_description: `Doplatek rezervace místnosti ${room}`,
+          items: [{ name: `Pronájem místnosti ${room} (${duration}h)`, amount: amount, count: 1 }],
+          callback: {
+              return_url: returnUrl || "https://rezervace.centrumunity.cz/",
+              notification_url: "https://rezervace.centrumunity.cz/api/gopay/notify"
+          },
+          target: {
+              type: "ACCOUNT",
+              goid: process.env.GOPAY_GOID
+          },
+          additional_params: [
+              { name: "bookingId", value: bookingId || '' },
+              { name: "reservationDate", value: reservationDate || '' },
+              { name: "reservationTime", value: reservationTime || '' }
+          ]
+      };
+
+      const response = await fetch(`${GOPAY_URL}/payments/payment`, {
+         method: "POST",
+         headers: {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+         },
+         body: JSON.stringify(paymentData)
+      });
+      
+      const data = await response.json();
+
+      if (!response.ok) {
+         throw new Error("GoPay create payment failed: " + JSON.stringify(data));
+      }
+      
+      res.json({ 
+        paymentId: data.id,
+        gwUrl: data.gw_url
+      });
+    } catch (error: any) {
+      console.error("GoPay Public Payment Error:", error.message);
+      res.status(400).json({ error: error.message });
     }
   });
 
@@ -249,7 +392,14 @@ async function startServer() {
          body: `amount=${amount || paymentStatus.amount}`
       });
 
-      const result = await refundRes.json();
+      const textResult = await refundRes.text();
+      let result;
+      try {
+          result = textResult ? JSON.parse(textResult) : {};
+      } catch (e) {
+          console.error("GoPay refund returned non-JSON:", textResult);
+          result = { error: textResult };
+      }
 
       if (!refundRes.ok) {
          return res.status(400).json({ error: `Nelze refundovat platbu: ${JSON.stringify(result)}` });
@@ -352,19 +502,69 @@ async function startServer() {
   // Cron endpoint pro kontrolu plateb > 120 dní (spouštěn např. z Google Cloud Scheduler každý den v noci)
   app.post("/api/cron/check-future-payments", async (req: Request, res: Response) => {
      try {
-         // Bezpečnostní kontrola (např. custom header od Scheduleru)
+         // Bezpečnostní kontrola
+         const cronSecret = process.env.CRON_SECRET;
+         if (!cronSecret) {
+             console.error("CRON_SECRET is not configured on the server.");
+             return res.status(500).json({ error: "Server configuration error" });
+         }
+
          const authHeader = req.headers.authorization;
-         if (authHeader !== `Bearer ${process.env.CRON_SECRET || "cron-secret"}`) {
+         if (authHeader !== `Bearer ${cronSecret}`) {
             return res.status(401).send("Unauthorized");
          }
 
-         // 1. Zde byste načetli z Firebase všechny rezervace ve stavu 'pending_future'
-         // 2. Prošlo by se každou z nich a zjistilo by se, jestli zbývá <= 120 dní do termínu
-         // 3. Pro ty, které jsou <= 120 dní, vytvoříme GoPay platbu (podobně jako v /api/create-payment)
-         // 4. Emailem pošleme klientovi odkaz na platební bránu (gw_url) a změníme stav na 'pending' (nebo 'pending_email_sent')
+         if (!admin.apps.length) {
+            return res.status(500).json({ error: "Firebase Admin is not initialized" });
+         }
 
-         console.log("Cron check-future-payments proběhl.");
-         res.json({ success: true, checked: true });
+         const db = admin.firestore();
+         const pendingBookingsSnap = await db.collection('bookings')
+            .where('paymentStatus', '==', 'pending_future')
+            .get();
+
+         let processedCount = 0;
+         const today = new Date();
+
+         for (const doc of pendingBookingsSnap.docs) {
+             const booking = doc.data();
+             const bDate = new Date(booking.date);
+             const daysToReservation = (bDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+
+             if (daysToReservation <= 120) {
+                 const targetEmail = booking.clientEmail || 'mirek.saba@gmail.com';
+                 const paymentLink = `https://rezervace.centrumunity.cz/#/pay/${doc.id}`;
+                 
+                 const emailHtml = `
+                    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+                        <h2 style="color: #4f46e5;">Výzva k platbě rezervace - Centrum Unity</h2>
+                        <p>Dobrý den,</p>
+                        <p>blíží se termín Vaší rezervace. Nyní je možné ji uhradit online.</p>
+                        <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                            <p><strong>Datum:</strong> ${booking.date}</p>
+                            <p><strong>Částka k úhradě:</strong> ${booking.price} Kč</p>
+                        </div>
+                        <a href="${paymentLink}" style="display: inline-block; background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">Zaplatit online</a>
+                        <p style="margin-top: 20px;">Těšíme se na Vás,<br>Sólás Holistic Studio & Centrum Unity</p>
+                    </div>
+                 `;
+
+                 // Odešleme notifikaci e-mailem
+                 await resendClient.emails.send({
+                    from: 'rezervace@centrumunity.cz',
+                    to: targetEmail,
+                    subject: 'Výzva k platbě rezervace - Centrum Unity',
+                    html: emailHtml
+                 });
+
+                 // Změníme status
+                 await doc.ref.update({ paymentStatus: 'unpaid' });
+                 processedCount++;
+             }
+         }
+
+         console.log(`Cron check-future-payments proběhl. Zpracováno: ${processedCount}`);
+         res.json({ success: true, processedCount });
      } catch (error: any) {
          console.error("Cron Error:", error.message);
          res.status(500).send("Error");
@@ -396,6 +596,9 @@ async function startServer() {
       res.status(400).json({ error: error.message });
     }
   });
+
+  // 404 guard for /api routes
+  app.use("/api", (req, res) => res.status(404).json({ error: "Not found" }));
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
