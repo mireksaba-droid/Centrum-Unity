@@ -16,7 +16,10 @@ if (!admin.apps.length) {
 }
 
 function getJwtSecret(): string {
-  const secret = process.env.JWT_SECRET || "default_dev_secret_key";
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+      throw new Error("JWT_SECRET is not configured on the server.");
+  }
   return secret;
 }
 
@@ -453,7 +456,6 @@ async function startServer() {
              return res.status(400).json({ error: "Missing payment ID" });
           }
 
-          // V praxi byste zde zkontrolovali stav platby přes GoPay API
           const token = await getGoPayToken();
           const statusRes = await fetch(`${GOPAY_URL}/payments/payment/${id}`, {
              method: "GET",
@@ -464,10 +466,50 @@ async function startServer() {
           });
           const paymentStatus = await statusRes.json();
 
-          // Na základě paymentStatus.state (např. PAID, CANCELED, TIMEOUTED)
-          // aktualizujete stav rezervace v databázi (Firebase).
-          console.log(`GoPay Notification - Payment ID: ${id}, State: ${paymentStatus.state}`);
+          const bookingIdParam = paymentStatus.additional_params?.find((x: any) => x.name === "bookingId")?.value;
+          
+          if (!admin.apps.length) {
+             return res.status(500).json({ error: "Firebase Admin is not initialized" });
+          }
+          const adminDb = admin.firestore();
 
+          let bookingRef: FirebaseFirestore.DocumentReference | null = null;
+          let bookingId = bookingIdParam;
+
+          if (bookingId) {
+             bookingRef = adminDb.collection("bookings").doc(bookingId);
+          } else {
+             // Zkusíme najít podle paymentId
+             const snapshot = await adminDb.collection("bookings").where("paymentId", "==", String(id)).limit(1).get();
+             if (!snapshot.empty) {
+                bookingRef = snapshot.docs[0].ref;
+                bookingId = snapshot.docs[0].id;
+             }
+          }
+
+          if (bookingRef) {
+             const map: Record<string, string> = {
+                PAID: "paid",
+                CANCELED: "cancelled_unpaid",
+                TIMEOUTED: "cancelled_unpaid",
+                REFUNDED: "refunded",
+             };
+             const newStatus = map[paymentStatus.state];
+             if (newStatus) {
+                await adminDb.runTransaction(async (tx) => {
+                   const doc = await tx.get(bookingRef!);
+                   if (!doc.exists) return;
+                   if (doc.data()?.paymentStatus === "paid" && newStatus === "paid") return; // idempotence
+                   
+                   tx.update(bookingRef!, { 
+                      paymentStatus: newStatus, 
+                      paymentId: String(id) 
+                   });
+                });
+             }
+          }
+
+          console.log(`GoPay Notification - Payment ID: ${id}, State: ${paymentStatus.state}`);
           res.send("OK"); // GoPay očekává jakoukoliv HTTP 200 odpověď
       } catch (error: any) {
           console.error("GoPay Webhook Error:", error.message);

@@ -81,8 +81,9 @@ export const useStore = create<AppState>()(
       },
 
       addBooking: async (bookingData) => {
+        const slotId = `${bookingData.room}_${bookingData.date}_${bookingData.time}`;
         const newBooking: Booking = {
-          id: crypto.randomUUID(),
+          id: slotId,
           bookedByUserId: bookingData.bookedByUserId!,
           bookedByName: bookingData.bookedByName!,
           date: bookingData.date!,

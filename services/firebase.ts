@@ -76,11 +76,18 @@ export const saveBookingToFirestore = async (booking: Booking) => {
         return true;
     }
     try {
-        await setDoc(doc(db, 'bookings', booking.id), booking);
+        const bookingRef = doc(db, 'bookings', booking.id);
+        await runTransaction(db, async (transaction) => {
+            const bookingDoc = await transaction.get(bookingRef);
+            if (bookingDoc.exists()) {
+                throw new Error("Tento termín je již rezervován. Prosím, obnovte stránku a vyberte jiný čas.");
+            }
+            transaction.set(bookingRef, booking);
+        });
         return true;
     } catch (error) {
         console.error("Error saving booking:", error);
-        return false;
+        throw error;
     }
 };
 

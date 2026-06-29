@@ -490,8 +490,8 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
             if (closeModal) {
                 setSelectedSlot(null);
             }
-        } catch (e) {
-            addToast('error', 'Chyba', 'Nepodařilo se uložit rezervaci.');
+        } catch (e: any) {
+            addToast('error', 'Rezervace se nezdařila', e.message || 'Nepodařilo se uložit rezervaci.');
         }
 
         setIsProcessing(false);

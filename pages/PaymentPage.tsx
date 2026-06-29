@@ -25,7 +25,6 @@ const PaymentPage: React.FC = () => {
                     const data = await response.json();
                     
                     if (data.state === 'PAID') {
-                        await updateBookingPaymentStatus(booking.id, 'paid');
                         setStatusMessage({ type: 'success', text: 'Vaše platba proběhla úspěšně. Děkujeme!' });
                     } else if (data.state === 'CANCELED' || data.state === 'TIMEOUTED') {
                         setStatusMessage({ type: 'error', text: 'Platba byla zrušena nebo vypršela.' });

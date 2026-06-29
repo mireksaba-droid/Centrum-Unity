@@ -337,26 +337,36 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
 
       // Simulate Processing
       setTimeout(async () => {
-        const finalPrice = calculateRentalPrice(rentalMinutes, bookingSlot.room);
-        await onInternalBook({
-            date: bookingSlot.date,
-            time: bookingSlot.time,
-            durationMinutes: rentalMinutes,
-            room: bookingSlot.room,
-            price: finalPrice,
-            bookedByUserId: currentUser?.id,
-            bookedByName: currentUser?.name || 'Lektor',
-            clientName: internalClientName || currentUser?.name,
-            clientEmail: internalClientEmail,
-            clientPhone: internalClientPhone,
-            paymentMethod: internalPaymentMethod as any,
-            paymentStatus: internalPaymentMethod === 'apple_pay' ? 'paid' : 'invoice_pending',
-            equipment: selectedEquipment,
-            note: internalNote
-        });
-        
-        setIsProcessing(false);
-        setShowBookingModal(false);
+        try {
+            const finalPrice = calculateRentalPrice(rentalMinutes, bookingSlot.room);
+            await onInternalBook({
+                date: bookingSlot.date,
+                time: bookingSlot.time,
+                durationMinutes: rentalMinutes,
+                room: bookingSlot.room,
+                price: finalPrice,
+                bookedByUserId: currentUser?.id,
+                bookedByName: currentUser?.name || 'Lektor',
+                clientName: internalClientName || currentUser?.name,
+                clientEmail: internalClientEmail,
+                clientPhone: internalClientPhone,
+                paymentMethod: internalPaymentMethod as any,
+                paymentStatus: internalPaymentMethod === 'apple_pay' ? 'paid' : 'invoice_pending',
+                equipment: selectedEquipment,
+                note: internalNote
+            });
+            setShowBookingModal(false);
+            setInternalClientName('');
+            setInternalClientEmail('');
+            setInternalClientPhone('');
+            setSelectedEquipment([]);
+            setInternalNote('');
+            setRentalMinutes(60);
+        } catch (e: any) {
+            alert(e.message || "Nepodařilo se vytvořit rezervaci.");
+        } finally {
+            setIsProcessing(false);
+        }
       }, delay);
   };
 
