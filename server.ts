@@ -2,14 +2,20 @@ import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import { Resend } from "resend";
 import jwt from "jsonwebtoken";
-import * as admin from "firebase-admin";
+import { initializeApp, getApps } from "firebase-admin/app";
+import { getFirestore, DocumentReference } from "firebase-admin/firestore";
+
+const FIRESTORE_DB_ID =
+  process.env.FIRESTORE_DATABASE_ID ||
+  "ai-studio-21fbe237-8e55-49f1-9943-9fef39621ecb";
+
 import { PRACTITIONERS } from "./constants";
 import { calculateRentalPrice } from "./utils/scheduler";
 
 // Initialize Firebase Admin if not already initialized
-if (!admin.apps.length) {
+if (!getApps().length) {
   try {
-    admin.initializeApp();
+    initializeApp();
   } catch (error) {
     console.warn("Failed to initialize Firebase Admin:", error);
   }
@@ -105,11 +111,11 @@ async function startServer() {
          return res.status(403).json({ error: "Nedostatečná oprávnění. Pouze admin." });
       }
 
-      if (!admin.apps.length) {
+      if (!getApps().length) {
          return res.status(500).json({ error: "Firebase Admin is not initialized" });
       }
 
-      const db = admin.firestore();
+      const db = getFirestore(FIRESTORE_DB_ID);
       
       const deleteCollection = async (collectionPath: string) => {
          const snapshot = await db.collection(collectionPath).get();
@@ -186,8 +192,8 @@ async function startServer() {
       }
 
       // 1. Ověříme, že rezervace existuje v databázi a není už zaplacená
-      if (admin.apps.length > 0) {
-        const db = admin.firestore();
+      if (getApps().length > 0) {
+        const db = getFirestore(FIRESTORE_DB_ID);
         const bookingRef = db.collection('bookings').doc(bookingId);
         const bookingSnap = await bookingRef.get();
         if (!bookingSnap.exists) {
@@ -468,12 +474,12 @@ async function startServer() {
 
           const bookingIdParam = paymentStatus.additional_params?.find((x: any) => x.name === "bookingId")?.value;
           
-          if (!admin.apps.length) {
+          if (!getApps().length) {
              return res.status(500).json({ error: "Firebase Admin is not initialized" });
           }
-          const adminDb = admin.firestore();
+          const adminDb = getFirestore(FIRESTORE_DB_ID);
 
-          let bookingRef: FirebaseFirestore.DocumentReference | null = null;
+          let bookingRef: DocumentReference | null = null;
           let bookingId = bookingIdParam;
 
           if (bookingId) {
@@ -556,11 +562,11 @@ async function startServer() {
             return res.status(401).send("Unauthorized");
          }
 
-         if (!admin.apps.length) {
+         if (!getApps().length) {
             return res.status(500).json({ error: "Firebase Admin is not initialized" });
          }
 
-         const db = admin.firestore();
+         const db = getFirestore(FIRESTORE_DB_ID);
          const pendingBookingsSnap = await db.collection('bookings')
             .where('paymentStatus', '==', 'pending_future')
             .get();
@@ -592,7 +598,7 @@ async function startServer() {
                  `;
 
                  // Odešleme notifikaci e-mailem
-                 await resendClient.emails.send({
+                 await getResend().emails.send({
                     from: 'rezervace@centrumunity.cz',
                     to: targetEmail,
                     subject: 'Výzva k platbě rezervace - Centrum Unity',
