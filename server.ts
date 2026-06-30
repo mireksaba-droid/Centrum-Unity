@@ -139,27 +139,47 @@ async function startServer() {
   });
 
   // Login endpoint
-  app.post("/api/login", (req, res) => {
+  app.post("/api/login", async (req, res) => {
     try {
-      const { userId, name, role } = req.body;
+      const { userId, pin } = req.body;
       
-      if (!userId || !name || !role) {
+      if (!userId || !pin) {
         return res.status(400).json({ error: "Chybí informace o uživateli" });
       }
 
-      // PIN validity was already verified on the client safely
-      // Give signed JWT based on client claims
+      if (!getApps().length) {
+          return res.status(500).json({ error: "Firebase Admin is not initialized" });
+      }
+
+      const db = getFirestore(FIRESTORE_DB_ID);
+      const snap = await db.collection("practitioners").doc(userId).get();
+      if (!snap.exists) return res.status(401).json({ error: "Neplatné přihlášení" });
+
+      const p = snap.data()!;
+      if (String(p.pin) !== String(pin)) return res.status(401).json({ error: "Nesprávný PIN" });
+
       const token = jwt.sign(
-        { id: userId, role: role, name: name },
+        { id: userId, role: p.role, name: p.name },
         process.env.JWT_SECRET || "default_dev_secret_key",
         { expiresIn: "1d" }
       );
 
-      res.json({ success: true, token, user: { id: userId, name, role } });
+      res.json({ success: true, token, user: { id: userId, name: p.name, role: p.role } });
     } catch (error: any) {
       console.error("Login Error:", error);
       res.status(500).json({ error: error.message || "Interní chyba serveru" });
     }
+  });
+
+  // AI Chat endpoint
+  app.post("/api/ai/chat", async (req, res) => {
+    try {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req.body),
+      });
+      res.status(r.status).json(await r.json());
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   // Simple in-memory rate limiter for public payment endpoint
@@ -575,39 +595,48 @@ async function startServer() {
          const today = new Date();
 
          for (const doc of pendingBookingsSnap.docs) {
-             const booking = doc.data();
-             const bDate = new Date(booking.date);
-             const daysToReservation = (bDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+             try {
+                 const booking = doc.data();
+                 const bDate = new Date(booking.date);
+                 const daysToReservation = (bDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
 
-             if (daysToReservation <= 120) {
-                 const targetEmail = booking.clientEmail || 'mirek.saba@gmail.com';
-                 const paymentLink = `https://rezervace.centrumunity.cz/#/pay/${doc.id}`;
-                 
-                 const emailHtml = `
-                    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
-                        <h2 style="color: #4f46e5;">Výzva k platbě rezervace - Centrum Unity</h2>
-                        <p>Dobrý den,</p>
-                        <p>blíží se termín Vaší rezervace. Nyní je možné ji uhradit online.</p>
-                        <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                            <p><strong>Datum:</strong> ${booking.date}</p>
-                            <p><strong>Částka k úhradě:</strong> ${booking.price} Kč</p>
+                 if (daysToReservation <= 120) {
+                     const targetEmail = booking.clientEmail;
+                     if (!targetEmail) {
+                         console.log(`Skipping booking ${doc.id} - no email provided.`);
+                         continue;
+                     }
+                     
+                     const paymentLink = `https://rezervace.centrumunity.cz/#/pay/${doc.id}`;
+                     
+                     const emailHtml = `
+                        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+                            <h2 style="color: #4f46e5;">Výzva k platbě rezervace - Centrum Unity</h2>
+                            <p>Dobrý den,</p>
+                            <p>blíží se termín Vaší rezervace. Nyní je možné ji uhradit online.</p>
+                            <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                                <p><strong>Datum:</strong> ${booking.date}</p>
+                                <p><strong>Částka k úhradě:</strong> ${booking.price} Kč</p>
+                            </div>
+                            <a href="${paymentLink}" style="display: inline-block; background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">Zaplatit online</a>
+                            <p style="margin-top: 20px;">Těšíme se na Vás,<br>Sólás Holistic Studio & Centrum Unity</p>
                         </div>
-                        <a href="${paymentLink}" style="display: inline-block; background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">Zaplatit online</a>
-                        <p style="margin-top: 20px;">Těšíme se na Vás,<br>Sólás Holistic Studio & Centrum Unity</p>
-                    </div>
-                 `;
+                     `;
 
-                 // Odešleme notifikaci e-mailem
-                 await getResend().emails.send({
-                    from: 'rezervace@centrumunity.cz',
-                    to: targetEmail,
-                    subject: 'Výzva k platbě rezervace - Centrum Unity',
-                    html: emailHtml
-                 });
+                     // Odešleme notifikaci e-mailem
+                     await getResend().emails.send({
+                        from: 'rezervace@centrumunity.cz',
+                        to: targetEmail,
+                        subject: 'Výzva k platbě rezervace - Centrum Unity',
+                        html: emailHtml
+                     });
 
-                 // Změníme status
-                 await doc.ref.update({ paymentStatus: 'unpaid' });
-                 processedCount++;
+                     // Změníme status
+                     await doc.ref.update({ paymentStatus: 'unpaid' });
+                     processedCount++;
+                 }
+             } catch (e: any) {
+                 console.error(`Cron: chyba u rezervace ${doc.id}:`, e);
              }
          }
 
