@@ -82,7 +82,7 @@ export const saveBookingToFirestore = async (booking: Booking) => {
             if (bookingDoc.exists()) {
                 throw new Error("Tento termín je již rezervován. Prosím, obnovte stránku a vyberte jiný čas.");
             }
-            transaction.set(bookingRef, booking);
+            transaction.set(bookingRef, booking as any);
         });
         return true;
     } catch (error) {
@@ -120,7 +120,7 @@ export const updateBookingInFirestore = async (bookingId: string, data: Partial<
     }
     try {
         const bookingRef = doc(db, 'bookings', bookingId);
-        await updateDoc(bookingRef, data);
+        await updateDoc(bookingRef, data as any);
         return true;
     } catch (error) {
         console.error("Error updating booking:", error);

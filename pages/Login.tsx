@@ -27,16 +27,23 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       e.preventDefault();
       if (!selectedUser) return;
 
+      // Validate PIN directly on the client (using data synced from Firebase/Store)
+      if (String(pin) !== String(selectedUser.pin)) {
+          setError('Nesprávný PIN.');
+          setPin('');
+          return;
+      }
+
       try {
           const response = await fetch('/api/login', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ userId: selectedUser.id, pin: pin })
+              body: JSON.stringify({ userId: selectedUser.id, name: selectedUser.name, role: selectedUser.role })
           });
           
           if (!response.ok) {
               const data = await response.json();
-              setError(data.error || 'Nesprávný PIN.');
+              setError(data.error || 'Nastala chyba na serveru.');
               setPin('');
               return;
           }

@@ -22,7 +22,13 @@ const PaymentPage: React.FC = () => {
                 setIsProcessing(true);
                 try {
                     const response = await fetch(`/api/gopay/status?id=${paymentId}`);
-                    const data = await response.json();
+                    const text = await response.text();
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        throw new Error(`Neplatná odpověď ze serveru: ${text.substring(0, 50)}`);
+                    }
                     
                     if (data.state === 'PAID') {
                         setStatusMessage({ type: 'success', text: 'Vaše platba proběhla úspěšně. Děkujeme!' });
@@ -73,7 +79,13 @@ const PaymentPage: React.FC = () => {
                 })
             });
 
-            const data = await response.json();
+            const text = await response.text();
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (e) {
+                throw new Error(`Neplatná odpověď ze serveru: ${text.substring(0, 50)}`);
+            }
             if (data.error) throw new Error(data.error);
 
             if (data.gwUrl) {

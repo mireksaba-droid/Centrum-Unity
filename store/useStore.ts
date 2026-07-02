@@ -121,7 +121,11 @@ export const useStore = create<AppState>()(
         const booking = state.bookings.find(b => b.id === bookingId);
         if (!booking) return;
         
-        if (state.currentUser?.id !== booking.bookedByUserId && state.currentUser?.role !== Role.ADMIN) {
+        const isOwner = state.currentUser?.id === booking.bookedByUserId;
+        const isAdmin = state.currentUser?.role === Role.ADMIN;
+        const isGuestBooking = !state.currentUser && booking.bookedByUserId === 'guest';
+        
+        if (!isOwner && !isAdmin && !isGuestBooking) {
           console.error("Unauthorized to cancel this booking");
           return;
         }

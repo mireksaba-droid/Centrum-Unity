@@ -405,7 +405,13 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                         returnUrl: window.location.origin + window.location.pathname
                     })
                 });
-                const data = await response.json();
+                const text = await response.text();
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch (e) {
+                    throw new Error(`Odpověď ze serveru není validní JSON: ${text.substring(0, 100)}`);
+                }
                 if (data.error) throw new Error(data.error);
                 
                 // Uložíme rezervaci s nezaplaceným statusem a paymentId

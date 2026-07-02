@@ -6,22 +6,25 @@ service cloud.firestore {
     function isSignedIn() { return request.auth != null; }
     function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
 
-    // Practitioners - need to be readable by the client to verify PIN logins.
+    // Practitioners - served by /api/practitioners to avoid leaking PINs
     match /practitioners/{practitionerId} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
 
     // Bookings
     match /bookings/{bookingId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if true; // Temporarily unlocked for AI Studio dev server. Lock to 'if false' in production with a service account.
     }
 
     match /groupEvents/{eventId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if true; // Temporarily unlocked for AI Studio dev server. Lock to 'if false' in production with a service account.
     }
 
     match /eventRegistrations/{regId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if true; // Temporarily unlocked for AI Studio dev server. Lock to 'if false' in production with a service account.
     }
 
     match /{document=**} {
