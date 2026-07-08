@@ -107,10 +107,13 @@ export const useStore = create<AppState>()(
       },
 
       updateBookingStatus: async (bookingId: string, status: any) => {
-          await updateBookingInFirestore(bookingId, { status });
+          // Při odeslání výzvy k platbě označíme čas, od kterého běží 15min okno na platbu
+          const extra = status === 'awaiting_payment' ? { paymentRequestedAt: new Date().toISOString() } : {};
+          const data = { status, ...extra };
+          await updateBookingInFirestore(bookingId, data);
           set((state) => ({
-             bookings: state.bookings.map(b => 
-                b.id === bookingId ? { ...b, status } : b
+             bookings: state.bookings.map(b =>
+                b.id === bookingId ? { ...b, ...data } : b
              )
           }));
       },

@@ -9,6 +9,7 @@ import { useToast } from '../contexts/ToastContext';
 import { checkBookingCollision, timeToMinutes } from '../utils/scheduler';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 import { useStore } from '../store/useStore';
+import { generatePaymentRequestEmail } from '../utils/emailTemplates';
 
 interface AdminDashboardProps {
   allBookings: Booking[];
@@ -272,7 +273,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         // 6. REVENUE ATTRIBUTION
         const revenueByPractitioner: Record<string, number> = {};
         confirmedBookings.forEach(b => {
-            const name = b.practitionerName || b.bookedByName || 'Neznámý';
+            const name = b.bookedByName || 'Neznámý';
             revenueByPractitioner[name] = (revenueByPractitioner[name] || 0) + b.price;
         });
         const topPerformersData = Object.entries(revenueByPractitioner)
@@ -415,7 +416,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     // --- SCHEDULE FILTERING ---
     const filteredBookings = allBookings.filter(b => {
-        const pName = b.practitionerName || b.bookedByName || '';
+        const pName = b.bookedByName || '';
         const sName = b.serviceName || '';
         const matchesSearch = pName.toLowerCase().includes(searchQuery.toLowerCase()) || 
                               sName.toLowerCase().includes(searchQuery.toLowerCase());
@@ -457,20 +458,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             const targetEmail = booking.clientEmail || 'mirek.saba@gmail.com'; // fallback
             
             // Note: Since we use HashRouter, the URL looks like /#/pay/ID
-            const paymentLink = `${window.location.origin}/#/pay/${booking.id}`;
-            const emailHtml = `
-                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
-                    <h2 style="color: #4f46e5;">Výzva k platbě rezervace - Centrum Unity</h2>
-                    <p>Dobrý den,</p>
-                    <p>blíží se termín Vaší rezervace. Nyní je možné ji uhradit online.</p>
-                    <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                        <p><strong>Datum:</strong> ${formatLocalDate(booking.date)}</p>
-                        <p><strong>Částka k úhradě:</strong> ${booking.price} Kč</p>
-                    </div>
-                    <a href="${paymentLink}" style="display: inline-block; background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">Zaplatit online</a>
-                    <p style="margin-top: 20px;">Těšíme se na Vás,<br>Sólás Holistic Studio & Centrum Unity</p>
-                </div>
-            `;
+            const emailHtml = generatePaymentRequestEmail(booking, window.location.origin);
 
             try {
                 await fetch('/api/send-email', {
@@ -811,7 +799,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                 <div className="text-stone-500">{booking.time} ({booking.durationMinutes} min)</div>
                                             </td>
                                             <td className="px-6 py-4">
-                                                <div className="font-bold text-stone-900">{booking.practitionerName || booking.bookedByName}</div>
+                                                <div className="font-bold text-stone-900">{booking.bookedByName}</div>
                                                 <div className="text-xs text-indigo-600 font-medium">{booking.serviceName}</div>
                                             </td>
                                             <td className="px-6 py-4">

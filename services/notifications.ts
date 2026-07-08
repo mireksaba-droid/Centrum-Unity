@@ -21,7 +21,7 @@ export const NotificationService = {
         
         <div style="background-color: #f9f9f9; padding: 15px; border-radius: 6px; margin: 20px 0;">
           <p style="margin: 5px 0;"><strong>Služba:</strong> ${service.name}</p>
-          <p style="margin: 5px 0;"><strong>Lektor:</strong> ${booking.practitionerName}</p>
+          <p style="margin: 5px 0;"><strong>Lektor:</strong> ${booking.bookedByName}</p>
           <p style="margin: 5px 0;"><strong>Datum:</strong> ${new Date(booking.date).toLocaleDateString('cs-CZ')}</p>
           <p style="margin: 5px 0;"><strong>Čas:</strong> ${booking.time}</p>
           <p style="margin: 5px 0;"><strong>Cena:</strong> ${booking.price} Kč</p>
@@ -33,7 +33,7 @@ export const NotificationService = {
       </div>
     `;
 
-    const textBody = `Rezervace potvrzena: ${service.name}\nDatum: ${new Date(booking.date).toLocaleDateString('cs-CZ')} v ${booking.time}\nLektor: ${booking.practitionerName}\nCena: ${booking.price} Kč`;
+    const textBody = `Rezervace potvrzena: ${service.name}\nDatum: ${new Date(booking.date).toLocaleDateString('cs-CZ')} v ${booking.time}\nLektor: ${booking.bookedByName}\nCena: ${booking.price} Kč`;
 
     try {
         await sendTransactionalEmail({
@@ -73,7 +73,7 @@ export const NotificationService = {
 
   // 3. Krizová notifikace (Zrušení lektorem)
   sendCancellationNotice: async (booking: Booking, reason: string = 'Nemoc/Osobní důvody') => {
-    const message = `Důležité: Vaše rezervace ${booking.date} v ${booking.time} byla zrušena lektorem (${booking.practitionerName}). Důvod: ${reason}. Peníze vracíme automaticky.`;
+    const message = `Důležité: Vaše rezervace ${booking.date} v ${booking.time} byla zrušena lektorem (${booking.bookedByName}). Důvod: ${reason}. Peníze vracíme automaticky.`;
     
     try {
         await sendTransactionalEmail({

@@ -1,20 +1,23 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Centrum Unity
 
-# Run and deploy your AI Studio app
+Rezervační systém coworkingového wellness centra — rezervace místností, online platby (GoPay), e-mailové notifikace a admin dashboard.
 
-This contains everything you need to run your app locally.
+Podrobná dokumentace: **[PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md)** · pravidla pro vývoj: **[AGENTS.md](AGENTS.md)**.
 
-View your app in AI Studio: https://ai.studio/apps/21fbe237-8e55-49f1-9943-9fef39621ecb
+## Spuštění lokálně
 
-## Run Locally
+**Požadavky:** Node.js
 
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
+1. Instalace závislostí:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Vytvořte `.env` podle `.env.example` a vyplňte klíče (GoPay, SMTP, `JWT_SECRET`, `GEMINI_API_KEY`, `CRON_SECRET`).
+3. Spuštění vývojového serveru:
    `npm run dev`
+
+## Build a produkce
+- `npm run build` — sestaví frontend (Vite) a server (esbuild → `dist/server.cjs`).
+- `npm start` — spustí produkční server.
+- Cron `/api/cron/check-future-payments` volejte pravidelně s hlavičkou `Authorization: Bearer <CRON_SECRET>`.
+
+## Technologie
+React 19 · TypeScript · Vite · Express 5 · Firebase Firestore · GoPay · nodemailer (SMTP) · Zustand · Tailwind CSS.

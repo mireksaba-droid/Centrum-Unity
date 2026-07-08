@@ -67,7 +67,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ practitioners, bookings, on
 
       // 2. Personal Booking (If practitioner is already booked somewhere else at this time)
       const isPersonallyBooked = bookings.some(b => {
-          if (b.date !== dateStr || !['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status) || b.practitionerId !== p.id) return false;
+          if (b.date !== dateStr || !['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status) || b.bookedByUserId !== p.id) return false;
           const bStart = timeToMinutes(b.time);
           const bEnd = bStart + b.durationMinutes;
           // Check overlap with slot start
@@ -90,7 +90,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ practitioners, bookings, on
                 // DYNAMIC BUFFER:
                 // If the existing booking is by P -> 30 min buffer.
                 // If the existing booking is by someone else -> 60 min buffer.
-                const bufferAfterB = (b.practitionerId === p.id) ? BUFFER_SAME_USER : BUFFER_DIFF_USER;
+                const bufferAfterB = (b.bookedByUserId === p.id) ? BUFFER_SAME_USER : BUFFER_DIFF_USER;
                 const blockedUntil = bEnd + bufferAfterB;
                 
                 // Is the slot start time blocked?

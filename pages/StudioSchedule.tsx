@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
 import { useStore } from '../store/useStore';
 import { checkBookingCollision, calculateRentalPrice, timeToMinutes } from '../utils/scheduler';
+import { generateConfirmationEmail } from '../utils/emailTemplates';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 
 declare global {
@@ -43,38 +44,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
     const sendConfirmationEmail = async (booking: Booking, isPaid: boolean = false) => {
         const targetEmail = currentUser.id === 'guest' ? booking.clientEmail : (currentUser as any).email || 'mirek.saba@gmail.com'; 
         if (targetEmail) {
-            const dateParts = booking.date.split('-');
-            const formattedDate = `${dateParts[2]}. ${dateParts[1]}. ${dateParts[0]}`;
-            
-            const emailHtml = `
-                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
-                    <h2 style="color: #4f46e5;">Vaše rezervace je potvrzena</h2>
-                    <p>Dobrý den,</p>
-                    <p>veškeré podrobnosti o rezervaci naleznete níže</p>
-                    
-                    <div style="background-color: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                        <strong>Rezervace na ${formattedDate} v ${booking.time}</strong><br/>
-                        Sólás Holistic Studio (Centrum Unity)<br/><br/>
-                        
-                        <strong>Místnost:</strong> ${booking.room === 1 ? 'M1 (Malá)' : 'M2 (Velká)'}<br/>
-                        <strong>Datum:</strong> ${formattedDate}<br/>
-                        <strong>Čas:</strong> ${booking.time}<br/>
-                        <strong>Doba trvání:</strong> ${booking.durationMinutes} min<br/>
-                        <strong>Cena:</strong> ${booking.price.toFixed(2).replace('.', ',')} Kč<br/>
-                        <br/>
-                        <strong>Adresa:</strong> Šmilovského 1268/9, Vinohrady, Praha 2<br/>
-                        <br/>
-                        <strong>Informace o platbě:</strong><br/>
-                        ${isPaid ? 'Platba online' : 'Faktura'}<br/>
-                        ${booking.price.toFixed(2).replace('.', ',')} Kč<br/>
-                    </div>
-                    
-                    <div style="font-size: 12px; color: #666;">
-                        <strong>Storno podmínky:</strong><br/>
-                        Vezměte prosím na vědomí, že rezervace lze zrušit maximálně 24 hodin před termínem. Pokud ji zrušíte včas, bude vám zaplacená částka vrácena.
-                    </div>
-                </div>
-            `;
+            const emailHtml = generateConfirmationEmail(booking, isPaid);
 
             fetch('/api/send-email', {
                 method: 'POST',

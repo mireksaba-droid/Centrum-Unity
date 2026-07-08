@@ -82,7 +82,7 @@ const Dashboard: React.FC<DashboardProps> = ({ bookings }) => {
                     <Calendar className="w-6 h-6" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-stone-900 font-heading">{booking.practitionerName}</h3>
+                    <h3 className="font-bold text-stone-900 font-heading">{booking.bookedByName}</h3>
                     <div className="flex items-center gap-2 text-stone-500 text-sm mt-1">
                       <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {booking.time}</span>
                       <span>•</span>

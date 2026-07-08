@@ -1,6 +1,6 @@
 import express, { Request, Response, NextFunction } from "express";
 import path from "path";
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
 
 import { runTransaction, getDoc, DocumentReference, db, collection, doc, updateDoc, deleteDoc, getDocs, query, where, setDoc, writeBatch } from "./server-firebase";
@@ -10,6 +10,7 @@ import firebaseConfig from "./firebase-applet-config.json";
 
 import { PRACTITIONERS } from "./constants";
 import { calculateRentalPrice } from "./utils/scheduler";
+import { generatePaymentRequestEmail, generateConfirmationEmail, generateCancellationEmail } from "./utils/emailTemplates";
 
 async function safeJson(res: any) {
   const text = await res.text();
@@ -93,18 +94,29 @@ async function startServer() {
     return data.access_token as string;
   }
 
-  // Resend lazy initialization
-  let resendClient: Resend | null = null;
-  function getResend(): Resend {
-    if (!resendClient) {
-      const key = process.env.RESEND_API_KEY;
-      if (!key) {
-        throw new Error("RESEND_API_KEY environment variable is required");
+  // SMTP (nodemailer) lazy initialization - webkitty.eu / vlastní poštovní server
+  let mailTransporter: nodemailer.Transporter | null = null;
+  function getMailer(): nodemailer.Transporter {
+    if (!mailTransporter) {
+      const host = process.env.SMTP_HOST;
+      const user = process.env.SMTP_USER;
+      const pass = process.env.SMTP_PASS;
+      if (!host || !user || !pass) {
+        throw new Error("SMTP_HOST, SMTP_USER a SMTP_PASS musí být nastaveny v proměnných prostředí.");
       }
-      resendClient = new Resend(key);
+      const port = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 465;
+      mailTransporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465, // 465 = SSL/TLS, 587 = STARTTLS
+        auth: { user, pass },
+      });
     }
-    return resendClient;
+    return mailTransporter;
   }
+
+  // Odesílací adresa (musí patřit pod vaši doménu na webkitty)
+  const getFromEmail = () => process.env.FROM_EMAIL || process.env.SMTP_USER || "info@centrumunity.cz";
 
   // --- API Routes ---
   app.get("/api/health", (req, res) => {
@@ -732,30 +744,18 @@ async function startServer() {
                      
                      const paymentLink = `https://rezervace.centrumunity.cz/#/pay/${doc.id}`;
                      
-                     const emailHtml = `
-                        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
-                            <h2 style="color: #4f46e5;">Výzva k platbě rezervace - Centrum Unity</h2>
-                            <p>Dobrý den,</p>
-                            <p>blíží se termín Vaší rezervace. Nyní je možné ji uhradit online.</p>
-                            <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                                <p><strong>Datum:</strong> ${booking.date}</p>
-                                <p><strong>Částka k úhradě:</strong> ${booking.price} Kč</p>
-                            </div>
-                            <a href="${paymentLink}" style="display: inline-block; background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">Zaplatit online</a>
-                            <p style="margin-top: 20px;">Těšíme se na Vás,<br>Sólás Holistic Studio & Centrum Unity</p>
-                        </div>
-                     `;
+                     const emailHtml = generatePaymentRequestEmail(booking);
 
                      // Odešleme notifikaci e-mailem
-                     await getResend().emails.send({
-                        from: 'rezervace@centrumunity.cz',
+                     await getMailer().sendMail({
+                        from: getFromEmail(),
                         to: targetEmail,
                         subject: 'Výzva k platbě rezervace - Centrum Unity',
                         html: emailHtml
                      });
 
-                     // Změníme status
-                     await updateDoc(doc.ref, { status: 'awaiting_payment' });
+                     // Změníme status a označíme čas odeslání výzvy (od něj běží 15min okno na platbu)
+                     await updateDoc(doc.ref, { status: 'awaiting_payment', paymentRequestedAt: new Date().toISOString() });
                      processedCount++;
                  }
              } catch (e: any) {
@@ -776,23 +776,68 @@ async function startServer() {
     try {
       const { to, subject, html } = req.body;
 
-      if (!process.env.RESEND_API_KEY) {
-        console.log("No RESEND_API_KEY provided. Mocking email send:");
-        console.log(`To: ${to}\nSubject: ${subject}\nBody: ${html}`);
+      if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+        console.log("SMTP není nakonfigurováno. Mockuji odeslání e-mailu:");
+        console.log(`To: ${to}\nSubject: ${subject}`);
         return res.json({ success: true, mocked: true });
       }
-      
-      const resend = getResend();
-      const data = await resend.emails.send({
-        from: process.env.FROM_EMAIL || "Centrum Unity <onboarding@resend.dev>",
+
+      const info = await getMailer().sendMail({
+        from: getFromEmail(),
         to: [to],
         subject: subject,
         html: html,
       });
-      
-      res.json({ success: true, data });
+
+      res.json({ success: true, data: { id: info.messageId } });
     } catch (error: any) {
-      console.error("Resend Error:", error.message);
+      console.error("SMTP Error:", error.message);
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Testovací endpoint pro ověření SMTP (jen admin) - pošle ukázkový potvrzovací e-mail
+  app.post("/api/test-email", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      if (req.user?.role !== "ADMIN") {
+        return res.status(403).json({ error: "Pouze admin může posílat testovací e-maily." });
+      }
+
+      const to = req.body?.to || process.env.FROM_EMAIL || process.env.SMTP_USER;
+      if (!to) {
+        return res.status(400).json({ error: "Chybí cílová e-mailová adresa (to)." });
+      }
+
+      // Ukázková rezervace
+      const sampleBooking = {
+        id: "TEST-" + Date.now(),
+        bookedByName: "Testovací rezervace",
+        clientName: req.user?.name || "Eva",
+        date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+        time: "17:00",
+        durationMinutes: 90,
+        room: 2 as const,
+        equipment: "futon" as const,
+        price: 525,
+      };
+
+      const html = generateConfirmationEmail(sampleBooking, true);
+
+      if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+        console.log("SMTP není nakonfigurováno - test e-mail nebyl odeslán.");
+        return res.json({ success: false, mocked: true, message: "SMTP proměnné nejsou nastaveny." });
+      }
+
+      const info = await getMailer().sendMail({
+        from: getFromEmail(),
+        to,
+        subject: "TEST – Potvrzení rezervace | Centrum Unity",
+        html,
+      });
+
+      res.json({ success: true, messageId: info.messageId, to });
+    } catch (error: any) {
+      console.error("Test Email Error:", error.message);
       res.status(400).json({ error: error.message });
     }
   });
@@ -822,34 +867,69 @@ async function startServer() {
     });
   }
 
-  // Start background job to expire unpaid pending bookings after 15 minutes
+  // Start background job to expire unpaid bookings.
+  // Dvě různá okna:
+  //   - Okamžitá online platba (jen createdAt, bez paymentRequestedAt): 15 minut na bráně.
+  //   - E-mailová výzva k platbě (paymentRequestedAt nastaven): 24 hodin, pak storno + e-mail o zrušení.
   setInterval(async () => {
     if (!db) return;
     try {
-      
-      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      const now = Date.now();
+      const fifteenMinutesAgo = new Date(now - 15 * 60 * 1000).toISOString();
+      const twentyFourHoursAgo = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+
       const snapshot = await getDocs(query(collection(db, "bookings"), where("status", "==", "awaiting_payment")));
-        
       if (snapshot.empty) return;
-      
+
       const batch = writeBatch(db);
       let count = 0;
-      
+      const toNotify: any[] = []; // rezervace s výzvou k platbě, u kterých pošleme storno e-mail
+
       snapshot.docs.forEach((doc) => {
         const data = doc.data();
-        if (data.status === 'awaiting_payment' && data.createdAt && data.createdAt < fifteenMinutesAgo) {
+        if (data.status !== 'awaiting_payment') return;
+
+        let expired = false;
+        if (data.paymentRequestedAt) {
+          // E-mailová výzva k platbě → 24h okno
+          expired = data.paymentRequestedAt < twentyFourHoursAgo;
+        } else if (data.createdAt) {
+          // Okamžitý online flow → 15min okno
+          expired = data.createdAt < fifteenMinutesAgo;
+        }
+
+        if (expired) {
           batch.update(doc.ref, {
              status: 'cancelled',
              cancelledAt: new Date().toISOString(),
-             note: (data.note ? data.note + '\n' : '') + 'Automaticky zrušeno - platba vypršela.'
+             note: (data.note ? data.note + '\n' : '') + 'Automaticky zrušeno - platba nebyla uhrazena včas.'
           });
           count++;
+          if (data.paymentRequestedAt && data.clientEmail) {
+             toNotify.push({ id: doc.id, ...data });
+          }
         }
       });
-      
+
       if (count > 0) {
         await batch.commit();
         console.log(`Automatically cancelled ${count} expired pending bookings`);
+
+        // Best-effort: pošleme storno e-maily klientům, kterým vypršela výzva k platbě
+        for (const booking of toNotify) {
+          try {
+            if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+              await getMailer().sendMail({
+                from: getFromEmail(),
+                to: booking.clientEmail,
+                subject: 'Zrušení rezervace - Centrum Unity',
+                html: generateCancellationEmail(booking),
+              });
+            }
+          } catch (mailErr: any) {
+            console.error(`Nepodařilo se odeslat storno e-mail pro rezervaci ${booking.id}:`, mailErr.message);
+          }
+        }
       }
     } catch (e) {
       console.error("Failed to run booking cleanup job:", e);

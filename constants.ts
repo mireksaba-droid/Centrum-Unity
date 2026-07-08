@@ -820,8 +820,6 @@ export const generateMockBookings = (): Booking[] => {
                 id: `seed-${p.id}-${i}`,
                 bookedByUserId: p.id,
                 bookedByName: p.name,
-                practitionerId: p.id, // Populate alias
-                practitionerName: p.name, // Populate alias
                 serviceName: 'Konzultace/Pronájem', // Mock service
                 equipment: Math.random() > 0.5 ? 'table' : 'futon', // Mock equipment
                 date: date.toISOString().split('T')[0],

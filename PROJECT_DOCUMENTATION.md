@@ -1,208 +1,195 @@
 # Dokumentace projektu Centrum Unity
 
+> Aktualizováno tak, aby odpovídalo skutečnému stavu kódu (SMTP e-maily přes webkitty.eu, platební okna 15 min / 24 h, stavy rezervací, GoPay). Sekce označené jako **Známé omezení** popisují rozdíl mezi zamýšleným a aktuálním stavem.
+
 ## 1. Přehled projektu
-**Název:** Centrum Unity (Wellness Marketplace)
-**Popis:** Komplexní platforma pro správu wellness centra, která propojuje klienty s terapeuty, kouči a lektory. Aplikace umožňuje správu rezervací, profilů praktiků a administraci studia.
+**Název:** Centrum Unity (Coworking Space pro wellness)
+**Popis:** Platforma pro správu coworkingového wellness centra. Lektoři (terapeuti, kouči, maséři) si rezervují místnosti, správce (Eva) spravuje kalendář, profily, skupinové události a platby. Součástí jsou online platby přes GoPay a e-mailové notifikace.
 
 ## 2. Technologický Stack
-- **Frontend:** React 19, TypeScript, Vite
-- **Backend:** Express.js (Node.js) integrovaný s Vite (SSR/Middleware mód pro vývoj)
-- **Kompilace (Build):** `esbuild` pro sjednocení backendu do `dist/server.cjs`
-- **State Management:** Zustand (globální store pro uživatele, rezervace a události)
-- **Styling:** Tailwind CSS (včetně vlastních barevných palet `sage` a `stone`)
-- **Routing:** React Router Dom v7
-- **Data & Backend:** 
-  - Firebase (Firestore pro data, Functions pro logiku)
-  - Lokální mock data (pro vývoj/demo režim)
-- **AI & Integrace:**
-  - Google Gemini API (AI Chatbot, `@google/genai` v2.x)
-  - Resend (E-mailové notifikace - simulace browser SDK)
-  - Recharts (Grafy a analytika)
-- **Ikony:** Lucide React
+- **Frontend:** React 19, TypeScript, Vite 6
+- **Backend:** Express 5 (Node.js) integrovaný s Vite (middleware mód pro vývoj), samostatný `server.ts`
+- **Build:** `vite build` pro frontend + `esbuild` pro sbalení serveru do `dist/server.cjs`
+- **State Management:** Zustand (s `persist` do localStorage)
+- **Styling:** Tailwind CSS v4 (palety `sage`, `stone`; pozadí `#f1e9dc`)
+- **Routing:** React Router Dom v7 (Hash router v preview/iframe, Browser router jinak)
+- **Databáze:** Firebase Firestore
+- **Platby:** GoPay REST API (sandbox i produkce)
+- **E-maily:** SMTP přes `nodemailer` (poštovní server na doméně, webkitty.eu)
+- **AI:** Google Gemini (`gemini-1.5-flash`) přes serverový proxy endpoint
+- **Grafy:** Recharts · **Ikony:** Lucide React · **Monitoring:** Sentry (`@sentry/react`)
 
-## 3. Adresářová Struktura
+## 3. Adresářová Struktura (skutečná)
 ```
 /
-├── components/         # Znovupoužitelné UI komponenty
-│   ├── AIChatBot.tsx   # Plovoucí AI asistent
-│   ├── Button.tsx      # Univerzální tlačítko
-│   ├── PractitionerCard.tsx # Karta terapeuta
-│   ├── RescheduleModal.tsx  # Modální okno pro změnu termínu
-│   └── Toast.tsx       # Notifikace
-├── contexts/           # React Context (Global State)
-│   └── ToastContext.tsx # Správa toast zpráv
-├── pages/              # Hlavní stránky aplikace
-│   ├── Login.tsx       # Přihlášení (PIN/Heslo)
-│   ├── StudioSchedule.tsx # Kalendář pro praktiky
-│   ├── AdminDashboard.tsx # Admin panel (přehledy, správa lidí)
-│   └── ... (About, Team, Services - statické stránky)
-├── services/           # Logika pro komunikaci s API
-│   ├── firebase.ts     # Firestore, Auth, Resend wrapper
-│   ├── geminiService.ts # Komunikace s AI modelem
-│   ├── monitoring.ts   # Analytika (Google Analytics wrapper)
-│   └── notifications.ts # Logika posílání notifikací
-├── utils/              # Pomocné funkce
-│   └── scheduler.ts    # Logika pro generování slotů v kalendáři
-├── App.tsx             # Hlavní router a layout
-├── constants.ts        # Konstanty a mock data (PRACTITIONERS)
-└── types.ts            # TypeScript definice (Booking, Practitioner)
+├── components/           # UI komponenty (Button, Footer, PractitionerCard,
+│                         #   RescheduleModal, Toast, MiniCalendar)
+├── contexts/
+│   └── ToastContext.tsx  # Správa toast zpráv
+├── pages/                # Login, StudioSchedule, AdminDashboard,
+│                         #   PractitionerDashboard, PaymentPage, PublicEventPage,
+│                         #   TermsPage, PrivacyPage, About, Team, Services, CalendarView, Dashboard
+├── services/
+│   ├── firebase.ts       # Klientský přístup k Firestore + wrapper na /api/send-email
+│   ├── geminiService.ts  # Volání AI přes /api/ai/chat
+│   ├── monitoring.ts     # Analytika / logování
+│   └── notifications.ts  # Skládání a odesílání notifikací
+├── store/
+│   └── useStore.ts       # Zustand store (uživatel, rezervace, lektoři, události)
+├── utils/
+│   ├── scheduler.ts      # Kolize rezervací, buffery na úklid, výpočet ceny
+│   ├── dateUtils.ts      # Práce s lokálním datem/časem
+│   ├── emailTemplates.ts # HTML šablony e-mailů (potvrzení, výzva, storno)
+│   └── vocative.ts       # Skloňování jmen do 5. pádu (oslovení)
+├── server.ts             # Express backend (API, cron, cleanup job)
+├── server-firebase.ts    # Inicializace Firestore pro server
+├── firestore.rules       # Bezpečnostní pravidla Firestore
+├── constants.ts          # Konstanty a seed data (PRACTITIONERS, ceny, časy)
+├── types.ts              # TypeScript modely (Booking, Practitioner, GroupEvent…)
+└── firebase-applet-config.json  # Konfigurace Firebase projektu
 ```
 
 ## 4. Logická Mapa Aplikace
 
-### A. Tok Autentizace (Auth Flow)
-```mermaid
-graph TD
-    A[Uživatel otevře aplikaci] --> B{Je přihlášen?}
-    B -- NE --> C[Stránka /login]
-    C --> D[Zadání PINu]
-    D --> E{Ověření Role}
-    E -- ADMIN --> F[Přesměrování na /admin]
-    E -- PRACTITIONER --> G[Přesměrování na /schedule]
-    B -- ANO --> H{Role uživatele?}
-    H -- ADMIN --> F
-    H -- PRACTITIONER --> G
-```
+### A. Autentizace
+Uživatel vybere profil a zadá PIN. Po ověření (dnes na klientovi) zavolá `/api/login`, který vydá JWT. Podle role se přesměruje: `ADMIN` → `/admin`, ostatní → `/schedule`.
 
-### B. Tok Rezervace a storna (Booking Flow)
-1. **Výběr:** Praktik vybere volný slot v kalendáři (`StudioSchedule`).
-2. **Formulář:** Vyplní údaje o klientovi a typu služby.
-3. **Uložení:** 
-   - Aktualizace lokálního stavu (`setBookings`).
-   - Odeslání do Firestore (`saveBookingToFirestore`).
-   - Odeslání e-mailu potvrzení (`sendTransactionalEmail`).
-4. **Zobrazení:** Slot se v kalendáři změní na "Obsazeno".
-5. **Zrušení/Přesun:** Změny přes `cancelBooking` a `adminRescheduleBooking` se okamžitě projevují jak v lokálním storu aplikaci, tak zpětným zápisem do Firestore (`updateBookingInFirestore`).
+### B. Rezervace a storno
+1. Lektor/admin vybere volný slot v kalendáři (`StudioSchedule`).
+2. Vyplní údaje (klient, vybavení, doba trvání).
+3. Kontrola kolizí (`utils/scheduler.ts` → `checkBookingCollision`) včetně bufferů na úklid.
+4. Cena se počítá funkcí `calculateRentalPrice` (admin má **0 Kč zdarma**).
+5. Uložení: lokální store + Firestore (`saveBookingToFirestore`, transakce proti dvojité rezervaci).
+6. Platba podle scénáře (viz sekce 6).
+7. Storno/přesun přes `cancelBooking` a `adminRescheduleBooking` (zápis do Firestore).
 
-### C. Tok Skupinové Události (Public Event Flow)
-1. **Vytvoření:** Manažer vytvoří `GroupEvent` pro Velkou místnost s kapacitou a cenou.
-2. **Sdílení:** Vygeneruje se veřejná URL (např. `/event/:eventId/book`).
-3. **Přihlášení:** Klient otevře URL, vidí zbývající kapacitu a vyplní údaje.
-4. **Zápis (Transakce):** Vytvoří se `EventRegistration`. Firestore transakce ověří, že počet existujících registrací nepřekročil kapacitu události.
+### C. Skupinové události (veřejné)
+Admin vytvoří `GroupEvent` pro Velkou místnost s kapacitou a cenou. Vygeneruje se veřejná URL `/event/:eventId`. Klient se registruje; Firestore **transakce** hlídá, že se nepřekročí kapacita.
 
-### D. Administrátorský Tok
-1. **Dashboard:** Zobrazení metrik (Příjmy, Vytíženost) a přehledu rezervací.
-2. **Master Kalendář:** Admin vidí přehledný kalendář se všemi rezervacemi. Na rozdíl od běžných praktiků (kteří u své rezervace vidí obecné "MOJE AKCE"), administrátor vidí konkrétní jména terapeutů, což zajišťuje maximální přehled nad personální organizací.
-3. **Správa Terapeutů:** Přidání/Editace profilů v `AdminDashboard`.
-4. **Správa Rezervací a Událostí:** Admin může přesunout/zrušit 1-on-1 rezervace a spravovat skupinové události (vytváření, úprava, mazání).
-    - **Řešení kolizí (Conflict Resolution):** Pokud se admin pokusí vytvořit skupinovou událost v čase, kdy má lektor již vytvořenou běžnou rezervaci, systém detekuje kolizi a automaticky otevře modální okno pro přesun (Reschedule) lektorovy rezervace. Po úspěšném přesunu může admin dokončit vytvoření události.
+### D. Administrátorský tok
+Dashboard s metrikami (příjmy, vytíženost), master kalendář se jmény lektorů, správa profilů, rezervací a událostí. Při kolizi skupinové události s rezervací lektora se otevře modál pro přesun (Reschedule).
 
-## 5. Klíčové Datové Modely (`types.ts`)
+## 5. Klíčové datové modely (`types.ts`)
 
 ### Role
-- `ADMIN`: Plný přístup, vidí vše.
-- `PRACTITIONER`: Vidí jen kalendář a své rezervace.
-- `CLIENT`: (Zatím nevyužito pro přihlášení, jen jako role v datech). // Prepared for Phase 2 client portal
+`ADMIN` (plný přístup) · `PRACTITIONER` (kalendář a vlastní rezervace) · `CLIENT` (připraveno pro Fázi 2, zatím nevyužito k přihlášení).
 
-### Booking (Rezervace)
-- `id`: Unikátní identifikátor.
-- `room`: 1 (Malá) nebo 2 (Velká).
-- `status`: 'confirmed' | 'cancelled'.
-- `paymentStatus`: 'paid' | 'unpaid' | 'invoice_pending'.
-- `paymentId`: ID platby v platební bráně (GoPay) pro párování a refundace.
-- `clientEmail` / `clientPhone`: Kontaktní údaje pro hosty a jednorázové klienty.
-- `bookedByUserId`: ID terapeuta, který rezervaci vytvořil.
+### Booking (Rezervace) — skutečná pole
+- `id` — deterministické `"{room}_{date}_{time}"`.
+- `bookedByUserId`, `bookedByName` — kdo si místnost pronajal.
+- `room`: `1` (Malá) | `2` (Velká).
+- `date` (`YYYY-MM-DD`), `time` (`HH:MM`), `durationMinutes`.
+- `status`: `created` | `awaiting_payment` | `deferred_payment` | `paid` | `cancelled` | `completed` | `refunded`.
+- `paymentMethod`: `invoice` | `qr` | `online`.
+- `price` — cena pronájmu v Kč.
+- `equipment`: `table` (Lehátko) | `futon` — volitelné vybavení místnosti.
+- `clientName` / `clientEmail` / `clientPhone` — kontakt na klienta (CRM).
+- `paymentId` — ID platby v GoPay (párování, refundace).
+- `createdAt` — čas vytvoření.
+- `paymentRequestedAt` — čas odeslání výzvy k platbě (od něj běží 24h okno).
+- `note`, `cancelledAt`, `recurringGroupId` — volitelné.
 
-### Practitioner (Praktik)
-- `id`, `name`, `title`, `role`, `pin`
-- `specialization`, `bio`, `imageUrl`
-- `services`: Seznam nabízených služeb.
-- `colorCode`: Unikátní Tailwind CSS třída pro barevné odlišení v kalendáři.
-- **Řazení lektorů v UI:** Lektori jsou v aplikaci (i v administrátorském výběru) vždy seřazeni podle následujícího pravidla:
-  1. Eva (Admin)
-  2. Host / Externista
-  3. Filip
-  4. Ostatní lektoři s profilovou fotografií (abecedně)
-  5. Ostatní lektoři bez fotografie (Placeholder obrázek, abecedně)
+### Practitioner (Lektor)
+`id`, `name`, `title`, `category`, `role`, `pin`, `imageUrl`, `services`, `colorCode`, `isActive`.
+Řazení v UI viz `AGENTS.md` / `sortPractitioners`.
 
-## 6. Externí Služby a Integrace
+## 6. E-maily a platební logika
 
-### Firebase (Režim Demo vs. Prod)
-Soubor `services/firebase.ts` obsahuje logiku, která detekuje, zda je k dispozici API klíč.
-- **Prod:** Používá `firebase/firestore` a `firebase/functions`.
-- **Demo:** Pokud klíč chybí, vypisuje operace do konzole a vrací mock data (`isFirebaseReady = false`).
+### Odesílání e-mailů (SMTP)
+E-maily posílá backend přes `nodemailer` (`getMailer()` v `server.ts`). Endpoint `/api/send-email` (chráněný JWT) a interní volání v cronu/cleanupu. Když SMTP proměnné chybí, odeslání se jen zaloguje (mock). Šablony jsou v `utils/emailTemplates.ts`:
+- `generateConfirmationEmail(booking, isPaid)` — potvrzení rezervace (řádek s vybavením, stav Zaplaceno/Faktura, oslovení ve 5. pádu).
+- `generatePaymentRequestEmail(booking, baseUrl)` — výzva k platbě s odkazem na `/#/pay/:id`.
+- `generateCancellationEmail(booking, reason)` — storno rezervace.
 
-### Stripe (Platby a Storna) -> GoPay
-Systém poskytuje integrovanou platební bránu (Express/Node.js přes /api/... endpointy):
-- **GoPay Integrace:** Vytváření plateb (`/api/create-payment` a `/api/public-payment`) komunikuje s GoPay REST API.
-- **Webhooky:** Endpoint `/api/gopay/notify` slouží k asynchronnímu potvrzení zaplacení přímo ze strany platební brány.
-- **Refundace:** Zrušení rezervace do **24 hodin před začátkem** zavolá endpoint `/api/refund`, který provede storno částky v haléřích zpět klientovi.
-- **Bezpečnost endpointů:** Platební API a další citlivé operace implementují základní ochranu jako Rate Limiting (pro zamezení spamu) a striktní ověřování `bookingId`.
-- **Zpracování neznámých API cest:** Express server obsahuje 404 catch-all guard před fallbackem na React SPA (HTML), což brání vracení HTML kódu (Unexpected token < in JSON) při chybách na backendu.
+Všechny mají značkovou hlavičku s logem (`LOGO_URL = https://rezervace.centrumunity.cz/logo.png`) a patičku s popisem centra.
 
-### Resend a Twilio (Komunikace)
-- **E-maily (Resend):** Implementována vlastní třída `ResendBrowserClient`, která umožňuje posílat e-maily přímo z prohlížeče (pro demo účely) voláním REST API Resend.
-- **SMS (Twilio):** Připraveno pro Fázi 1.5. Bude využito pro SMS notifikace klientům a terapeutům.
+### Testovací endpoint
+`POST /api/test-email` (jen admin) odešle ukázkový potvrzovací e-mail pro ověření SMTP. Tělo: `{ "to": "adresa" }` (nepovinné, jinak na `FROM_EMAIL`).
+
+### Platební scénáře
+- **Cena 0 (admin, faktura zdarma):** rezervace rovnou `paid`, potvrzení hned.
+- **Online platba, termín ≤ 120 dní:** rezervace `awaiting_payment` + přesměrování na GoPay. Po zaplacení (webhook `PAID`) → `paid` + potvrzení.
+- **Online platba, termín > 120 dní:** rezervace `deferred_payment` (brána se nespouští). Výzva k platbě se pošle, až je termín ≤ 120 dní (cron nebo admin) → `awaiting_payment` + `paymentRequestedAt`.
+
+### Automatické storno (dvě okna)
+Úloha v `server.ts` běží každou minutu a ruší `awaiting_payment`:
+- **15 minut** pro okamžitou online platbu (jen `createdAt`).
+- **24 hodin** pro e-mailovou výzvu (`paymentRequestedAt`). Po vypršení → `cancelled` + storno e-mail klientovi.
+
+## 7. Externí služby a integrace
+
+### Firebase / Firestore
+Konfigurace je v `firebase-applet-config.json`. Klient i server používají webové Firebase SDK (`firebase/firestore`).
+**Známé omezení:** server nepoužívá `firebase-admin` (byť je v závislostech) a přistupuje k DB jako klient — proto jsou dnes Firestore pravidla otevřená. Viz sekce 9.
+
+### GoPay (platby)
+- Vytváření plateb: `/api/create-payment` (auth) a `/api/public-payment` (veřejné, rate-limit).
+- Webhook: `/api/gopay/notify` asynchronně aktualizuje stav rezervace (`PAID` → `paid`, `CANCELED`/`TIMEOUTED` → `cancelled`, `REFUNDED` → `refunded`), idempotentně.
+- Ověření stavu po návratu: `/api/gopay/status`.
+- Refundace: `/api/refund` — jen vlastník nebo admin, a jen je-li do termínu **≥ 24 h**. Částky v haléřích.
+
+### SMTP (webkitty.eu)
+Viz sekce 6. Doporučeno založit samostatnou schránku pro odesílání; `FROM_EMAIL` musí být na vlastní doméně.
 
 ### Gemini AI
-Chatbot (`AIChatBot.tsx`) využívá model `gemini-2.5-flash-lite` pro odpovídání na dotazy ohledně služeb centra a pomáhá s navigací.
+`/api/ai/chat` proxuje požadavky na Gemini (`gemini-1.5-flash`). Frontend volá přes `services/geminiService.ts`.
+**Známé omezení:** endpoint nemá auth ani rate-limit.
 
-## 7. Konfigurace a Nasazení (Deployment)
+## 8. Konfigurace a nasazení
 
-### Environment Variables (.env)
-Pro běh aplikace v produkčním režimu jsou vyžadovány následující proměnné prostředí:
-- `VITE_FIREBASE_API_KEY`
-- `VITE_FIREBASE_AUTH_DOMAIN`
-- `VITE_FIREBASE_PROJECT_ID`
-- `VITE_FIREBASE_STORAGE_BUCKET`
-- `VITE_FIREBASE_MESSAGING_SENDER_ID`
-- `VITE_FIREBASE_APP_ID`
-- `VITE_GEMINI_API_KEY` (Pro AI Chatbota)
-- `VITE_RESEND_API_KEY` (Pro e-mailové notifikace)
-- `VITE_STRIPE_PUBLISHABLE_KEY` (Klíč pro frontend - Stripe Elements)
-- `STRIPE_SECRET_KEY` (Tajný klíč pro backend server)
-- `STRIPE_WEBHOOK_SECRET` (Tajný klíč pro ověření podpisů Stripe webhooků)
+### Environment Variables (`.env`)
+```
+# GoPay
+GOPAY_GOID=
+GOPAY_CLIENT_ID=
+GOPAY_CLIENT_SECRET=
 
-### Deployment Postup
-Aplikace je nasazována primárně do kontejnerového prostředí jako Google Cloud Run:
-1. Build aplikace probíhá příkazem `npm run build` (nejprve React/Vite přes `vite build`, a následně Node.js server přes `esbuild` do `dist/server.cjs`).
-2. Server využívá dynamické mapování portu načtením `process.env.PORT` a striktně naslouchá na hostiteli `0.0.0.0`, aby byl dostupný zvnějšku.
-3. Klientské assets jsou servírovány jako statické soubory Express backendem.
-4. Je nutné nastavit environment proměnné v administraci hostingu (Cloud Run environment variables).
+# SMTP e-maily (webkitty.eu / centrumunity.cz)
+SMTP_HOST=smtp.centrumunity.cz
+SMTP_PORT=465                    # 465 = SSL, nebo 587 = STARTTLS
+SMTP_USER=info@centrumunity.cz
+SMTP_PASS=
+FROM_EMAIL=info@centrumunity.cz
 
-## 8. Error Handling a Testování
+# Tajné klíče
+JWT_SECRET=                      # podpis přihlašovacích tokenů
+CRON_SECRET=                     # ochrana cron endpointu výzev k platbě
+GEMINI_API_KEY=                  # AI chat
+```
+Firebase konfigurace je v `firebase-applet-config.json`, ne v env proměnných.
 
-### Strategie pro Error Handling
-- **Sentry (Produkce):** Pro aktivní monitoring chyb v produkci bude nasazeno Sentry. Umožní to okamžitou detekci pádů aplikace na straně klienta, zachycení chyb s přesným stack tracem (díky source maps) a sledování kontextu uživatele. Je to mnohem efektivnější než prohledávání logů ve Firebase konzoli.
-- **Výpadek Firebase (Prod režim):** Pokud Firebase není dostupný nebo selže inicializace, aplikace by měla zachytit chybu na úrovni služeb (`services/firebase.ts`) a zobrazit uživateli přátelskou chybovou hlášku (např. přes `ToastContext`), případně nabídnout fallback do read-only režimu nebo lokálního dema, pokud je to žádoucí.
-- **API Limity:** Ošetření chyb při překročení limitů Gemini API nebo Resend API s informativní hláškou pro uživatele.
-
-### Testovací Strategie (QA)
-- **Unit testy (Vitest + React Testing Library):** Kritická business logika, zejména `utils/scheduler.ts` (výpočet volných slotů, překryvy rezervací, časová pásma), musí být pokryta unit testy. Zabrání to regresím při úpravách kalendáře.
-- **E2E testy (Playwright):** Automatizovaný test kritické cesty (tzv. "happy path" pro booking flow). Skript projde výběr slotu, vyplnění formuláře a potvrzení rezervace. Zaručuje, že hlavní byznys funkce aplikace vždy funguje.
-- **Smoke testy:** Po každém nasazení se provádí základní průchod aplikací.
-- **Manuální checklist:**
-  1. Přihlášení s platným/neplatným PINem.
-  2. Vytvoření rezervace (ověření, že se slot zablokuje).
-  3. Zrušení rezervace.
-  4. Otevření AI chatu a odeslání testovacího dotazu.
-  5. Kontrola zobrazení dat v Admin Dashboardu.
+### Deployment
+Cílem je kontejnerové prostředí (např. Google Cloud Run):
+1. `npm run build` (Vite frontend → `dist/`, poté `esbuild` server → `dist/server.cjs`).
+2. Server čte `process.env.PORT` a naslouchá na `0.0.0.0`.
+3. Statické assety servíruje Express.
+4. Env proměnné se nastaví v administraci hostingu.
+5. Cron endpoint `/api/cron/check-future-payments` volat pravidelně (např. Cloud Scheduler denně) s hlavičkou `Authorization: Bearer <CRON_SECRET>`.
 
 ## 9. Bezpečnost (Security)
 
+> Tato sekce popisuje **aktuální stav**. Body označené jako **Známé omezení** je nutné vyřešit před ostrým provozem — detailně v code review.
+
 ### Firestore Security Rules
-Kritickou vrstvou ochrany dat jsou Firestore Security Rules (`firestore.rules`). Zajišťují, že klientská aplikace přistupuje k databázi bezpečně na základě rolí (RBAC):
-- **Admin:** Má oprávnění ke čtení i zápisu všech dokumentů.
-- **Practitioner:** Může číst a zapisovat pouze své vlastní rezervace a upravovat svůj profil.
-- **Veřejnost (Nepřihlášený uživatel):** Má přístup pouze ke čtení veřejných dat (např. seznam praktiků a dostupných služeb).
-Bez těchto pravidel by kdokoli s konfigurací Firebase mohl číst nebo měnit data v databázi.
+**Známé omezení:** aktuální `firestore.rules` mají u kolekcí `practitioners`, `bookings`, `groupEvents`, `eventRegistrations` `allow read, write: if true` (dokořán). Zamýšlený stav je RBAC (admin plný přístup, lektor jen své rezervace, veřejnost pouze čtení veřejných dat). Souvisí s tím, že server běží na klientském SDK — cílem je přejít na `firebase-admin` a pravidla zamknout.
+
+### Autentizace a autorizace
+- Přihlášení: PIN + JWT (`/api/login`). **Známé omezení:** server PIN neověřuje, ověření je pouze na klientovi; PINy jsou v `constants.ts`. Doporučeno ověřovat PIN na serveru proti hashi.
+- Serverové role: většina admin endpointů kontroluje `req.user?.role === "ADMIN"`. **Známé omezení:** u `/api/admin/reset-data` a `/api/refund` je porovnání proti `'admin'` (malými) nekonzistentní.
+- `JWT_SECRET` má fallback `default_dev_secret_key` — v produkci nastavit vlastní.
 
 ### Bezpečnost na úrovni Store (Zustand)
-Systém aktivně chrání integritu dat přímo ve state managementu:
-- **Zabezpečení storna (`cancelBooking`):** Lze zrušit pouze rezervaci, která buď patří aktuálně přihlášenému uživateli (`currentUser.id === bookedByUserId`), nebo pokud má uživatel administrátorská práva (`Role.ADMIN`). Pokus o neoprávněné zrušení selže a vypíše varování.
-- **Hard reset dat (`/api/admin/reset-data`):** Smazání celé databáze (všechny rezervace, události) bylo přesunuto ze strany klienta výhradně na chráněný serverový endpoint. Volání vyžaduje autorizaci (JWT token) a roli administrátora, čímž se efektivně zamezuje neúmyslnému smazání produkční databáze nepovolanou osobou.
-- **Synchronizace s databází:** Akce měnící firemní data (jako storno nebo přesun – `adminRescheduleBooking`) okamžitě synchronizují úpravy s Firestore (`updateBookingInFirestore`), což eliminuje bezpečnostní a logické chyby po reloadu stránky.
+- `cancelBooking`: zrušit lze jen vlastní rezervaci nebo jako admin.
+- `resetData` → `/api/admin/reset-data`: hard reset dat jen pro admina přes chráněný endpoint.
+- Akce měnící data (storno, přesun) se okamžitě synchronizují do Firestore.
 
-## 10. Architektura a Výkon (Optimalizace)
+## 10. Architektura a výkon
+- **UUID:** registrace používají `crypto.randomUUID()`; rezervace mají deterministické `id` (slot), což slouží i jako ochrana proti dvojité rezervaci v transakci.
+- **Zustand:** centralizovaný stav, žádný prop-drilling; `persist` do localStorage s migracemi.
+- **Error Boundary:** `index.tsx` zachytává pády React stromu (v produkci skrýt stack trace).
+- **404 guard:** Express má catch-all `/api` 404 před SPA fallbackem, aby se nevracelo HTML místo JSON.
 
-### Generování Identifikátorů (UUID)
-S cílem zamezit kolizím při rychlém nebo souběžném vytváření položek (rezervace, služby, zprávy) využívá aplikace nativní funkci prohlížeče `crypto.randomUUID()`. Předešlo se tak problémům pramenícím z méně spolehlivého timestampování (`Date.now()`).
-
-### Globální State Management (Zustand)
-Aplikace využívá **Zustand** pro správu globálního stavu (`src/store/useStore.ts`). Veškerý stav (aktuální uživatel, rezervace, seznam lektorů, skupinové události) a s ním spojená business logika (vytváření, mazání, updaty) je centralizována do tohoto storu. Tím se zamezilo zbytečnému předávání props (prop-drilling) a komponenty (jako `App.tsx`) zůstávají čisté a soustředí se pouze na UI a routing.
-
-### Inicializace dat a re-rendery
-Díky přesunu stavu do Zustand storu se inicializační funkce jako `generateMockBookings()` volají pouze jednou při vytvoření storu, nikoliv při každém re-renderu React komponent. To výrazně šetří výkon a zabraňuje nechtěným vedlejším efektům (např. generování nových náhodných ID při každém překreslení).
-
-### Optimalizace načítání (React Root)
-Vstupní bod aplikace (`index.tsx`) obsahuje logiku pro bezpečné načtení React stromu s fallback timeoutem. Timeout je nyní správně vyčištěn (`clearTimeout`) ihned po úspěšném zavolání `root.render()`, což zabraňuje zbytečnému běhu asynchronních operací na pozadí poté, co React již převzal kontrolu nad DOMem.
+## 11. Testování (QA)
+- **Unit (doporučeno):** `utils/scheduler.ts` (kolize, buffery, ceny) a `utils/vocative.ts` (skloňování).
+- **E2E (doporučeno):** happy-path booking flow.
+- **Manuální checklist:** přihlášení (platný/neplatný PIN), vytvoření rezervace (blokace slotu), skloňované oslovení v potvrzení, vybavení v e-mailu, test SMTP přes `/api/test-email`, storno po vypršení 24 h, admin rezervace zdarma, reset dat.

@@ -64,8 +64,9 @@ Aplikace definuje následující role s odlišnými oprávněními:
   - Editace stávajících údajů (změna PINu, specializace).
 
 ### 3.5. Notifikace a Komunikace
-- **E-mailové potvrzení:** Automatické odeslání e-mailu praktikovi (a volitelně klientovi) po vytvoření rezervace.
-- **Systém:** Integrace se službou Resend pro transakční e-maily.
+- **E-mailové potvrzení:** Automatické odeslání e-mailu klientovi/praktikovi po potvrzení rezervace (u online plateb až po zaplacení).
+- **Výzva k platbě a storno:** U odložených plateb (termín > 120 dní) se posílá výzva k platbě; při neuhrazení do 24 h automatické storno + e-mail o zrušení.
+- **Systém:** Odesílání přes SMTP (`nodemailer`) z vlastního poštovního serveru (webkitty.eu). Šablony v `utils/emailTemplates.ts`, oslovení skloňované do 5. pádu.
 
 ### 3.6. AI Asistent (Chatbot)
 - **Funkce:** Plovoucí chatovací okno dostupné na všech stránkách.
@@ -81,9 +82,9 @@ Aplikace definuje následující role s odlišnými oprávněními:
 - ID, Datum, Čas, Délka trvání
 - ID Místnosti (Room)
 - ID Praktika (Kdo rezervoval)
-- Údaje o klientovi (Jméno, Email)
-- Stav (Potvrzeno, Zrušeno)
-- Cena a Stav platby // Reserved for future Stripe integration
+- Údaje o klientovi (Jméno, Email), Vybavení (lehátko/futon)
+- Stav: `created`, `awaiting_payment`, `deferred_payment`, `paid`, `cancelled`, `completed`, `refunded`
+- Cena, způsob platby (`invoice`/`qr`/`online`), `paymentId`, `paymentRequestedAt`
 
 ### Praktik (Practitioner)
 - ID, Jméno, Role
@@ -104,7 +105,7 @@ Aplikace definuje následující role s odlišnými oprávněními:
 ## 5. Nefunkční Požadavky
 - **Technologie:** React (Frontend), Firebase (Backend služby/Databáze) a Express.js s esbuild bundlem nasazovaný na Google Cloud Run.
 - **Infrastruktura & Sítě:** Aplikace poslouchá na dynamickém portu (`process.env.PORT`) a binduje na hostitele `0.0.0.0`, aby byl povolen síťový provoz z kontejnerizační platformy Cloud Run.
-- **Bezpečnost:** Striktní ochrana dat pomocí Firestore Security Rules (RBAC - Role-Based Access Control). Zamezení neoprávněného čtení/zápisu.
+- **Bezpečnost (cíl):** Striktní ochrana dat pomocí Firestore Security Rules (RBAC). **Aktuální stav:** pravidla jsou zatím otevřená a PIN se ověřuje na klientovi — nutno vyřešit před ostrým provozem (viz sekce 9 v `PROJECT_DOCUMENTATION.md`).
 - **Kvalita kódu a QA:** Pokrytí kritické logiky (generování slotů) unit testy (Vitest), hlavní rezervační cesty E2E testy (Playwright) a statická analýza ESLint (včetně TypeScript typování).
 - **Monitoring:** Nasazení Sentry pro proaktivní sledování chyb v produkci (HOTOVO).
 - **Design:** Responsivní design (Mobile-first přístup) využívající Tailwind CSS.
@@ -113,9 +114,10 @@ Aplikace definuje následující role s odlišnými oprávněními:
 
 ## 6. Krátkodobá rozšíření (Phase 1.5 / MVP+)
 Tyto funkce představují rychlá vylepšení s vysokou přidanou hodnotou:
-- **Platby kartou a Online Rezervace (HOTOVO):** Hosté (Nepřihlášení uživatelé) mohou vytvářet jednorázové rezervace pomocí integrace platební brány Stripe.
-  - Peníze jsou při rezervaci blokovány a plně strhnuty až těsně před službou (tzv. Capture).
-  - Přísná business logika (Frontend i Backend) pro zrušení rezervace do 24 hodin s automatickou refundací zrušené platby.
+- **Platby kartou a Online Rezervace (HOTOVO):** Online platby přes bránu **GoPay** (`/api/create-payment`, veřejné `/api/public-payment`, webhook `/api/gopay/notify`).
+  - Rezervace > 120 dní: platba se odloží (`deferred_payment`) a výzva k platbě přijde e-mailem, až se termín přiblíží.
+  - Nezaplacené rezervace se automaticky ruší (15 min na bráně / 24 h u e-mailové výzvy).
+  - Business logika (frontend i backend) pro refundaci při zrušení ≥ 24 h před termínem.
 - **Barevné kódování praktiků (HOTOVO):** Každý terapeut má přiřazenou barvu pro rychlou vizuální orientaci v kalendáři.
 - **Víkendové rezervace (HOTOVO):** Kalendář umožňuje rezervace i o víkendech.
 - **Export do osobního kalendáře (iCal/ICS):** Generování unikátní URL adresy s bezpečnostním tokenem pro každého praktika. Lektor si ji přidá do telefonu (Apple, Google Calendar) a vidí svůj rozvrh automaticky synchronizovaný.

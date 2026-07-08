@@ -42,8 +42,6 @@ export interface Booking {
   bookedByName: string;   // Jméno lektora
   
   // Expanded fields for dashboard compatibility and CRM
-  practitionerId?: string; // Alias for bookedByUserId or specific practitioner
-  practitionerName?: string; // Alias for bookedByName
   serviceName?: string;
   equipment?: 'table' | 'futon';
   
@@ -66,8 +64,9 @@ export interface Booking {
   cancelledAt?: string; // ISO date string
   
   paymentId?: string; // Pro refundace testovacích nebo skutečných plateb před uplynutím termínu
-  
+
   createdAt: string;
+  paymentRequestedAt?: string; // Kdy byla odeslána výzva k platbě (od tohoto času se počítá 15min okno)
   recurringGroupId?: string; // Phase 1.5: ID pro spojení opakujících se rezervací
 }
 

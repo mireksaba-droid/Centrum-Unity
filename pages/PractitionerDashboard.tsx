@@ -82,7 +82,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
   // --- ANALYTICS CALCULATION ---
   const stats = useMemo(() => {
     if (!currentUser) return null;
-    const myBookings = allBookings.filter(b => b.practitionerId === currentUser.id && ['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status));
+    const myBookings = allBookings.filter(b => b.bookedByUserId === currentUser.id && ['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status));
     
     // 1. Revenue
     const totalRevenue = myBookings.reduce((sum, b) => sum + b.price, 0);
@@ -162,7 +162,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
       );
   }
 
-  const myBookings = allBookings.filter(b => b.practitionerId === currentUser.id);
+  const myBookings = allBookings.filter(b => b.bookedByUserId === currentUser.id);
 
   // --- CALENDAR HELPERS ---
   const changeWeek = (offset: number) => {
@@ -231,7 +231,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
           r2: getStatusForRoom(2),
           // Helper to see if *I* am booked anywhere at this time (regardless of room)
           myBooking: allBookings.find(b => {
-              if (b.date !== dateStr || !['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status) || b.practitionerId !== currentUser.id) return false;
+              if (b.date !== dateStr || !['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status) || b.bookedByUserId !== currentUser.id) return false;
                const bStart = timeToMinutes(b.time);
                const bEnd = bStart + b.durationMinutes;
                return (bStart < slotEnd && bEnd > slotStart);
