@@ -1,3 +1,4 @@
+import "dotenv/config"; // Načte proměnné z .env do process.env (musí být úplně první)
 import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import nodemailer from "nodemailer";
