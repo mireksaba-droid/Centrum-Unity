@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Booking, Practitioner, GroupEvent, Role } from '../types';
+import { Booking, BookingStatus, Practitioner, GroupEvent, Role } from '../types';
 import { GENERATED_TIMES, BUFFER_SAME_USER, BUFFER_DIFF_USER, RENTAL_PRICING } from '../constants';
 import Button from '../components/Button';
 import { MiniCalendar } from '../components/MiniCalendar';
@@ -37,7 +37,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
     onLogout
 }) => {
     // Hooks
-    const { token, practitionersList, updateBookingPaymentStatus } = useStore();
+    const { token, practitionersList, updateBookingStatus } = useStore();
     const { addToast } = useToast();
 
     const sendConfirmationEmail = async (booking: Booking, isPaid: boolean = false) => {
@@ -98,13 +98,13 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
         if (paymentId) {
             // Find booking with this paymentId
             const booking = allBookings.find(b => b.paymentId === String(paymentId));
-            if (booking && booking.paymentStatus !== 'paid') {
+            if (booking && booking.status !== 'paid') {
                 // Verify with backend
                 fetch(`/api/gopay/status?id=${paymentId}`)
                     .then(res => res.json())
                     .then(data => {
                         if (data.state === 'PAID') {
-                            updateBookingPaymentStatus(booking.id, 'paid');
+                            updateBookingStatus(booking.id, 'paid');
                             addToast('success', 'Platba úspěšná', 'Vaše rezervace byla zaplacena.');
                             sendConfirmationEmail(booking, true);
                         } else if (data.state === 'CANCELED' || data.state === 'TIMEOUTED') {
@@ -121,7 +121,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
             const newUrl = window.location.pathname;
             window.history.replaceState({}, document.title, newUrl);
         }
-    }, [allBookings, updateBookingPaymentStatus, addToast]);
+    }, [allBookings, updateBookingStatus, addToast]);
 
     // View State
     const [viewMode, setViewMode] = useState<'day' | 'week'>('week');
@@ -218,8 +218,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                 durationMinutes: duration > 0 ? duration : 60,
                 room: 2, // Group events are in room 2
                 price: 0,
-                status: 'confirmed',
-                paymentStatus: 'paid',
+                status: 'paid',
                 paymentMethod: 'invoice',
                 createdAt: event.createdAt || new Date().toISOString(),
                 note: `Skupinová událost: ${event.title}`
@@ -240,7 +239,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
         // Past check logic...
 
         const overlap = combinedBookings.find(b => {
-            if (b.date !== dateStr || b.status !== 'confirmed' || b.room !== room) return false;
+            if (b.date !== dateStr || !['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status) || b.room !== room) return false;
             
             const bStart = timeToMinutes(b.time);
             const bEnd = bStart + b.durationMinutes;
@@ -375,16 +374,21 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
         }
 
         setIsProcessing(true);
-        const finalPrice = calculateRentalPrice(duration, selectedSlot.room);
+        const finalPrice = calculateRentalPrice(currentUser.id, duration, selectedSlot.room);
 
         // Zjištění zda je rezervace za více než 120 dní
         const selectedDateObj = parseLocalDate(selectedSlot.date, selectedSlot.time);
         const daysToReservation = (selectedDateObj.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24);
 
+        if (finalPrice === 0) {
+            await finalizeBooking('paid');
+            return;
+        }
+
         if (paymentMethod === 'online') {
             if (daysToReservation > 120) {
                addToast('info', 'Platba bude vyžadována později', 'Vaše rezervace je dále než 120 dní. Výzva k platbě vám přijde e-mailem, až se termín přiblíží.');
-               await finalizeBooking('pending_future'); 
+               await finalizeBooking('deferred_payment'); 
                return;
             }
 
@@ -416,7 +420,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                 
                 // Uložíme rezervaci s nezaplaceným statusem a paymentId
                 setPaymentIntentIdState(data.paymentId);
-                await finalizeBooking('pending', data.paymentId, false); // neuzavřít okno ještě
+                await finalizeBooking('awaiting_payment', data.paymentId, false); // neuzavřít okno ještě
                 
                 if (data.gwUrl) {
                     setPaymentUrl(data.gwUrl);
@@ -443,14 +447,14 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
         }
 
         // For invoice payments, book immediately
-        await finalizeBooking('unpaid');
+        await finalizeBooking('deferred_payment');
     };
 
-    const finalizeBooking = async (paymentStatus: 'paid' | 'unpaid' | 'pending' | 'pending_future' = 'unpaid', paymentId?: string, closeModal: boolean = true) => {
+    const finalizeBooking = async (status: BookingStatus = 'awaiting_payment', paymentId?: string, closeModal: boolean = true) => {
         if (!selectedSlot) return;
         setIsProcessing(true);
         
-        const finalPrice = calculateRentalPrice(duration, selectedSlot.room);
+        const finalPrice = calculateRentalPrice(currentUser.id, duration, selectedSlot.room);
 
         try {
             await onBook({
@@ -461,17 +465,17 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                 durationMinutes: duration,
                 room: selectedSlot.room,
                 price: finalPrice,
-                paymentStatus: paymentStatus,
+                status: status,
                 paymentMethod: paymentMethod,
                 clientName: clientName,
                 clientEmail: isGuest ? guestEmail : undefined,
                 clientPhone: isGuest ? guestPhone : undefined,
                 equipment: equipment,
-                paymentId: paymentId || (paymentStatus === 'paid' ? paymentIntentIdState || undefined : undefined)
+                paymentId: paymentId || (status === 'paid' ? paymentIntentIdState || undefined : undefined)
             });
 
             // --- Send Confirmation Email ---
-            if (paymentStatus !== 'pending') {
+            if (status !== 'awaiting_payment') {
                 sendConfirmationEmail({
                     id: 'temp', // Not strictly needed for email
                     bookedByUserId: currentUser.id,
@@ -481,18 +485,18 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                     durationMinutes: duration,
                     room: selectedSlot.room,
                     price: finalPrice,
-                    paymentStatus: paymentStatus,
+                    status: status,
                     paymentMethod: paymentMethod,
                     clientName: clientName,
                     clientEmail: isGuest ? guestEmail : undefined,
                     clientPhone: isGuest ? guestPhone : undefined,
                     equipment: equipment,
                     paymentId: paymentId || undefined
-                } as Booking, paymentStatus === 'paid');
+                } as Booking, status === 'paid');
             }
             // -------------------------------
 
-            addToast('success', 'Rezervace potvrzena', paymentStatus === 'paid' ? 'Platba byla úspěšná.' : `Částka k úhradě: ${finalPrice.toFixed(0)} Kč`);
+            addToast('success', 'Rezervace potvrzena', status === 'paid' ? 'Platba byla úspěšná.' : `Částka k úhradě: ${finalPrice.toFixed(0)} Kč`);
             if (closeModal) {
                 setSelectedSlot(null);
             }
@@ -898,7 +902,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                 <div>
                                     <div className="text-xs font-bold text-stone-500 uppercase">Cena celkem</div>
                                     <div className="text-xl font-bold text-stone-900">
-                                        {calculateRentalPrice(duration, selectedSlot.room)} Kč
+                                        {calculateRentalPrice(currentUser.id, duration, selectedSlot.room)} Kč
                                     </div>
                                 </div>
                                 {paymentUrl ? (

@@ -43,7 +43,7 @@ export const checkBookingCollision = ({
         const doubleBooking = allBookings.find(b => {
             if (b.id === excludeBookingId) return false;
             if (b.bookedByUserId !== userId) return false;
-            if (b.date !== newDate || b.status !== 'confirmed') return false;
+            if (b.date !== newDate || !['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status)) return false;
 
             const bStart = timeToMinutes(b.time);
             const bEnd = bStart + b.durationMinutes;
@@ -59,7 +59,7 @@ export const checkBookingCollision = ({
     // 2. Check ROOM collision (including Buffers)
     const roomCollision = allBookings.find(b => {
         if (b.id === excludeBookingId) return false;
-        if (b.date !== newDate || b.status !== 'confirmed' || b.room !== room) return false;
+        if (b.date !== newDate || !['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status) || b.room !== room) return false;
 
         const bStart = timeToMinutes(b.time);
         const bEnd = bStart + b.durationMinutes;
@@ -87,7 +87,8 @@ export const checkBookingCollision = ({
     return { hasCollision: false };
 };
 
-export const calculateRentalPrice = (minutes: number, room: 1 | 2): number => {
+export const calculateRentalPrice = (userId: string, minutes: number, room: 1 | 2): number => {
+    if (userId === 'admin') return 0;
     if (minutes >= 720) return 1700;
     const rate = room === 1 ? RENTAL_PRICING.room1 : RENTAL_PRICING.room2;
     return (minutes / 60) * rate;

@@ -34,6 +34,8 @@ export interface Practitioner {
   calendarSyncToken?: string; // Phase 1.5: Bezpečnostní token pro iCal/ICS feed (export do telefonu)
 }
 
+export type BookingStatus = 'created' | 'awaiting_payment' | 'deferred_payment' | 'paid' | 'cancelled' | 'completed' | 'refunded';
+
 export interface Booking {
   id: string;
   bookedByUserId: string; // ID lektora, který si místnost pronajal
@@ -49,9 +51,8 @@ export interface Booking {
   time: string; // "HH:MM"
   durationMinutes: number;
   
-  status: 'confirmed' | 'cancelled';
+  status: BookingStatus;
   price: number; // Cena pronájmu, kterou lektor dluží studiu
-  paymentStatus: 'paid' | 'unpaid' | 'invoice_pending' | 'pending' | 'pending_future';
   paymentMethod: 'invoice' | 'qr' | 'online';
   
   room: 1 | 2; // 1 = Malá, 2 = Velká

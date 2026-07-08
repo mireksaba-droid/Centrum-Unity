@@ -67,7 +67,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ practitioners, bookings, on
 
       // 2. Personal Booking (If practitioner is already booked somewhere else at this time)
       const isPersonallyBooked = bookings.some(b => {
-          if (b.date !== dateStr || b.status !== 'confirmed' || b.practitionerId !== p.id) return false;
+          if (b.date !== dateStr || !['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status) || b.practitionerId !== p.id) return false;
           const bStart = timeToMinutes(b.time);
           const bEnd = bStart + b.durationMinutes;
           // Check overlap with slot start
@@ -82,7 +82,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ practitioners, bookings, on
       const isRoomAvailableForP = (roomNum: 1 | 2) => {
           // Check if any booking in this room blocks P
           return !bookings.some(b => {
-                if (b.date !== dateStr || b.status !== 'confirmed' || b.room !== roomNum) return false;
+                if (b.date !== dateStr || !['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status) || b.room !== roomNum) return false;
                 
                 const bStart = timeToMinutes(b.time);
                 const bEnd = bStart + b.durationMinutes;

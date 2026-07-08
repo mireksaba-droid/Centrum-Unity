@@ -130,8 +130,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     durationMinutes: timeToMinutes(ev.endTime) - timeToMinutes(ev.startTime),
                     room: 2 as const,
                     price: 0,
-                    status: 'confirmed' as const,
-                    paymentStatus: 'paid' as const,
+                    status: 'paid' as const,
                     paymentMethod: 'invoice' as const,
                     createdAt: ev.createdAt || new Date().toISOString()
                 }))
@@ -189,7 +188,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     // --- ANALYTICS DATA ---
     const stats = useMemo(() => {
         console.log("Stats calculation with allBookings:", allBookings);
-        const confirmedBookings = allBookings.filter(b => b.status === 'confirmed');
+        const confirmedBookings = allBookings.filter(b => ['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status));
         const cancelledBookings = allBookings.filter(b => b.status === 'cancelled');
         
         const totalRevenue = confirmedBookings.reduce((sum, b) => sum + b.price, 0);
@@ -437,13 +436,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }).sort((a,b) => parseLocalDate(a.date).getTime() - parseLocalDate(b.date).getTime());
 
     // --- FUTURE PAYMENTS LOGIC ---
-    const { updateBookingPaymentStatus, token } = useStore();
+    const { updateBookingStatus, token } = useStore();
     const [isProcessingPayments, setIsProcessingPayments] = useState(false);
 
     const dueFutureBookings = useMemo(() => {
         const today = new Date();
         return allBookings.filter(b => {
-            if (b.paymentStatus !== 'pending_future') return false;
+            if (b.status !== 'deferred_payment') return false;
             const bDate = parseLocalDate(b.date);
             const daysToReservation = (bDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
             return daysToReservation <= 120;
@@ -487,7 +486,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     })
                 });
 
-                await updateBookingPaymentStatus(booking.id, 'unpaid'); // update status so it doesn't get processed again
+                await updateBookingStatus(booking.id, 'awaiting_payment'); // update status so it doesn't get processed again
                 count++;
             } catch (error) {
                 console.error("Failed to send payment email for booking", booking.id, error);
@@ -821,7 +820,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4">
-                                                {booking.status === 'confirmed' ? (
+                                                {!['cancelled', 'refunded'].includes(booking.status) ? (
                                                     <span className="text-green-600 flex items-center gap-1 text-xs font-bold"><CheckCircle className="w-3 h-3" /> Potvrzeno</span>
                                                 ) : (
                                                     <span className="text-red-400 flex items-center gap-1 text-xs font-bold"><XCircle className="w-3 h-3" /> Zrušeno</span>

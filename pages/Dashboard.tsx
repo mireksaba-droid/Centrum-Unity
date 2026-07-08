@@ -55,7 +55,7 @@ const Dashboard: React.FC<DashboardProps> = ({ bookings }) => {
         <div className="space-y-6">
             <div className="bg-sage-50 p-6 rounded-xl border border-sage-100">
                 <h3 className="text-sage-800 font-semibold mb-1 font-heading">Nadcházející sezení</h3>
-                <p className="text-3xl font-bold text-sage-900">{bookings.filter(b => b.status === 'confirmed').length}</p>
+                <p className="text-3xl font-bold text-sage-900">{bookings.filter(b => ['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status)).length}</p>
             </div>
             <div className="bg-orange-50 p-6 rounded-xl border border-orange-100">
                 <h3 className="text-orange-800 font-semibold mb-1 font-heading">Absolvováno hodin</h3>
@@ -95,7 +95,7 @@ const Dashboard: React.FC<DashboardProps> = ({ bookings }) => {
                     <div className="text-right">
                         <span className="block font-bold text-stone-900">{booking.price} Kč</span>
                         <div className="flex items-center gap-1 text-xs mt-0.5">
-                            {booking.paymentStatus === 'paid' ? (
+                            {booking.status === 'paid' ? (
                                 <span className="text-green-600 flex items-center gap-1 font-medium">
                                     <CheckCircle className="w-3 h-3" /> Zaplaceno kartou
                                 </span>

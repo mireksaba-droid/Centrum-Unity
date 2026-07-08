@@ -68,7 +68,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
   const [selectedEquipment, setSelectedEquipment] = useState<'table' | 'futon'>('table');
   
   // Computed price for display
-  const currentPrice = bookingSlot ? calculateRentalPrice(selectedRentalMinutes, bookingSlot.room) : 0;
+  const currentPrice = bookingSlot ? calculateRentalPrice(currentUser?.id || '', selectedRentalMinutes, bookingSlot.room) : 0;
 
   useEffect(() => {
     if (currentUser) {
@@ -82,7 +82,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
   // --- ANALYTICS CALCULATION ---
   const stats = useMemo(() => {
     if (!currentUser) return null;
-    const myBookings = allBookings.filter(b => b.practitionerId === currentUser.id && b.status === 'confirmed');
+    const myBookings = allBookings.filter(b => b.practitionerId === currentUser.id && ['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status));
     
     // 1. Revenue
     const totalRevenue = myBookings.reduce((sum, b) => sum + b.price, 0);
@@ -197,7 +197,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
       const getStatusForRoom = (roomNum: 1 | 2) => {
           // Find booking that occupies this slot directly
           const booking = allBookings.find(b => {
-              if (b.date !== dateStr || b.status !== 'confirmed' || b.room !== roomNum) return false;
+              if (b.date !== dateStr || !['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status) || b.room !== roomNum) return false;
               const bStart = timeToMinutes(b.time);
               const bEnd = bStart + b.durationMinutes;
               return (bStart < slotEnd && bEnd > slotStart);
@@ -207,7 +207,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
 
           // If no direct booking, check if it's in the CLEANING BUFFER of a previous booking
           const cleaningBooking = allBookings.find(b => {
-             if (b.date !== dateStr || b.status !== 'confirmed' || b.room !== roomNum) return false;
+             if (b.date !== dateStr || !['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status) || b.room !== roomNum) return false;
              const bStart = timeToMinutes(b.time);
              const bEnd = bStart + b.durationMinutes;
              
@@ -231,7 +231,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
           r2: getStatusForRoom(2),
           // Helper to see if *I* am booked anywhere at this time (regardless of room)
           myBooking: allBookings.find(b => {
-              if (b.date !== dateStr || b.status !== 'confirmed' || b.practitionerId !== currentUser.id) return false;
+              if (b.date !== dateStr || !['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status) || b.practitionerId !== currentUser.id) return false;
                const bStart = timeToMinutes(b.time);
                const bEnd = bStart + b.durationMinutes;
                return (bStart < slotEnd && bEnd > slotStart);
@@ -288,7 +288,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
       // --- USER DOUBLE BOOKING CHECK ---
       const isUserDoubleBooked = allBookings.some(b => {
             if (b.bookedByUserId !== currentUser.id) return false; 
-            if (b.date !== bookingSlot.date || b.status !== 'confirmed') return false;
+            if (b.date !== bookingSlot.date || !['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status)) return false;
             
             const bStart = timeToMinutes(b.time);
             const bEnd = bStart + b.durationMinutes;
@@ -304,7 +304,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
 
       const hasCollision = allBookings.some(b => {
           if (b.date !== bookingSlot.date) return false;
-          if (b.status !== 'confirmed') return false;
+          if (!['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status)) return false;
           if (b.room !== bookingSlot.room) return false; 
 
           const bStart = timeToMinutes(b.time);
@@ -338,7 +338,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
       // Simulate Processing
       setTimeout(async () => {
         try {
-            const finalPrice = calculateRentalPrice(rentalMinutes, bookingSlot.room);
+            const finalPrice = calculateRentalPrice(currentUser?.id || '', rentalMinutes, bookingSlot.room);
             await onInternalBook({
                 date: bookingSlot.date,
                 time: bookingSlot.time,
@@ -351,7 +351,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
                 clientEmail: internalClientEmail,
                 clientPhone: internalClientPhone,
                 paymentMethod: internalPaymentMethod as any,
-                paymentStatus: internalPaymentMethod === 'apple_pay' ? 'paid' : 'invoice_pending',
+                status: internalPaymentMethod === 'apple_pay' ? 'paid' : 'deferred_payment',
                 equipment: selectedEquipment,
                 note: internalNote
             });
@@ -359,9 +359,9 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
             setInternalClientName('');
             setInternalClientEmail('');
             setInternalClientPhone('');
-            setSelectedEquipment([]);
+            setSelectedEquipment('table');
             setInternalNote('');
-            setRentalMinutes(60);
+            setSelectedRentalMinutes(60);
         } catch (e: any) {
             alert(e.message || "Nepodařilo se vytvořit rezervaci.");
         } finally {
@@ -409,7 +409,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
     }
     let icsContent = "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Centrum Unity//Wellness App//CZ\nCALSCALE:GREGORIAN\nMETHOD:PUBLISH\n";
     myBookings.forEach(booking => {
-        if (booking.status !== 'confirmed') return;
+        if (!['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(booking.status)) return;
         const [year, month, day] = booking.date.split('-').map(Number);
         const [hour, minute] = booking.time.split(':').map(Number);
         const startDate = new Date(year, month - 1, day, hour, minute);
@@ -546,12 +546,12 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
                                                     <div className="text-xs text-stone-400 font-medium mt-0.5">#{booking.id.slice(-6).toUpperCase()}</div>
                                                 </div>
                                                 <div className={`flex items-center gap-2 text-xs font-bold px-2.5 py-1.5 rounded-full w-fit ${
-                                                    booking.paymentStatus === 'paid' 
+                                                    booking.status === 'paid' 
                                                     ? 'bg-green-100 text-green-800' 
                                                     : 'bg-yellow-100 text-yellow-800'
                                                 }`}>
-                                                    {booking.paymentStatus === 'paid' ? <CreditCard className="w-3.5 h-3.5" /> : <Wallet className="w-3.5 h-3.5" />}
-                                                    {booking.paymentStatus === 'paid' ? 'Zaplaceno' : `${booking.price} Kč`}
+                                                    {booking.status === 'paid' ? <CreditCard className="w-3.5 h-3.5" /> : <Wallet className="w-3.5 h-3.5" />}
+                                                    {booking.status === 'paid' ? 'Zaplaceno' : `${booking.price} Kč`}
                                                 </div>
                                             </div>
 
@@ -662,7 +662,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
                           >
                               {RENTAL_OPTIONS.map(opt => (
                                   <option key={opt} value={opt}>
-                                      {opt === 720 ? 'Celý den' : `${opt} min`} – {calculateRentalPrice(opt, bookingSlot.room)} Kč
+                                      {opt === 720 ? 'Celý den' : `${opt} min`} – {calculateRentalPrice(currentUser?.id || '', opt, bookingSlot.room)} Kč
                                   </option>
                               ))}
                           </select>

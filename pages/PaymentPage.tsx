@@ -9,7 +9,7 @@ const PaymentPage: React.FC = () => {
     const { bookingId } = useParams<{ bookingId: string }>();
     const [searchParams] = useSearchParams();
     const paymentId = searchParams.get('id');
-    const { bookings, updateBookingPaymentStatus, token } = useStore();
+    const { bookings, updateBookingStatus, token } = useStore();
     
     const [isProcessing, setIsProcessing] = useState(false);
     const [statusMessage, setStatusMessage] = useState<{type: 'success' | 'error' | 'info', text: string} | null>(null);
@@ -18,7 +18,7 @@ const PaymentPage: React.FC = () => {
 
     useEffect(() => {
         const verifyPayment = async () => {
-            if (paymentId && booking && booking.paymentStatus !== 'paid') {
+            if (paymentId && booking && booking.status !== 'paid') {
                 setIsProcessing(true);
                 try {
                     const response = await fetch(`/api/gopay/status?id=${paymentId}`);
@@ -47,7 +47,7 @@ const PaymentPage: React.FC = () => {
         };
 
         verifyPayment();
-    }, [paymentId, booking, updateBookingPaymentStatus]);
+    }, [paymentId, booking, updateBookingStatus]);
 
     if (!booking) {
         return (
@@ -140,7 +140,7 @@ const PaymentPage: React.FC = () => {
                     </div>
                 )}
 
-                {booking.paymentStatus === 'paid' ? (
+                {booking.status === 'paid' ? (
                     <div className="text-center p-4 bg-green-50 rounded-xl border border-green-200">
                         <CheckCircle className="w-10 h-10 text-green-500 mx-auto mb-2" />
                         <h3 className="font-bold text-green-900">Platba byla úspěšná</h3>

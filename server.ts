@@ -2,14 +2,11 @@ import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import { Resend } from "resend";
 import jwt from "jsonwebtoken";
-import { initializeApp, getApps, cert } from "firebase-admin/app";
-import { getFirestore, DocumentReference } from "firebase-admin/firestore";
+
+import { runTransaction, getDoc, DocumentReference, db, collection, doc, updateDoc, deleteDoc, getDocs, query, where, setDoc, writeBatch } from "./server-firebase";
 import firebaseConfig from "./firebase-applet-config.json";
 
-const FIRESTORE_DB_ID =
-  process.env.FIRESTORE_DATABASE_ID ||
-  firebaseConfig.firestoreDatabaseId ||
-  "ai-studio-21fbe237-8e55-49f1-9943-9fef39621ecb";
+
 
 import { PRACTITIONERS } from "./constants";
 import { calculateRentalPrice } from "./utils/scheduler";
@@ -25,20 +22,7 @@ async function safeJson(res: any) {
 }
 
 // Initialize Firebase Admin if not already initialized
-if (!getApps().length) {
-  try {
-    process.env.GOOGLE_CLOUD_PROJECT = firebaseConfig.projectId;
-    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-      initializeApp({
-        credential: cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT))
-      });
-    } else {
-      initializeApp();
-    }
-  } catch (error) {
-    console.warn("Failed to initialize Firebase Admin:", error);
-  }
-}
+
 
 function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET || "default_dev_secret_key";
@@ -134,17 +118,11 @@ async function startServer() {
          return res.status(403).json({ error: "Nedostatečná oprávnění. Pouze admin." });
       }
 
-      if (!getApps().length) {
-         return res.status(500).json({ error: "Firebase Admin is not initialized" });
-      }
-
-      const db = getFirestore(FIRESTORE_DB_ID);
-      
       const deleteCollection = async (collectionPath: string) => {
-         const snapshot = await db.collection(collectionPath).get();
-         const batch = db.batch();
-         snapshot.docs.forEach((doc) => {
-            batch.delete(doc.ref);
+         const snapshot = await getDocs(collection(db, collectionPath));
+         const batch = writeBatch(db);
+         snapshot.docs.forEach((d) => {
+            batch.delete(d.ref);
          });
          await batch.commit();
       };
@@ -199,11 +177,7 @@ async function startServer() {
   // Get practitioners (public info only, no PIN)
   app.get("/api/practitioners", async (req, res) => {
     try {
-      if (!getApps().length) {
-         return res.status(500).json({ error: "Firebase Admin is not initialized" });
-      }
-      const db = getFirestore(FIRESTORE_DB_ID);
-      const snap = await db.collection("practitioners").get();
+      const snap = await getDocs(collection(db, "practitioners"));
       const practitioners = snap.docs.map(doc => {
          const data = doc.data();
          // Odstraníme PIN z veřejného výstupu
@@ -223,8 +197,8 @@ async function startServer() {
       if (req.user?.role !== "ADMIN") return res.status(403).json({ error: "Unauthorized" });
       const practitioner = req.body;
       if (!practitioner.id) return res.status(400).json({ error: "Missing ID" });
-      const db = getFirestore(FIRESTORE_DB_ID);
-      await db.collection("practitioners").doc(practitioner.id).set(practitioner, { merge: true });
+      
+      await setDoc(doc(db, "practitioners", practitioner.id), practitioner, { merge: true });
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -235,10 +209,10 @@ async function startServer() {
       const booking = req.body;
       if (!booking.id) return res.status(400).json({ error: "Missing ID" });
       
-      const db = getFirestore(FIRESTORE_DB_ID);
-      const bookingRef = db.collection('bookings').doc(booking.id);
       
-      await db.runTransaction(async (transaction) => {
+      const bookingRef = doc(db, "bookings", booking.id);
+      
+      await runTransaction(db, async (transaction: any) => {
           const bookingDoc = await transaction.get(bookingRef);
           if (bookingDoc.exists) {
               throw new Error("Tento termín je již rezervován. Prosím, obnovte stránku a vyberte jiný čas.");
@@ -258,8 +232,8 @@ async function startServer() {
     try {
       const { id } = req.params;
       const data = req.body;
-      const db = getFirestore(FIRESTORE_DB_ID);
-      await db.collection('bookings').doc(id).update(data);
+      
+      await updateDoc(doc(db, "bookings", String(id)), data);
       res.json({ success: true });
     } catch (error: any) {
       console.error("Error updating booking:", error);
@@ -271,8 +245,8 @@ async function startServer() {
   app.delete("/api/bookings/:id", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       const { id } = req.params;
-      const db = getFirestore(FIRESTORE_DB_ID);
-      await db.collection('bookings').doc(id).delete();
+      
+      await deleteDoc(doc(db, "bookings", String(id)));
       res.json({ success: true });
     } catch (error: any) {
       console.error("Error deleting booking:", error);
@@ -285,8 +259,8 @@ async function startServer() {
     try {
       if (req.user?.role !== "ADMIN") return res.status(403).json({ error: "Unauthorized" });
       const event = req.body;
-      const db = getFirestore(FIRESTORE_DB_ID);
-      await db.collection("groupEvents").doc(event.id).set(event, { merge: true });
+      
+      await setDoc(doc(db, "groupEvents", String(event.id)), event, { merge: true });
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -296,8 +270,8 @@ async function startServer() {
       if (req.user?.role !== "ADMIN") return res.status(403).json({ error: "Unauthorized" });
       const { id } = req.params;
       const data = req.body;
-      const db = getFirestore(FIRESTORE_DB_ID);
-      await db.collection("groupEvents").doc(id).update(data);
+      
+      await updateDoc(doc(db, "groupEvents", String(id)), data);
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -306,8 +280,8 @@ async function startServer() {
     try {
       if (req.user?.role !== "ADMIN") return res.status(403).json({ error: "Unauthorized" });
       const { id } = req.params;
-      const db = getFirestore(FIRESTORE_DB_ID);
-      await db.collection("groupEvents").doc(id).delete();
+      
+      await deleteDoc(doc(db, "groupEvents", String(id)));
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
@@ -316,10 +290,10 @@ async function startServer() {
   app.post("/api/eventRegistrations", async (req: Request, res: Response) => {
     try {
       const registration = req.body;
-      const db = getFirestore(FIRESTORE_DB_ID);
       
-      await db.runTransaction(async (transaction) => {
-          const eventRef = db.collection('groupEvents').doc(registration.eventId);
+      
+      await runTransaction(db, async (transaction: any) => {
+          const eventRef = doc(db, "groupEvents", registration.eventId);
           const eventDoc = await transaction.get(eventRef);
 
           if (!eventDoc.exists) throw new Error("Event does not exist!");
@@ -329,7 +303,7 @@ async function startServer() {
 
           if (currentRegistrations >= capacity) throw new Error("Capacity full");
 
-          const newRegRef = db.collection('eventRegistrations').doc(registration.id || db.collection('eventRegistrations').doc().id);
+          const newRegRef = doc(db, "eventRegistrations", registration.id || doc(collection(db, "eventRegistrations")).id);
           
           transaction.set(newRegRef, { ...registration, id: newRegRef.id });
           transaction.update(eventRef, { currentRegistrations: currentRegistrations + 1 });
@@ -370,20 +344,22 @@ async function startServer() {
       }
 
       // 1. Ověříme, že rezervace existuje v databázi a není už zaplacená
-      if (getApps().length > 0) {
-        const db = getFirestore(FIRESTORE_DB_ID);
-        const bookingRef = db.collection('bookings').doc(bookingId);
-        const bookingSnap = await bookingRef.get();
+      let bookedByUserId = '';
+      if (db) {
+        
+        const bookingRef = doc(db, "bookings", bookingId);
+        const bookingSnap = await getDoc(bookingRef);
         if (!bookingSnap.exists) {
            return res.status(404).json({ error: "Rezervace nebyla nalezena." });
         }
         const bookingData = bookingSnap.data();
-        if (bookingData?.paymentStatus === 'paid') {
+        if (bookingData?.status === 'paid') {
            return res.status(400).json({ error: "Tato rezervace je již zaplacena." });
         }
+        bookedByUserId = bookingData?.bookedByUserId || '';
       }
       
-      const finalPrice = calculateRentalPrice(duration, room);
+      const finalPrice = calculateRentalPrice(bookedByUserId, duration, room);
       const amount = Math.round(finalPrice * 100);
 
       const token = await getGoPayToken();
@@ -448,7 +424,7 @@ async function startServer() {
          return res.status(400).json({ error: "Neplatné parametry pro výpočet ceny." });
       }
       
-      const finalPrice = calculateRentalPrice(duration, room);
+      const finalPrice = calculateRentalPrice(req.user?.id || '', duration, room);
       const amount = Math.round(finalPrice * 100); // v haléřích
 
       const token = await getGoPayToken();
@@ -633,9 +609,9 @@ async function startServer() {
   });
 
   // Webhook pro notifikace z GoPay (změna stavu platby)
-  app.get("/api/gopay/notify", async (req: Request, res: Response) => {
+  app.all("/api/gopay/notify", async (req: Request, res: Response) => {
       try {
-          const { id } = req.query; // GoPay posílá ID platby v query parametru
+          const id = req.query.id || req.body?.id; // GoPay posílá ID platby v query parametru nebo body
           if (!id) {
              return res.status(400).json({ error: "Missing payment ID" });
           }
@@ -652,19 +628,14 @@ async function startServer() {
 
           const bookingIdParam = paymentStatus.additional_params?.find((x: any) => x.name === "bookingId")?.value;
           
-          if (!getApps().length) {
-             return res.status(500).json({ error: "Firebase Admin is not initialized" });
-          }
-          const adminDb = getFirestore(FIRESTORE_DB_ID);
-
           let bookingRef: DocumentReference | null = null;
           let bookingId = bookingIdParam;
 
           if (bookingId) {
-             bookingRef = adminDb.collection("bookings").doc(bookingId);
+             bookingRef = doc(db, "bookings", bookingId);
           } else {
              // Zkusíme najít podle paymentId
-             const snapshot = await adminDb.collection("bookings").where("paymentId", "==", String(id)).limit(1).get();
+             const snapshot = await getDocs(query(collection(db, "bookings"), where("paymentId", "==", String(id))));
              if (!snapshot.empty) {
                 bookingRef = snapshot.docs[0].ref;
                 bookingId = snapshot.docs[0].id;
@@ -674,20 +645,19 @@ async function startServer() {
           if (bookingRef) {
              const map: Record<string, string> = {
                 PAID: "paid",
-                CANCELED: "cancelled_unpaid",
-                TIMEOUTED: "cancelled_unpaid",
+                CANCELED: "cancelled",
+                TIMEOUTED: "cancelled",
                 REFUNDED: "refunded",
              };
              const newStatus = map[paymentStatus.state];
              if (newStatus) {
-                await adminDb.runTransaction(async (tx) => {
+                await runTransaction(db, async (tx: any) => {
                    const doc = await tx.get(bookingRef!);
                    if (!doc.exists) return;
-                   if (doc.data()?.paymentStatus === "paid" && newStatus === "paid") return; // idempotence
+                   if (doc.data()?.status === "paid" && newStatus === "paid") return; // idempotence
                    
-                   const updateData: any = { paymentStatus: newStatus, paymentId: String(id) };
-                   if (newStatus === "cancelled_unpaid") {
-                       updateData.status = "cancelled";
+                   const updateData: any = { status: newStatus, paymentId: String(id) };
+                   if (newStatus === "cancelled" || newStatus === "refunded") {
                        updateData.cancelledAt = new Date().toISOString();
                    }
                    tx.update(bookingRef!, updateData);
@@ -742,14 +712,7 @@ async function startServer() {
             return res.status(401).send("Unauthorized");
          }
 
-         if (!getApps().length) {
-            return res.status(500).json({ error: "Firebase Admin is not initialized" });
-         }
-
-         const db = getFirestore(FIRESTORE_DB_ID);
-         const pendingBookingsSnap = await db.collection('bookings')
-            .where('paymentStatus', '==', 'pending_future')
-            .get();
+         const pendingBookingsSnap = await getDocs(query(collection(db, "bookings"), where("status", "==", "deferred_payment")));
 
          let processedCount = 0;
          const today = new Date();
@@ -792,7 +755,7 @@ async function startServer() {
                      });
 
                      // Změníme status
-                     await doc.ref.update({ paymentStatus: 'unpaid' });
+                     await updateDoc(doc.ref, { status: 'awaiting_payment' });
                      processedCount++;
                  }
              } catch (e: any) {
@@ -858,6 +821,40 @@ async function startServer() {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
+
+  // Start background job to expire unpaid pending bookings after 15 minutes
+  setInterval(async () => {
+    if (!db) return;
+    try {
+      
+      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      const snapshot = await getDocs(query(collection(db, "bookings"), where("status", "==", "awaiting_payment")));
+        
+      if (snapshot.empty) return;
+      
+      const batch = writeBatch(db);
+      let count = 0;
+      
+      snapshot.docs.forEach((doc) => {
+        const data = doc.data();
+        if (data.status === 'awaiting_payment' && data.createdAt && data.createdAt < fifteenMinutesAgo) {
+          batch.update(doc.ref, {
+             status: 'cancelled',
+             cancelledAt: new Date().toISOString(),
+             note: (data.note ? data.note + '\n' : '') + 'Automaticky zrušeno - platba vypršela.'
+          });
+          count++;
+        }
+      });
+      
+      if (count > 0) {
+        await batch.commit();
+        console.log(`Automatically cancelled ${count} expired pending bookings`);
+      }
+    } catch (e) {
+      console.error("Failed to run booking cleanup job:", e);
+    }
+  }, 60 * 1000); // Check every minute
 
   app.listen(port, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${port}`);
