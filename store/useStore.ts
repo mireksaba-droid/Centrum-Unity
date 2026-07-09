@@ -33,6 +33,7 @@ interface AppState {
   // Bookings
   addBooking: (bookingData: Partial<Booking>) => Promise<void>;
   updateBookingStatus: (bookingId: string, status: string) => Promise<void>;
+  attachPaymentId: (bookingId: string, paymentId: string) => void;
   cancelBooking: (bookingId: string) => Promise<void>;
   adminRescheduleBooking: (bookingId: string, newDate: string, newTime: string, reason?: string) => Promise<void>;
   
@@ -134,6 +135,15 @@ export const useStore = create<AppState>()(
           set((state) => ({
              bookings: state.bookings.map(b =>
                 b.id === bookingId ? { ...b, ...data } : b
+             )
+          }));
+      },
+
+      attachPaymentId: (bookingId, paymentId) => {
+          // paymentId zapsal server přímo do Firestore; sem ho jen promítneme do lokálního stavu
+          set((state) => ({
+             bookings: state.bookings.map(b =>
+                b.id === bookingId ? { ...b, paymentId } : b
              )
           }));
       },

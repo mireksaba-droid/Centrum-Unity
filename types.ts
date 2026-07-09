@@ -34,7 +34,7 @@ export interface Practitioner {
   calendarSyncToken?: string; // Phase 1.5: Bezpečnostní token pro iCal/ICS feed (export do telefonu)
 }
 
-export type BookingStatus = 'created' | 'awaiting_payment' | 'deferred_payment' | 'paid' | 'cancelled' | 'completed' | 'refunded';
+export type BookingStatus = 'created' | 'awaiting_payment' | 'deferred_payment' | 'paid' | 'cancelled' | 'completed' | 'refunded' | 'payment_review';
 
 export interface Booking {
   id: string;

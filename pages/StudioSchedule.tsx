@@ -38,7 +38,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
     onLogout
 }) => {
     // Hooks
-    const { token, practitionersList, updateBookingStatus } = useStore();
+    const { token, practitionersList, updateBookingStatus, attachPaymentId } = useStore();
     const { addToast } = useToast();
 
     const sendConfirmationEmail = async (booking: Booking, isPaid: boolean = false) => {
@@ -363,19 +363,20 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
             }
 
             try {
-                // Místo Stripe vytváříme GoPay platbu
+                // 1. Nejdřív založíme rezervaci (awaiting_payment), aby ji server mohl ocenit a spárovat.
+                const bookingId = `${selectedSlot.room}_${selectedSlot.date}_${selectedSlot.time}`;
+                await finalizeBooking('awaiting_payment', undefined, false); // neuzavřít okno ještě
+                setIsProcessing(true);
+
+                // 2. Platbu vytvoříme odkazem na bookingId - cenu i párování řeší server z DB.
                 const response = await fetch('/api/create-payment', {
                     method: 'POST',
-                    headers: { 
+                    headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`
                     },
-                    body: JSON.stringify({ 
-                        duration: duration,
-                        room: selectedSlot.room,
-                        currency: 'CZK',
-                        reservationDate: selectedSlot.date,
-                        reservationTime: selectedSlot.time,
+                    body: JSON.stringify({
+                        bookingId: bookingId,
                         returnUrl: window.location.origin + window.location.pathname
                     })
                 });
@@ -387,11 +388,20 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                     throw new Error(`Odpověď ze serveru není validní JSON: ${text.substring(0, 100)}`);
                 }
                 if (data.error) throw new Error(data.error);
-                
-                // Uložíme rezervaci s nezaplaceným statusem a paymentId
+
+                // 2b. Rezervace zdarma (server vrátí paid) - žádná brána.
+                if (data.paid) {
+                    updateBookingStatus(bookingId, 'paid');
+                    addToast('success', 'Rezervace potvrzena', 'Rezervace nevyžaduje platbu.');
+                    setSelectedSlot(null);
+                    setIsProcessing(false);
+                    return;
+                }
+
+                // 3. paymentId zapsal server do DB; promítneme ho i do lokálního stavu.
                 setPaymentIntentIdState(data.paymentId);
-                await finalizeBooking('awaiting_payment', data.paymentId, false); // neuzavřít okno ještě
-                
+                attachPaymentId(bookingId, data.paymentId);
+
                 if (data.gwUrl) {
                     setPaymentUrl(data.gwUrl);
                     

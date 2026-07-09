@@ -57,6 +57,7 @@ async function startServer() {
   const app = express();
   const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
+  app.set("trust proxy", 1); // správná klientská IP za reverzní proxy (rate limiting)
   app.use(express.json());
   app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     if (err instanceof SyntaxError && 'body' in err) {
@@ -66,8 +67,11 @@ async function startServer() {
     next(err);
   });
 
-  // GoPay API base URL (sandbox by default)
-  const GOPAY_URL = "https://gw.sandbox.gopay.com/api";
+  // GoPay API base URL - přepínatelné přes env (GOPAY_ENV=production nebo přímo GOPAY_API_URL)
+  const GOPAY_URL = process.env.GOPAY_API_URL
+    || (process.env.GOPAY_ENV === "production"
+        ? "https://gate.gopay.cz/api"
+        : "https://gw.sandbox.gopay.com/api");
 
   async function getGoPayToken() {
     const gopayId = process.env.GOPAY_GOID;
@@ -119,6 +123,21 @@ async function startServer() {
   // Odesílací adresa (musí patřit pod vaši doménu na webkitty)
   const getFromEmail = () => process.env.FROM_EMAIL || process.env.SMTP_USER || "info@centrumunity.cz";
 
+  // --- Sdílené platební helpery ---
+  const isAdmin = (req: AuthRequest) => req.user?.role === "ADMIN";
+
+  // Načte rezervaci z Firestore; vrací { ref, data } nebo null
+  async function loadBooking(bookingId: string): Promise<{ ref: DocumentReference, data: any } | null> {
+    const ref = doc(db, "bookings", bookingId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return null;
+    return { ref, data: snap.data() };
+  }
+
+  // Očekávaná částka v haléřích počítaná POUZE z uložené rezervace (nikdy z klientského vstupu)
+  const expectedAmountHaler = (b: any): number =>
+    Math.round(calculateRentalPrice(b?.bookedByUserId || "", b?.durationMinutes || 0, b?.room) * 100);
+
   // --- API Routes ---
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
@@ -127,7 +146,7 @@ async function startServer() {
   // Admin endpoint for completely resetting database data (bookings, events, registrations)
   app.delete("/api/admin/reset-data", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-      if (req.user?.role !== 'admin') {
+      if (!isAdmin(req)) {
          return res.status(403).json({ error: "Nedostatečná oprávnění. Pouze admin." });
       }
 
@@ -346,47 +365,47 @@ async function startServer() {
           paymentRateLimits.set(ip, { count: 1, resetTime: now + 60000 }); // 5 requests per minute
       }
 
-      const { duration, room, currency, reservationDate, reservationTime, returnUrl, bookingId } = req.body;
-      
+      const { returnUrl, bookingId } = req.body;
+
       if (!bookingId) {
         return res.status(400).json({ error: "Chybí identifikátor rezervace (bookingId)." });
       }
 
-      if (typeof duration !== 'number' || (room !== 1 && room !== 2)) {
-         return res.status(400).json({ error: "Neplatné parametry pro výpočet ceny." });
+      // 1. Načteme rezervaci z DB - všechny cenotvorné údaje bereme POUZE odsud (nikdy z klienta)
+      const booking = await loadBooking(bookingId);
+      if (!booking) {
+        return res.status(404).json({ error: "Rezervace nebyla nalezena." });
+      }
+      if (booking.data.status === 'paid') {
+        return res.status(400).json({ error: "Tato rezervace je již zaplacena." });
       }
 
-      // 1. Ověříme, že rezervace existuje v databázi a není už zaplacená
-      let bookedByUserId = '';
-      if (db) {
-        
-        const bookingRef = doc(db, "bookings", bookingId);
-        const bookingSnap = await getDoc(bookingRef);
-        if (!bookingSnap.exists) {
-           return res.status(404).json({ error: "Rezervace nebyla nalezena." });
-        }
-        const bookingData = bookingSnap.data();
-        if (bookingData?.status === 'paid') {
-           return res.status(400).json({ error: "Tato rezervace je již zaplacena." });
-        }
-        bookedByUserId = bookingData?.bookedByUserId || '';
+      const durationMinutes = booking.data.durationMinutes;
+      const room = booking.data.room;
+      const bookedByUserId = booking.data.bookedByUserId || '';
+      const reservationDate = booking.data.date || '';
+      const reservationTime = booking.data.time || '';
+
+      const amount = expectedAmountHaler(booking.data);
+
+      // 2. Rezervace zdarma (např. admin) - žádná platba, rovnou paid
+      if (amount <= 0) {
+        await updateDoc(booking.ref, { status: 'paid' });
+        return res.json({ paid: true, message: "Rezervace nevyžaduje platbu." });
       }
-      
-      const finalPrice = calculateRentalPrice(bookedByUserId, duration, room);
-      const amount = Math.round(finalPrice * 100);
 
       const token = await getGoPayToken();
-      
+
       const paymentData = {
           payer: {
               allowed_payment_instruments: ["PAYMENT_CARD"],
               default_payment_instrument: "PAYMENT_CARD",
           },
           amount: amount,
-          currency: currency || "CZK",
-          order_number: `RES-${Date.now()}`,
-          order_description: `Doplatek rezervace místnosti ${room}`,
-          items: [{ name: `Pronájem místnosti ${room} (${duration}h)`, amount: amount, count: 1 }],
+          currency: "CZK",
+          order_number: bookingId,
+          order_description: `Rezervace místnosti ${room} (${bookingId})`,
+          items: [{ name: `Pronájem místnosti ${room} (${durationMinutes} min)`, amount: amount, count: 1 }],
           callback: {
               return_url: returnUrl || "https://rezervace.centrumunity.cz/",
               notification_url: "https://rezervace.centrumunity.cz/api/gopay/notify"
@@ -396,9 +415,10 @@ async function startServer() {
               goid: process.env.GOPAY_GOID
           },
           additional_params: [
-              { name: "bookingId", value: bookingId || '' },
-              { name: "reservationDate", value: reservationDate || '' },
-              { name: "reservationTime", value: reservationTime || '' }
+              { name: "bookingId", value: String(bookingId) },
+              { name: "userId", value: String(bookedByUserId) },
+              { name: "reservationDate", value: String(reservationDate) },
+              { name: "reservationTime", value: String(reservationTime) }
           ]
       };
 
@@ -411,14 +431,17 @@ async function startServer() {
          },
          body: JSON.stringify(paymentData)
       });
-      
+
       const data = await safeJson(response);
 
       if (!response.ok) {
          throw new Error("GoPay create payment failed: " + JSON.stringify(data));
       }
-      
-      res.json({ 
+
+      // 3. Zapíšeme paymentId přímo na rezervaci (spolehlivé párování ve webhooku)
+      await updateDoc(booking.ref, { paymentId: String(data.id) });
+
+      res.json({
         paymentId: data.id,
         gwUrl: data.gw_url
       });
@@ -428,30 +451,57 @@ async function startServer() {
     }
   });
 
-  // Create a payment via GoPay
+  // Create a payment via GoPay (přihlášený uživatel; platí pro už založenou rezervaci)
   app.post("/api/create-payment", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-      const { duration, room, currency, reservationDate, reservationTime, returnUrl } = req.body;
-      
-      if (typeof duration !== 'number' || (room !== 1 && room !== 2)) {
-         return res.status(400).json({ error: "Neplatné parametry pro výpočet ceny." });
+      const { bookingId, returnUrl } = req.body;
+
+      if (!bookingId) {
+        return res.status(400).json({ error: "Chybí identifikátor rezervace (bookingId)." });
       }
-      
-      const finalPrice = calculateRentalPrice(req.user?.id || '', duration, room);
-      const amount = Math.round(finalPrice * 100); // v haléřích
+
+      // 1. Načteme rezervaci - cenu i párování bereme jen z DB
+      const booking = await loadBooking(bookingId);
+      if (!booking) {
+        return res.status(404).json({ error: "Rezervace nebyla nalezena." });
+      }
+      if (booking.data.status === 'paid') {
+        return res.status(400).json({ error: "Tato rezervace je již zaplacena." });
+      }
+
+      // 2. Ověření vlastnictví: rezervaci může platit její autor, host, nebo admin
+      const isOwner = req.user?.id === booking.data.bookedByUserId;
+      const isGuestBooking = booking.data.bookedByUserId === 'guest';
+      if (!isOwner && !isGuestBooking && !isAdmin(req)) {
+        return res.status(403).json({ error: "Nemáte oprávnění platit tuto rezervaci." });
+      }
+
+      const durationMinutes = booking.data.durationMinutes;
+      const room = booking.data.room;
+      const bookedByUserId = booking.data.bookedByUserId || '';
+      const reservationDate = booking.data.date || '';
+      const reservationTime = booking.data.time || '';
+
+      const amount = expectedAmountHaler(booking.data);
+
+      // 3. Rezervace zdarma → rovnou paid, bez brány
+      if (amount <= 0) {
+        await updateDoc(booking.ref, { status: 'paid' });
+        return res.json({ paid: true, message: "Rezervace nevyžaduje platbu." });
+      }
 
       const token = await getGoPayToken();
-      
+
       const paymentData = {
           payer: {
               allowed_payment_instruments: ["PAYMENT_CARD"],
               default_payment_instrument: "PAYMENT_CARD",
           },
           amount: amount,
-          currency: currency || "CZK",
-          order_number: `RES-${Date.now()}`,
-          order_description: `Rezervace místnosti ${room}`,
-          items: [{ name: `Pronájem místnosti ${room} (${duration}h)`, amount: amount, count: 1 }],
+          currency: "CZK",
+          order_number: String(bookingId),
+          order_description: `Rezervace místnosti ${room} (${bookingId})`,
+          items: [{ name: `Pronájem místnosti ${room} (${durationMinutes} min)`, amount: amount, count: 1 }],
           callback: {
               return_url: returnUrl || "https://rezervace.centrumunity.cz/",
               notification_url: "https://rezervace.centrumunity.cz/api/gopay/notify"
@@ -461,9 +511,10 @@ async function startServer() {
               goid: process.env.GOPAY_GOID
           },
           additional_params: [
-              { name: "userId", value: req.user?.id || '' },
-              { name: "reservationDate", value: reservationDate || '' },
-              { name: "reservationTime", value: reservationTime || '' }
+              { name: "bookingId", value: String(bookingId) },
+              { name: "userId", value: String(bookedByUserId) },
+              { name: "reservationDate", value: String(reservationDate) },
+              { name: "reservationTime", value: String(reservationTime) }
           ]
       };
 
@@ -476,14 +527,17 @@ async function startServer() {
          },
          body: JSON.stringify(paymentData)
       });
-      
+
       const data = await safeJson(response);
 
       if (!response.ok) {
          throw new Error("GoPay create payment failed: " + JSON.stringify(data));
       }
-      
-      res.json({ 
+
+      // 4. Zapíšeme paymentId na rezervaci (spolehlivé párování, žádný race s klientem)
+      await updateDoc(booking.ref, { paymentId: String(data.id) });
+
+      res.json({
         paymentId: data.id,
         gwUrl: data.gw_url
       });
@@ -514,26 +568,33 @@ async function startServer() {
       });
       const paymentStatus = await safeJson(statusRes);
 
-      // Check permissions based on additional_params
+      // Údaje z additional_params (userId, bookingId, datum/čas rezervace)
       let paymentUserId = "";
+      let paymentBookingId = "";
       let resDate = "";
       let resTime = "";
       if (paymentStatus.additional_params) {
-         const userParam = paymentStatus.additional_params.find((p: any) => p.name === "userId");
-         if (userParam) paymentUserId = userParam.value;
-         
-         const dateParam = paymentStatus.additional_params.find((p: any) => p.name === "reservationDate");
-         if (dateParam) resDate = dateParam.value;
-         
-         const timeParam = paymentStatus.additional_params.find((p: any) => p.name === "reservationTime");
-         if (timeParam) resTime = timeParam.value;
+         const get = (name: string) => paymentStatus.additional_params.find((p: any) => p.name === name)?.value || "";
+         paymentUserId = get("userId");
+         paymentBookingId = get("bookingId");
+         resDate = get("reservationDate");
+         resTime = get("reservationTime");
       }
 
-      // Verify ownership or admin role
-      const isOwner = req.user?.id === paymentUserId;
-      const isAdmin = req.user?.role === 'admin';
-      
-      if (!isOwner && !isAdmin) {
+      // Ověření vlastnictví: přes uživatele z platby NEBO přes autora rezervace (spolehlivější),
+      // plus admin má vždy přístup.
+      let bookingOwnerId = "";
+      if (paymentBookingId) {
+        const b = await loadBooking(paymentBookingId);
+        if (b) {
+          bookingOwnerId = b.data.bookedByUserId || "";
+          if (!resDate) resDate = b.data.date || "";
+          if (!resTime) resTime = b.data.time || "";
+        }
+      }
+
+      const isOwner = !!req.user?.id && (req.user.id === paymentUserId || req.user.id === bookingOwnerId);
+      if (!isOwner && !isAdmin(req)) {
         return res.status(403).json({ error: "Access denied. You can only refund your own payments." });
       }
 
@@ -557,6 +618,13 @@ async function startServer() {
         }
       }
 
+      // Částku k refundaci nikdy nepřebíráme slepě od klienta - omezíme ji na skutečně zaplacenou
+      const paidAmount = Number(paymentStatus.amount) || 0;
+      const requested = Number(amount);
+      const refundAmount = (Number.isFinite(requested) && requested > 0)
+        ? Math.min(requested, paidAmount)
+        : paidAmount;
+
       // Refund the payment
       const refundRes = await fetch(`${GOPAY_URL}/payments/payment/${paymentId}/refund`, {
          method: "POST",
@@ -565,7 +633,7 @@ async function startServer() {
            "Content-Type": "application/x-www-form-urlencoded",
            "Authorization": `Bearer ${token}`
          },
-         body: `amount=${amount || paymentStatus.amount}`
+         body: `amount=${refundAmount}`
       });
 
       const textResult = await refundRes.text();
@@ -663,21 +731,46 @@ async function startServer() {
                 REFUNDED: "refunded",
              };
              const newStatus = map[paymentStatus.state];
+             let amountMismatch = false;
              if (newStatus) {
                 await runTransaction(db, async (tx: any) => {
-                   const doc = await tx.get(bookingRef!);
-                   if (!doc.exists) return;
-                   if (doc.data()?.status === "paid" && newStatus === "paid") return; // idempotence
-                   
+                   const snap = await tx.get(bookingRef!);
+                   if (!snap.exists()) return;
+                   const current = snap.data() || {};
+
+                   // Idempotence a ochrana: ze stavu 'paid' už nepřecházíme na 'paid' ani zpět na 'cancelled'
+                   if (current.status === "paid") {
+                      if (newStatus === "paid" || newStatus === "cancelled") return;
+                   }
+
+                   // Ověření částky u PAID - nesmí být nižší než očekávaná cena z rezervace
+                   if (newStatus === "paid") {
+                      const expected = expectedAmountHaler(current);
+                      const paid = Number(paymentStatus.amount) || 0;
+                      if (expected > 0 && paid < expected) {
+                         amountMismatch = true;
+                         tx.update(bookingRef!, {
+                            status: "payment_review",
+                            paymentId: String(id),
+                            note: (current.note ? current.note + "\n" : "") + `POZOR: nesoulad částky - zaplaceno ${paid}, očekáváno ${expected} haléřů. Nutná ruční kontrola.`
+                         });
+                         return;
+                      }
+                   }
+
                    const updateData: any = { status: newStatus, paymentId: String(id) };
                    if (newStatus === "cancelled" || newStatus === "refunded") {
                        updateData.cancelledAt = new Date().toISOString();
                    }
                    tx.update(bookingRef!, updateData);
                 });
-                
-                // Odeslání e-mailu po úspěšné platbě (změna na paid)
-                if (newStatus === "paid" && process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+
+                if (amountMismatch) {
+                   console.error(`GoPay: nesoulad částky u rezervace ${bookingId}, platba ${id}. Rezervace označena k ruční kontrole.`);
+                }
+
+                // Odeslání e-mailu po úspěšné platbě (změna na paid, bez nesouladu částky)
+                if (newStatus === "paid" && !amountMismatch && process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
                    try {
                        const finalDoc = await getDoc(bookingRef!);
                        const bookingData = finalDoc.data() as any;
@@ -780,7 +873,7 @@ async function startServer() {
                         html: emailHtml
                      });
 
-                     // Změníme status a označíme čas odeslání výzvy (od něj běží 15min okno na platbu)
+                     // Změníme status a označíme čas odeslání výzvy (od něj běží 24h okno na platbu)
                      await updateDoc(doc.ref, { status: 'awaiting_payment', paymentRequestedAt: new Date().toISOString() });
                      processedCount++;
                  }
