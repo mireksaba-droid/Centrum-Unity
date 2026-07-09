@@ -108,7 +108,7 @@ export const useStore = create<AppState>()(
         set((state) => ({ bookings: [...state.bookings, newBooking] }));
         // Odeslání potvrzovacího e-mailu pro ne-online platby
         if (newBooking.paymentMethod !== "online" || newBooking.price === 0) {
-            const emailTarget = newBooking.clientEmail;
+            const emailTarget = newBooking.clientEmail || (newBooking.bookedByUserId !== "guest" ? "mirek.saba@gmail.com" : null);
             if (emailTarget) {
                 try {
                     const html = generateConfirmationEmail(newBooking, newBooking.status === "paid" || newBooking.price === 0);
