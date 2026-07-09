@@ -1,0 +1,1 @@
+sed -i 's/}).catch(e => console.error("Chyba odesílání e-mailu", e));/}).then(async (res) => console.log("Email response:", res.status, await res.text())).catch(e => console.error("Chyba odesílání e-mailu", e));/g' pages/StudioSchedule.tsx

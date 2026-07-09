@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Practitioner, Booking, GroupEvent, EventRegistration, Role } from '../types';
+import { generateConfirmationEmail } from "../utils/emailTemplates";
 import { PRACTITIONERS, sortPractitioners } from '../constants';
 import { 
   saveBookingToFirestore, 
@@ -13,7 +14,8 @@ import {
   loadBookings, 
   loadPractitioners, 
   savePractitionerToFirestore, 
-  updatePractitionerInFirestore
+  updatePractitionerInFirestore,
+  sendTransactionalEmail
 } from '../services/firebase';
 
 interface AppState {
@@ -104,6 +106,24 @@ export const useStore = create<AppState>()(
 
         await saveBookingToFirestore(newBooking);
         set((state) => ({ bookings: [...state.bookings, newBooking] }));
+        // Odeslání potvrzovacího e-mailu pro ne-online platby
+        if (newBooking.paymentMethod !== "online" || newBooking.price === 0) {
+            const emailTarget = newBooking.clientEmail;
+            if (emailTarget) {
+                try {
+                    const html = generateConfirmationEmail(newBooking, newBooking.status === "paid" || newBooking.price === 0);
+                    sendTransactionalEmail({
+                        to: emailTarget,
+                        subject: "Potvrzení rezervace - Centrum Unity",
+                        text: "Potvrzení rezervace pro: " + newBooking.date + " v " + newBooking.time,
+                        html: html
+                    }).catch(e => console.error("Nepodařilo se odeslat potvrzovací e-mail:", e.message));
+                    console.log("Pokus o odeslání potvrzovacího e-mailu na:", emailTarget);
+                } catch (e: any) {
+                    console.error("Chyba při přípravě e-mailu:", e.message);
+                }
+            }
+        }
       },
 
       updateBookingStatus: async (bookingId: string, status: any) => {
@@ -166,6 +186,7 @@ export const useStore = create<AppState>()(
 
       updatePractitioner: async (updatedP) => {
         await updatePractitionerInFirestore(updatedP);
+
         set((state) => ({
           practitionersList: sortPractitioners(state.practitionersList.map(p => p.id === updatedP.id ? updatedP : p))
         }));

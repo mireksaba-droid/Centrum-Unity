@@ -675,6 +675,31 @@ async function startServer() {
                    }
                    tx.update(bookingRef!, updateData);
                 });
+                
+                // Odeslání e-mailu po úspěšné platbě (změna na paid)
+                if (newStatus === "paid" && process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+                   try {
+                       const finalDoc = await getDoc(bookingRef!);
+                       const bookingData = finalDoc.data() as any;
+                       if (bookingData && (bookingData.clientEmail || bookingData.bookedByUserId !== 'guest')) {
+                           // Zjistíme e-mail: zkusíme clientEmail, jinak jestli to dělal přihlášený uživatel s e-mailem (málokdy)
+                           // Bohužel Practitioner nemá e-mail, takže použijeme clientEmail.
+                           const targetEmail = bookingData.clientEmail || 'mirek.saba@gmail.com';
+                           if (targetEmail) {
+                               const emailHtml = generateConfirmationEmail(bookingData, true);
+                               await getMailer().sendMail({
+                                  from: getFromEmail(),
+                                  to: targetEmail,
+                                  subject: 'Potvrzení zaplacené rezervace - Centrum Unity',
+                                  html: emailHtml
+                               });
+                               console.log(`Confirmation email sent to ${targetEmail} for paid booking ${bookingId}`);
+                           }
+                       }
+                   } catch (e: any) {
+                       console.error("Failed to send confirmation email after payment:", e.message);
+                   }
+                }
              }
           }
 
