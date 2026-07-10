@@ -165,9 +165,15 @@ export const useStore = create<AppState>()(
         const cancelledAt = new Date().toISOString();
         await updateBookingInFirestore(bookingId, { status: 'cancelled', cancelledAt });
 
-        // Odeslání storno e-mailu klientovi, pokud má vyplněný e-mail.
+        // Odeslání storno e-mailu klientovi i lektorovi (pokud mají vyplněný e-mail).
         // Důvod rozlišíme podle toho, kdo rezervaci ruší.
-        if (booking.clientEmail) {
+        const practitioner = state.practitionersList.find(p => p.id === booking.bookedByUserId);
+        const recipientList = [booking.clientEmail, practitioner?.email]
+            .map(x => (x || '').trim())
+            .filter(Boolean)
+            .join(', ');
+
+        if (recipientList) {
             const reason = isAdmin
                 ? "Rezervace byla zrušena administrátorem studia."
                 : isGuestBooking
@@ -181,7 +187,7 @@ export const useStore = create<AppState>()(
                         reason
                     );
                     sendTransactionalEmail({
-                        to: booking.clientEmail,
+                        to: recipientList,
                         subject: "Zrušení rezervace - Centrum Unity",
                         text: "Zrušení rezervace pro: " + booking.date + " v " + booking.time,
                         html: html

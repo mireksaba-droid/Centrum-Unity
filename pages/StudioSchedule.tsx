@@ -42,18 +42,24 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
     const { addToast } = useToast();
 
     const sendConfirmationEmail = async (booking: Booking, isPaid: boolean = false) => {
-        const targetEmail = currentUser.id === 'guest' ? booking.clientEmail : (currentUser as any).email || 'mirek.saba@gmail.com'; 
-        if (targetEmail) {
+        // Příjemci: klient (pokud vyplněn) + lektor, který rezervaci vytvořil.
+        const practitioner = practitionersList.find(p => p.id === booking.bookedByUserId);
+        const recipientList = [booking.clientEmail, practitioner?.email]
+            .map(x => (x || '').trim())
+            .filter(Boolean)
+            .join(', ');
+
+        if (recipientList) {
             const emailHtml = generateConfirmationEmail(booking, isPaid);
 
             fetch('/api/send-email', {
                 method: 'POST',
-                headers: { 
+                headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify({
-                    to: targetEmail,
+                    to: recipientList,
                     subject: 'Potvrzení rezervace - Centrum Unity',
                     html: emailHtml
                 })

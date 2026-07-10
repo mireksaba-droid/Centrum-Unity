@@ -30,6 +30,7 @@ export interface Practitioner {
   role?: Role;
   isActive?: boolean;
   pin?: string; // New: Simple auth for coworking model
+  email?: string; // E-mail lektora - sem chodí potvrzení o rezervaci/platbě a storno
   colorCode?: string; // Phase 1.5: Barevné kódování v kalendáři (např. '#10b981' nebo 'bg-emerald-500')
   calendarSyncToken?: string; // Phase 1.5: Bezpečnostní token pro iCal/ICS feed (export do telefonu)
 }

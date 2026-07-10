@@ -138,6 +138,28 @@ async function startServer() {
   const expectedAmountHaler = (b: any): number =>
     Math.round(calculateRentalPrice(b?.bookedByUserId || "", b?.durationMinutes || 0, b?.room) * 100);
 
+  // E-mail lektora podle jeho ID (z kolekce practitioners)
+  async function getPractitionerEmail(userId?: string): Promise<string> {
+    if (!userId || userId === "guest") return "";
+    try {
+      const snap = await getDoc(doc(db, "practitioners", userId));
+      if (snap.exists()) {
+        const email = (snap.data() as any)?.email;
+        return typeof email === "string" ? email.trim() : "";
+      }
+    } catch { /* ignore */ }
+    return "";
+  }
+
+  // Příjemci e-mailů k rezervaci: klient (pokud vyplněn) + lektor, který ji vytvořil. Bez duplicit.
+  async function recipientsFor(bookingData: any): Promise<string[]> {
+    const set = new Set<string>();
+    if (bookingData?.clientEmail) set.add(String(bookingData.clientEmail).trim());
+    const practitionerEmail = await getPractitionerEmail(bookingData?.bookedByUserId);
+    if (practitionerEmail) set.add(practitionerEmail);
+    return Array.from(set).filter(Boolean);
+  }
+
   // --- API Routes ---
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
@@ -778,17 +800,17 @@ async function startServer() {
       try {
         const finalDoc = await getDoc(bookingRef!);
         const bookingData = finalDoc.data() as any;
-        const targetEmail = bookingData?.clientEmail;
-        if (targetEmail) {
+        const recipients = await recipientsFor(bookingData); // klient + lektor
+        if (recipients.length) {
           await getMailer().sendMail({
             from: getFromEmail(),
-            to: targetEmail,
+            to: recipients,
             subject: 'Potvrzení zaplacené rezervace - Centrum Unity',
             html: generateConfirmationEmail(bookingData, true)
           });
-          console.log(`Confirmation email sent to ${targetEmail} for paid booking ${bookingId}`);
+          console.log(`Confirmation email sent to ${recipients.join(', ')} for paid booking ${bookingId}`);
         } else {
-          console.log(`Booking ${bookingId} zaplacena, ale bez clientEmail - potvrzení neodesláno.`);
+          console.log(`Booking ${bookingId} zaplacena, ale bez příjemce (klient ani lektor nemá e-mail) - potvrzení neodesláno.`);
         }
       } catch (e: any) {
         console.error("Failed to send confirmation email after payment:", e.message);
@@ -1067,7 +1089,7 @@ async function startServer() {
              note: (data.note ? data.note + '\n' : '') + 'Automaticky zrušeno - platba nebyla uhrazena včas.'
           });
           count++;
-          if (data.paymentRequestedAt && data.clientEmail) {
+          if (data.paymentRequestedAt) {
              toNotify.push({ id: doc.id, ...data });
           }
         }
@@ -1077,16 +1099,19 @@ async function startServer() {
         await batch.commit();
         console.log(`Automatically cancelled ${count} expired pending bookings`);
 
-        // Best-effort: pošleme storno e-maily klientům, kterým vypršela výzva k platbě
+        // Best-effort: pošleme storno e-maily (klientovi i lektorovi), kterým vypršela výzva k platbě
         for (const booking of toNotify) {
           try {
             if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-              await getMailer().sendMail({
-                from: getFromEmail(),
-                to: booking.clientEmail,
-                subject: 'Zrušení rezervace - Centrum Unity',
-                html: generateCancellationEmail(booking),
-              });
+              const recipients = await recipientsFor(booking);
+              if (recipients.length) {
+                await getMailer().sendMail({
+                  from: getFromEmail(),
+                  to: recipients,
+                  subject: 'Zrušení rezervace - Centrum Unity',
+                  html: generateCancellationEmail(booking),
+                });
+              }
             }
           } catch (mailErr: any) {
             console.error(`Nepodařilo se odeslat storno e-mail pro rezervaci ${booking.id}:`, mailErr.message);

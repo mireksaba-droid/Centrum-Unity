@@ -55,10 +55,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const [editingPractitionerId, setEditingPractitionerId] = useState<string | null>(null);
     
     // Form State
-    const [practitionerForm, setPractitionerForm] = useState<{name: string, title: string, pin: string, role: Role, category: string}>({
+    const [practitionerForm, setPractitionerForm] = useState<{name: string, title: string, pin: string, email: string, role: Role, category: string}>({
         name: '',
         title: '',
         pin: '',
+        email: '',
         role: Role.PRACTITIONER,
         category: 'Terapie 1-1'
     });
@@ -343,6 +344,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             name: '',
             title: '',
             pin: '',
+            email: '',
             role: Role.PRACTITIONER,
             category: 'Terapie 1-1'
         });
@@ -355,6 +357,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             name: p.name,
             title: p.title,
             pin: p.pin || '',
+            email: p.email || '',
             role: p.role || Role.PRACTITIONER,
             category: p.category
         });
@@ -378,6 +381,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     name: practitionerForm.name,
                     title: practitionerForm.title,
                     pin: practitionerForm.pin,
+                    email: practitionerForm.email.trim(),
                     category: practitionerForm.category,
                     role: practitionerForm.role,
                     specialties: [practitionerForm.category]
@@ -404,7 +408,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 services: [],
                 role: practitionerForm.role,
                 isActive: true,
-                pin: practitionerForm.pin
+                pin: practitionerForm.pin,
+                email: practitionerForm.email.trim()
             };
 
             onAddPractitioner(newP);
@@ -1162,12 +1167,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 </div>
                             </div>
 
+                            <div>
+                                <label className="block text-sm font-bold text-stone-700 mb-1">E-mail lektora</label>
+                                <input
+                                    type="email"
+                                    value={practitionerForm.email}
+                                    onChange={e => setPractitionerForm({...practitionerForm, email: e.target.value})}
+                                    className="w-full p-2 border border-stone-300 rounded-lg text-sm bg-white"
+                                    placeholder="lektor@centrumunity.cz"
+                                />
+                                <p className="text-[10px] text-stone-500 mt-1">
+                                    Sem chodí potvrzení o rezervaci, platbě a storno. Nepovinné.
+                                </p>
+                            </div>
+
                             <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100">
                                 <label className="block text-xs font-bold text-indigo-800 mb-1 flex items-center gap-1">
                                     <Lock className="w-3 h-3" /> PIN pro přihlášení
                                 </label>
-                                <input 
-                                    type="text" 
+                                <input
+                                    type="text"
                                     value={practitionerForm.pin}
                                     onChange={e => setPractitionerForm({...practitionerForm, pin: e.target.value})}
                                     className="w-full p-2 border border-indigo-200 rounded-lg text-sm bg-white font-mono text-center tracking-widest font-bold text-lg"
