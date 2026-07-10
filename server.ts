@@ -689,6 +689,115 @@ async function startServer() {
     }
   });
 
+  // --- Sdílená rekonciliace platby ---
+  // Dotáhne stav z GoPay, spáruje rezervaci, aktualizuje její stav a (jen při skutečném
+  // přechodu na 'paid') pošle potvrzovací e-mail. Volá se z webhooku i z návratu na return_url,
+  // takže potvrzení dorazí i když GoPay z nějakého důvodu nedoručí webhook.
+  // Je idempotentní - opakované volání nepřepíše zaplacenou rezervaci ani nepošle e-mail dvakrát.
+  async function reconcilePayment(id: string): Promise<{ state: string }> {
+    const token = await getGoPayToken();
+    const statusRes = await fetch(`${GOPAY_URL}/payments/payment/${id}`, {
+      method: "GET",
+      headers: { "Accept": "application/json", "Authorization": `Bearer ${token}` }
+    });
+    const paymentStatus = await safeJson(statusRes);
+    const state: string = paymentStatus.state;
+
+    // Najdeme rezervaci: primárně přes bookingId v additional_params, jinak podle paymentId
+    const bookingIdParam = paymentStatus.additional_params?.find((x: any) => x.name === "bookingId")?.value;
+    let bookingRef: DocumentReference | null = null;
+    let bookingId = bookingIdParam;
+
+    if (bookingId) {
+      bookingRef = doc(db, "bookings", bookingId);
+    } else {
+      const snapshot = await getDocs(query(collection(db, "bookings"), where("paymentId", "==", String(id))));
+      if (!snapshot.empty) {
+        bookingRef = snapshot.docs[0].ref;
+        bookingId = snapshot.docs[0].id;
+      }
+    }
+
+    if (!bookingRef) {
+      console.log(`GoPay reconcile: pro platbu ${id} nenalezena rezervace.`);
+      return { state };
+    }
+
+    const map: Record<string, string> = {
+      PAID: "paid",
+      CANCELED: "cancelled",
+      TIMEOUTED: "cancelled",
+      REFUNDED: "refunded",
+    };
+    const newStatus = map[state];
+    if (!newStatus) return { state };
+
+    let transitionedToPaid = false;
+    let amountMismatch = false;
+
+    await runTransaction(db, async (tx: any) => {
+      transitionedToPaid = false; // reset pro případ opakování transakce
+      amountMismatch = false;
+      const snap = await tx.get(bookingRef!);
+      if (!snap.exists()) return;
+      const current = snap.data() || {};
+
+      // Idempotence: ze stavu 'paid' už nepřecházíme na 'paid' ani zpět na 'cancelled'
+      if (current.status === "paid" && (newStatus === "paid" || newStatus === "cancelled")) return;
+
+      // Ověření částky u PAID - nesmí být nižší než očekávaná cena z rezervace
+      if (newStatus === "paid") {
+        const expected = expectedAmountHaler(current);
+        const paid = Number(paymentStatus.amount) || 0;
+        if (expected > 0 && paid < expected) {
+          amountMismatch = true;
+          tx.update(bookingRef!, {
+            status: "payment_review",
+            paymentId: String(id),
+            note: (current.note ? current.note + "\n" : "") + `POZOR: nesoulad částky - zaplaceno ${paid}, očekáváno ${expected} haléřů. Nutná ruční kontrola.`
+          });
+          return;
+        }
+      }
+
+      const updateData: any = { status: newStatus, paymentId: String(id) };
+      if (newStatus === "cancelled" || newStatus === "refunded") {
+        updateData.cancelledAt = new Date().toISOString();
+      }
+      tx.update(bookingRef!, updateData);
+      if (newStatus === "paid") transitionedToPaid = true;
+    });
+
+    if (amountMismatch) {
+      console.error(`GoPay: nesoulad částky u rezervace ${bookingId}, platba ${id}. Označeno k ruční kontrole.`);
+    }
+
+    // Potvrzovací e-mail posíláme JEN když jsme rezervaci právě teď překlopili na 'paid'
+    // (ne opakovaně) - tím zajistíme právě jedno odeslání napříč webhookem i návratem z brány.
+    if (transitionedToPaid && process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+      try {
+        const finalDoc = await getDoc(bookingRef!);
+        const bookingData = finalDoc.data() as any;
+        const targetEmail = bookingData?.clientEmail;
+        if (targetEmail) {
+          await getMailer().sendMail({
+            from: getFromEmail(),
+            to: targetEmail,
+            subject: 'Potvrzení zaplacené rezervace - Centrum Unity',
+            html: generateConfirmationEmail(bookingData, true)
+          });
+          console.log(`Confirmation email sent to ${targetEmail} for paid booking ${bookingId}`);
+        } else {
+          console.log(`Booking ${bookingId} zaplacena, ale bez clientEmail - potvrzení neodesláno.`);
+        }
+      } catch (e: any) {
+        console.error("Failed to send confirmation email after payment:", e.message);
+      }
+    }
+
+    return { state };
+  }
+
   // Webhook pro notifikace z GoPay (změna stavu platby)
   app.all("/api/gopay/notify", async (req: Request, res: Response) => {
       try {
@@ -696,107 +805,8 @@ async function startServer() {
           if (!id) {
              return res.status(400).json({ error: "Missing payment ID" });
           }
-
-          const token = await getGoPayToken();
-          const statusRes = await fetch(`${GOPAY_URL}/payments/payment/${id}`, {
-             method: "GET",
-             headers: {
-                "Accept": "application/json",
-                "Authorization": `Bearer ${token}`
-             }
-          });
-          const paymentStatus = await safeJson(statusRes);
-
-          const bookingIdParam = paymentStatus.additional_params?.find((x: any) => x.name === "bookingId")?.value;
-          
-          let bookingRef: DocumentReference | null = null;
-          let bookingId = bookingIdParam;
-
-          if (bookingId) {
-             bookingRef = doc(db, "bookings", bookingId);
-          } else {
-             // Zkusíme najít podle paymentId
-             const snapshot = await getDocs(query(collection(db, "bookings"), where("paymentId", "==", String(id))));
-             if (!snapshot.empty) {
-                bookingRef = snapshot.docs[0].ref;
-                bookingId = snapshot.docs[0].id;
-             }
-          }
-
-          if (bookingRef) {
-             const map: Record<string, string> = {
-                PAID: "paid",
-                CANCELED: "cancelled",
-                TIMEOUTED: "cancelled",
-                REFUNDED: "refunded",
-             };
-             const newStatus = map[paymentStatus.state];
-             let amountMismatch = false;
-             if (newStatus) {
-                await runTransaction(db, async (tx: any) => {
-                   const snap = await tx.get(bookingRef!);
-                   if (!snap.exists()) return;
-                   const current = snap.data() || {};
-
-                   // Idempotence a ochrana: ze stavu 'paid' už nepřecházíme na 'paid' ani zpět na 'cancelled'
-                   if (current.status === "paid") {
-                      if (newStatus === "paid" || newStatus === "cancelled") return;
-                   }
-
-                   // Ověření částky u PAID - nesmí být nižší než očekávaná cena z rezervace
-                   if (newStatus === "paid") {
-                      const expected = expectedAmountHaler(current);
-                      const paid = Number(paymentStatus.amount) || 0;
-                      if (expected > 0 && paid < expected) {
-                         amountMismatch = true;
-                         tx.update(bookingRef!, {
-                            status: "payment_review",
-                            paymentId: String(id),
-                            note: (current.note ? current.note + "\n" : "") + `POZOR: nesoulad částky - zaplaceno ${paid}, očekáváno ${expected} haléřů. Nutná ruční kontrola.`
-                         });
-                         return;
-                      }
-                   }
-
-                   const updateData: any = { status: newStatus, paymentId: String(id) };
-                   if (newStatus === "cancelled" || newStatus === "refunded") {
-                       updateData.cancelledAt = new Date().toISOString();
-                   }
-                   tx.update(bookingRef!, updateData);
-                });
-
-                if (amountMismatch) {
-                   console.error(`GoPay: nesoulad částky u rezervace ${bookingId}, platba ${id}. Rezervace označena k ruční kontrole.`);
-                }
-
-                // Odeslání e-mailu po úspěšné platbě (změna na paid, bez nesouladu částky)
-                if (newStatus === "paid" && !amountMismatch && process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-                   try {
-                       const finalDoc = await getDoc(bookingRef!);
-                       const bookingData = finalDoc.data() as any;
-                       if (bookingData && (bookingData.clientEmail || bookingData.bookedByUserId !== 'guest')) {
-                           // Zjistíme e-mail: zkusíme clientEmail, jinak jestli to dělal přihlášený uživatel s e-mailem (málokdy)
-                           // Bohužel Practitioner nemá e-mail, takže použijeme clientEmail.
-                           const targetEmail = bookingData.clientEmail || 'mirek.saba@gmail.com';
-                           if (targetEmail) {
-                               const emailHtml = generateConfirmationEmail(bookingData, true);
-                               await getMailer().sendMail({
-                                  from: getFromEmail(),
-                                  to: targetEmail,
-                                  subject: 'Potvrzení zaplacené rezervace - Centrum Unity',
-                                  html: emailHtml
-                               });
-                               console.log(`Confirmation email sent to ${targetEmail} for paid booking ${bookingId}`);
-                           }
-                       }
-                   } catch (e: any) {
-                       console.error("Failed to send confirmation email after payment:", e.message);
-                   }
-                }
-             }
-          }
-
-          console.log(`GoPay Notification - Payment ID: ${id}, State: ${paymentStatus.state}`);
+          const { state } = await reconcilePayment(String(id));
+          console.log(`GoPay Notification - Payment ID: ${id}, State: ${state}`);
           res.send("OK"); // GoPay očekává jakoukoliv HTTP 200 odpověď
       } catch (error: any) {
           console.error("GoPay Webhook Error:", error.message);
@@ -804,24 +814,17 @@ async function startServer() {
       }
   });
 
-  // Endpoint pro ověření stavu platby (např. po návratu na return_url)
+  // Endpoint pro ověření stavu platby po návratu na return_url.
+  // Kromě vrácení stavu rovnou provede rekonciliaci (spáruje a případně pošle potvrzení),
+  // takže potvrzovací e-mail dorazí i bez webhooku.
   app.get("/api/gopay/status", async (req: Request, res: Response) => {
       try {
           const { id } = req.query;
           if (!id) {
              return res.status(400).json({ error: "Missing payment ID" });
           }
-
-          const token = await getGoPayToken();
-          const statusRes = await fetch(`${GOPAY_URL}/payments/payment/${id}`, {
-             method: "GET",
-             headers: {
-                "Accept": "application/json",
-                "Authorization": `Bearer ${token}`
-             }
-          });
-          const paymentStatus = await safeJson(statusRes);
-          res.json({ state: paymentStatus.state });
+          const { state } = await reconcilePayment(String(id));
+          res.json({ state });
       } catch (error: any) {
           console.error("GoPay Status Error:", error.message);
           res.status(500).json({ error: error.message });
@@ -957,6 +960,46 @@ async function startServer() {
       res.json({ success: true, messageId: info.messageId, to });
     } catch (error: any) {
       console.error("Test Email Error:", error.message);
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Veřejný endpoint pro odeslání storno e-mailu (pro hosty bez přihlášení).
+  // Bezpečné: nepřijímá cílovou adresu ani obsah - vše bere z rezervace v DB
+  // a pošle jen tehdy, když je rezervace skutečně zrušená. Rate-limitováno.
+  app.post("/api/public-cancellation-email", async (req: Request, res: Response) => {
+    try {
+      const ip = req.ip || 'unknown';
+      const now = Date.now();
+      const key = "cancel:" + ip;
+      const limit = paymentRateLimits.get(key);
+      if (limit && limit.resetTime > now) {
+        if (limit.count >= 5) return res.status(429).json({ error: "Příliš mnoho požadavků." });
+        limit.count++;
+      } else {
+        paymentRateLimits.set(key, { count: 1, resetTime: now + 60000 });
+      }
+
+      const { bookingId } = req.body;
+      if (!bookingId) return res.status(400).json({ error: "Chybí bookingId" });
+
+      const booking = await loadBooking(bookingId);
+      // Pošleme jen po skutečném zrušení a jen na e-mail uložený u rezervace
+      if (!booking || booking.data.status !== 'cancelled' || !booking.data.clientEmail) {
+        return res.json({ skipped: true });
+      }
+
+      if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+        await getMailer().sendMail({
+          from: getFromEmail(),
+          to: booking.data.clientEmail,
+          subject: 'Zrušení rezervace - Centrum Unity',
+          html: generateCancellationEmail(booking.data, "Rezervace byla zrušena na Vaši žádost.")
+        });
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Public Cancellation Email Error:", error.message);
       res.status(400).json({ error: error.message });
     }
   });

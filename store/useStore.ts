@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Practitioner, Booking, GroupEvent, EventRegistration, Role } from '../types';
-import { generateConfirmationEmail } from "../utils/emailTemplates";
+import { generateConfirmationEmail, generateCancellationEmail } from "../utils/emailTemplates";
 import { PRACTITIONERS, sortPractitioners } from '../constants';
 import { 
   saveBookingToFirestore, 
@@ -164,6 +164,40 @@ export const useStore = create<AppState>()(
 
         const cancelledAt = new Date().toISOString();
         await updateBookingInFirestore(bookingId, { status: 'cancelled', cancelledAt });
+
+        // Odeslání storno e-mailu klientovi, pokud má vyplněný e-mail.
+        // Důvod rozlišíme podle toho, kdo rezervaci ruší.
+        if (booking.clientEmail) {
+            const reason = isAdmin
+                ? "Rezervace byla zrušena administrátorem studia."
+                : isGuestBooking
+                    ? "Rezervace byla zrušena na Vaši žádost."
+                    : "Rezervace byla zrušena ze strany studia (lektorem).";
+            try {
+                if (state.token) {
+                    // Přihlášený uživatel (lektor/admin) → přes chráněný endpoint s naší šablonou
+                    const html = generateCancellationEmail(
+                        { ...booking, status: 'cancelled', cancelledAt },
+                        reason
+                    );
+                    sendTransactionalEmail({
+                        to: booking.clientEmail,
+                        subject: "Zrušení rezervace - Centrum Unity",
+                        text: "Zrušení rezervace pro: " + booking.date + " v " + booking.time,
+                        html: html
+                    }).catch(e => console.error("Nepodařilo se odeslat storno e-mail:", e.message));
+                } else {
+                    // Host bez tokenu → veřejný serverový endpoint, který e-mail sestaví sám z DB
+                    fetch('/api/public-cancellation-email', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ bookingId })
+                    }).catch(e => console.error("Nepodařilo se odeslat storno e-mail (host):", e.message));
+                }
+            } catch (e: any) {
+                console.error("Chyba při přípravě storno e-mailu:", e.message);
+            }
+        }
 
         set((state) => ({
           bookings: state.bookings.map(b => 

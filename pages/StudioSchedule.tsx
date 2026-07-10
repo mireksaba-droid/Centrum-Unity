@@ -76,7 +76,8 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                         if (data.state === 'PAID') {
                             updateBookingStatus(booking.id, 'paid');
                             addToast('success', 'Platba úspěšná', 'Vaše rezervace byla zaplacena.');
-                            sendConfirmationEmail(booking, true);
+                            // Potvrzovací e-mail odešle server v rámci /api/gopay/status (na clientEmail),
+                            // aby dorazil právě jednou a správnému příjemci - klient ho už neposílá.
                         } else if (data.state === 'CANCELED' || data.state === 'TIMEOUTED') {
                             addToast('error', 'Platba neúspěšná', 'Platba byla zrušena nebo vypršela. Můžete ji zkusit znovu.');
                             onCancel(booking.id);

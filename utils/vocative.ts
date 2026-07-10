@@ -76,16 +76,44 @@ function nameToVocative(name: string): string {
   return name + 'e';
 }
 
+// Vokativ příjmení (jiná pravidla než u křestních jmen - hlavně ženská -ová/-á a přídavná -ý/-í)
+function surnameToVocative(name: string): string {
+  if (!name) return name;
+  const l = name.toLocaleLowerCase('cs-CZ');
+  const last = l.slice(-1);
+  const last2 = l.slice(-2);
+
+  // Ženská příjmení (-ová, -á) a přídavná (-ý, -í, -é) → beze změny
+  // (Nováková, Krátká, Novotný, Dolejší, Krejčí)
+  if (last === 'á' || last === 'ý' || last === 'í' || last === 'é') return name;
+
+  // -a (Svoboda, Procházka, Růžička) → -o
+  if (last === 'a') return name.slice(0, -1) + 'o';
+
+  // Ostatní samohlásky → beze změny
+  if ('eěiyouů'.includes(last)) return name;
+
+  // Souhláskové koncovky:
+  if (last2 === 'ek') return name.slice(0, -2) + 'ku';   // Havránek → Havránku
+  if (last2 === 'ec') return name.slice(0, -2) + 'če';   // Němec → Němče
+  if (last2 === 'ch') return name + 'u';                 // Vlach → Vlachu
+  if ('cčďjňřšťž'.includes(last)) return name + 'i';     // Bareš → Bareši, Kovář → Kováři
+  if (last === 'k' || last === 'g' || last === 'h') return name + 'u'; // Novák → Nováku, Dvořák → Dvořáku
+
+  // Ostatní tvrdé souhlásky → -e (Beran → Berane, Holub → Holube, Pospíšil → Pospíšile)
+  return name + 'e';
+}
+
 /**
- * Vrátí oslovení ve 5. pádě. Skloní pouze křestní jméno (první slovo),
- * případné příjmení ponechá beze změny.
- * Např. "Eva" → "Evo", "Jan Novák" → "Jene Novák".
+ * Vrátí oslovení ve 5. pádě. Skloní křestní jméno (první slovo) i příjmení (ostatní slova).
+ * Např. "Eva" → "Evo", "Honza Novák" → "Honzo Nováku", "Jana Nováková" → "Jano Nováková".
  */
 export function toVocative(fullName?: string): string {
   if (!fullName) return '';
   const trimmed = fullName.trim();
   if (!trimmed) return '';
   const parts = trimmed.split(/\s+/);
-  parts[0] = nameToVocative(parts[0]);
-  return parts.join(' ');
+  return parts
+    .map((part, i) => (i === 0 ? nameToVocative(part) : surnameToVocative(part)))
+    .join(' ');
 }
