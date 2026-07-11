@@ -171,3 +171,57 @@ export const generateCancellationEmail = (
     </div>
     `;
 };
+
+// Denní souhrn pro admina: nové a zrušené rezervace za dané období
+export const generateAdminDailySummaryEmail = (
+    newBookings: Partial<Booking>[],
+    cancelledBookings: Partial<Booking>[],
+    periodLabel: string = 'za posledních 24 hodin'
+) => {
+    const fmtDate = (d?: string) => {
+        const p = (d || '').split('-');
+        return p.length === 3 ? `${p[2]}. ${p[1]}. ${p[0]}` : (d || '');
+    };
+    const roomShort = (r?: number) => (r === 1 ? 'M1' : r === 2 ? 'M2' : '—');
+    const statusLabel: Record<string, string> = {
+        paid: 'Zaplaceno', awaiting_payment: 'Čeká na platbu', deferred_payment: 'Odložená platba',
+        created: 'Nová', completed: 'Dokončeno', cancelled: 'Zrušeno', refunded: 'Refundováno',
+        payment_review: 'Ke kontrole'
+    };
+
+    const row = (b: Partial<Booking>) => `
+        <tr>
+          <td style="padding:8px 10px;border-bottom:1px solid #ece3d6;font-size:13px;color:#1c1917;">${fmtDate(b.date)} <b>${b.time || ''}</b></td>
+          <td style="padding:8px 10px;border-bottom:1px solid #ece3d6;font-size:13px;color:#57534e;">${roomShort(b.room)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #ece3d6;font-size:13px;color:#1c1917;">${b.bookedByName || ''}${b.clientName ? ` <span style="color:#a8a29e;">/ ${b.clientName}</span>` : ''}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #ece3d6;font-size:13px;color:#57534e;text-align:right;">${typeof b.price === 'number' ? b.price + ' Kč' : ''}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #ece3d6;font-size:12px;color:#78716c;text-align:right;">${statusLabel[b.status as string] || b.status || ''}</td>
+        </tr>`;
+
+    const section = (title: string, color: string, items: Partial<Booking>[]) => `
+        <div style="margin-bottom:24px;">
+          <h2 style="font-size:15px;color:${color};margin:0 0 8px;">${title} (${items.length})</h2>
+          ${items.length === 0
+            ? `<p style="margin:0;color:#a8a29e;font-size:13px;">Žádné položky.</p>`
+            : `<table style="width:100%;border-collapse:collapse;background:#faf7f2;border:1px solid #ece3d6;border-radius:8px;overflow:hidden;">
+                 ${items.map(row).join('')}
+               </table>`}
+        </div>`;
+
+    return `
+    <div style="background-color:#f1e9dc;padding:32px 16px;font-family:Helvetica,Arial,sans-serif;">
+      <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06);">
+        ${emailHeader()}
+        <div style="padding:32px;">
+          <div style="display:inline-block;background:#e0e7ff;color:#3730a3;font-size:13px;font-weight:700;padding:6px 14px;border-radius:999px;margin-bottom:16px;">Denní souhrn</div>
+          <h1 style="margin:0 0 4px;font-size:22px;color:#1c1917;">Přehled rezervací</h1>
+          <p style="margin:0 0 24px;color:#57534e;font-size:14px;">Nové a zrušené rezervace ${periodLabel}.</p>
+
+          ${section('🟢 Nové rezervace', '#166534', newBookings)}
+          ${section('🔴 Zrušené rezervace', '#991b1b', cancelledBookings)}
+        </div>
+        ${emailFooter()}
+      </div>
+    </div>
+    `;
+};

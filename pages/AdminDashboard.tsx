@@ -9,6 +9,7 @@ import { useToast } from '../contexts/ToastContext';
 import { checkBookingCollision, timeToMinutes } from '../utils/scheduler';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 import { useStore } from '../store/useStore';
+import { isDemoMode } from '../services/firebase';
 import { generatePaymentRequestEmail } from '../utils/emailTemplates';
 
 interface AdminDashboardProps {
@@ -327,6 +328,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         };
     }, [allBookings]);
 
+    // Feed poslední aktivity: nové rezervace (dle createdAt) a zrušení (dle cancelledAt)
+    const recentActivity = useMemo(() => {
+        const items: { type: 'new' | 'cancel'; at: string; booking: Booking }[] = [];
+        allBookings.forEach(b => {
+            if (b.createdAt) items.push({ type: 'new', at: b.createdAt, booking: b });
+            if (b.cancelledAt && (b.status === 'cancelled' || b.status === 'refunded')) {
+                items.push({ type: 'cancel', at: b.cancelledAt, booking: b });
+            }
+        });
+        return items.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 12);
+    }, [allBookings]);
+
     // --- TEAM MANAGEMENT HANDLERS ---
     const handleToggleActive = (practitioner: Practitioner) => {
         if (window.confirm(`Opravdu chcete ${practitioner.isActive ? 'deaktivovat' : 'aktivovat'} profil lektora ${practitioner.name}?`)) {
@@ -492,7 +505,22 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500 pb-12">
-            
+
+            {/* Varování: aplikace neukládá data do databáze (demo/mock režim) */}
+            {isDemoMode() && (
+                <div className="bg-red-600 text-white p-4 rounded-xl shadow-lg flex items-start gap-3">
+                    <AlertTriangle className="w-6 h-6 shrink-0 mt-0.5" />
+                    <div>
+                        <div className="font-bold">Pozor: data se neukládají do databáze!</div>
+                        <div className="text-sm text-red-100 mt-1">
+                            Aplikace běží v <strong>demo režimu</strong> – připojení k databázi (Firebase) selhalo.
+                            Rezervace vytvořené teď zůstanou jen v tomto prohlížeči a po zavření nebo na jiném zařízení
+                            zmizí. Zkontrolujte konfiguraci Firebase, než začnete zadávat reálné rezervace.
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Admin Header */}
             <div className="bg-indigo-900 border-b-4 border-indigo-500 text-white p-8 rounded-2xl shadow-xl flex flex-col md:flex-row justify-between items-center gap-6 relative overflow-hidden">
                 <div className="absolute right-0 top-0 opacity-10 pointer-events-none translate-x-1/4 -translate-y-1/4">
@@ -587,6 +615,39 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </div>
                     ) : (
                         <>
+                            {/* SECTION 0: POSLEDNÍ AKTIVITA */}
+                            <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm">
+                                <h3 className="text-lg font-bold text-stone-900 mb-4 flex items-center gap-2">
+                                    <Activity className="w-5 h-5 text-indigo-600" /> Poslední aktivita
+                                </h3>
+                                {recentActivity.length === 0 ? (
+                                    <p className="text-sm text-stone-500">Zatím žádná aktivita.</p>
+                                ) : (
+                                    <div className="divide-y divide-stone-100">
+                                        {recentActivity.map((it, idx) => {
+                                            const b = it.booking;
+                                            const when = new Date(it.at).toLocaleString('cs-CZ', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
+                                            const dateParts = (b.date || '').split('-');
+                                            const resDate = dateParts.length === 3 ? `${dateParts[2]}.${dateParts[1]}.` : b.date;
+                                            return (
+                                                <div key={idx} className="flex items-center gap-3 py-2.5">
+                                                    <span className={`w-2 h-2 rounded-full shrink-0 ${it.type === 'new' ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
+                                                    <div className="flex-1 min-w-0">
+                                                        <span className={`text-sm font-semibold ${it.type === 'new' ? 'text-emerald-700' : 'text-red-700'}`}>
+                                                            {it.type === 'new' ? 'Nová rezervace' : 'Zrušená rezervace'}
+                                                        </span>
+                                                        <span className="text-sm text-stone-600">
+                                                            {' — '}{b.bookedByName}{b.clientName ? ` / ${b.clientName}` : ''}, {b.room === 1 ? 'M1' : 'M2'}, {resDate} {b.time}
+                                                        </span>
+                                                    </div>
+                                                    <span className="text-xs text-stone-400 shrink-0">{when}</span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+
                             {/* SECTION 1: FINANCIAL PERFORMANCE */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 {/* Revenue Trend */}
@@ -737,7 +798,22 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
                 <h3 className="text-xl font-bold text-stone-900">Správa Dat</h3>
                 <p className="text-stone-500 mb-6 max-w-md text-center text-sm">Vynulováním nevratně odstraníte všechny rezervace, události a registrace z databáze.</p>
-                <button onClick={() => { if (window.confirm('Opravdu chcete vynulovat veškerá data o rezervacích? Toto je nevratné.')) { useStore.getState().resetData(); } }} className="bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 transition-colors font-medium">Vynulovat Všechna Data</button>
+                <button
+                    onClick={() => {
+                        // Dvojité potvrzení + nutnost napsat přesně SMAZAT, aby nešlo omylem
+                        if (!window.confirm('Opravdu chcete NEVRATNĚ smazat všechny rezervace, události a registrace? Tuto akci nelze vzít zpět.')) return;
+                        const typed = window.prompt('Pro potvrzení napište velkými písmeny: SMAZAT');
+                        if (typed === null) return;
+                        if (typed.trim() !== 'SMAZAT') {
+                            addToast('info', 'Zrušeno', 'Text nesouhlasí, data nebyla smazána.');
+                            return;
+                        }
+                        useStore.getState().resetData();
+                    }}
+                    className="bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 transition-colors font-medium"
+                >
+                    Vynulovat Všechna Data
+                </button>
             </div>
             </div>
             )}

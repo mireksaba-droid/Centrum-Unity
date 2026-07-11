@@ -24,6 +24,9 @@ try {
   console.warn("Firebase failed to initialize. Running in Demo Mode.", e);
 }
 
+// True = data se NEUKLÁDAJÍ do databáze (běží demo/mock režim). Slouží k varování v adminu.
+export const isDemoMode = (): boolean => !isFirebaseReady;
+
 // Pomocná funkce pro čekání na dokončení Firebase Auth
 export const waitForAuth = async (): Promise<void> => {
   // We cannot use anonymous auth because it's not enabled by default.

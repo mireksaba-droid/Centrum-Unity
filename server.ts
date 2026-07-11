@@ -11,7 +11,7 @@ import firebaseConfig from "./firebase-applet-config.json";
 
 import { PRACTITIONERS } from "./constants";
 import { calculateRentalPrice } from "./utils/scheduler";
-import { generatePaymentRequestEmail, generateConfirmationEmail, generateCancellationEmail } from "./utils/emailTemplates";
+import { generatePaymentRequestEmail, generateConfirmationEmail, generateCancellationEmail, generateAdminDailySummaryEmail } from "./utils/emailTemplates";
 
 async function safeJson(res: any) {
   const text = await res.text();
@@ -913,6 +913,58 @@ async function startServer() {
          console.error("Cron Error:", error.message);
          res.status(500).send("Error");
      }
+  });
+
+  // Cron endpoint: denní souhrn pro admina (nové + zrušené rezervace za posledních 24 h).
+  // Spouštět např. z Google Cloud Scheduleru 1x denně s hlavičkou Authorization: Bearer <CRON_SECRET>.
+  app.post("/api/cron/daily-summary", async (req: Request, res: Response) => {
+    try {
+      const cronSecret = process.env.CRON_SECRET;
+      if (!cronSecret) {
+        console.error("CRON_SECRET is not configured on the server.");
+        return res.status(500).json({ error: "Server configuration error" });
+      }
+      if (req.headers.authorization !== `Bearer ${cronSecret}`) {
+        return res.status(401).send("Unauthorized");
+      }
+
+      const hours = Number(req.body?.hours) > 0 ? Number(req.body.hours) : 24;
+      const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+
+      const snap = await getDocs(collection(db, "bookings"));
+      const all = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+
+      const newBookings = all
+        .filter((b) => b.createdAt && b.createdAt >= cutoff)
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+      const cancelledBookings = all
+        .filter((b) => b.cancelledAt && b.cancelledAt >= cutoff && (b.status === "cancelled" || b.status === "refunded"))
+        .sort((a, b) => (a.cancelledAt < b.cancelledAt ? 1 : -1));
+
+      // Když se nic nestalo, e-mail neposíláme
+      if (newBookings.length === 0 && cancelledBookings.length === 0) {
+        return res.json({ success: true, sent: false, newCount: 0, cancelledCount: 0 });
+      }
+
+      const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL
+        || await getPractitionerEmail("admin")
+        || getFromEmail();
+
+      if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS && adminEmail) {
+        await getMailer().sendMail({
+          from: getFromEmail(),
+          to: adminEmail,
+          subject: `Denní souhrn rezervací – Centrum Unity (${newBookings.length} nových, ${cancelledBookings.length} zrušených)`,
+          html: generateAdminDailySummaryEmail(newBookings, cancelledBookings, `za posledních ${hours} h`)
+        });
+      }
+
+      console.log(`Daily summary sent: ${newBookings.length} new, ${cancelledBookings.length} cancelled → ${adminEmail}`);
+      res.json({ success: true, sent: true, newCount: newBookings.length, cancelledCount: cancelledBookings.length });
+    } catch (error: any) {
+      console.error("Daily Summary Error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // Send an email

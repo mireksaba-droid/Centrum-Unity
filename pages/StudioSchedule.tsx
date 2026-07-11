@@ -38,7 +38,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
     onLogout
 }) => {
     // Hooks
-    const { token, practitionersList, updateBookingStatus, attachPaymentId } = useStore();
+    const { token, practitionersList, updateBookingStatus, attachPaymentId, removeBooking } = useStore();
     const { addToast } = useToast();
 
     const sendConfirmationEmail = async (booking: Booking, isPaid: boolean = false) => {
@@ -369,10 +369,13 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                return;
             }
 
+            // ID rezervace (deterministické) - definujeme před try, ať je dostupné i pro rollback.
+            const bookingId = `${selectedSlot.room}_${selectedSlot.date}_${selectedSlot.time}`;
+            let bookingCreated = false;
             try {
                 // 1. Nejdřív založíme rezervaci (awaiting_payment), aby ji server mohl ocenit a spárovat.
-                const bookingId = `${selectedSlot.room}_${selectedSlot.date}_${selectedSlot.time}`;
                 await finalizeBooking('awaiting_payment', undefined, false); // neuzavřít okno ještě
+                bookingCreated = true;
                 setIsProcessing(true);
 
                 // 2. Platbu vytvoříme odkazem na bookingId - cenu i párování řeší server z DB.
@@ -405,29 +408,37 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                     return;
                 }
 
+                // Bez adresy brány nemá smysl pokračovat - vyvoláme rollback.
+                if (!data.gwUrl) {
+                    throw new Error("Platební brána nevrátila adresu pro platbu.");
+                }
+
                 // 3. paymentId zapsal server do DB; promítneme ho i do lokálního stavu.
                 setPaymentIntentIdState(data.paymentId);
                 attachPaymentId(bookingId, data.paymentId);
 
-                if (data.gwUrl) {
-                    setPaymentUrl(data.gwUrl);
-                    
-                    // Pokus o otevření GoPay okna
-                    // Jelikož appka může běžet v iframe (např. AI Studio preview), 
-                    // GoPay zablokuje zobrazení kvůli X-Frame-Options. Otevřeme proto v novém panelu.
-                    try {
-                        const newWindow = window.open(data.gwUrl, '_blank');
-                        if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
-                            // Popup was blocked, user will have to click the button
-                            addToast('info', 'Vyskakovací okno zablokováno', 'Prosím, klikněte na tlačítko "Pokračovat na platební bránu" pro dokončení platby.');
-                        }
-                    } catch (e) {
-                        console.error('Nepodařilo se otevřít okno platební brány:', e);
+                setPaymentUrl(data.gwUrl);
+
+                // Pokus o otevření GoPay okna.
+                // Jelikož appka může běžet v iframe (např. AI Studio preview),
+                // GoPay zablokuje zobrazení kvůli X-Frame-Options. Otevřeme proto v novém panelu.
+                try {
+                    const newWindow = window.open(data.gwUrl, '_blank');
+                    if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+                        // Popup was blocked, user will have to click the button
+                        addToast('info', 'Vyskakovací okno zablokováno', 'Prosím, klikněte na tlačítko "Pokračovat na platební bránu" pro dokončení platby.');
                     }
+                } catch (e) {
+                    console.error('Nepodařilo se otevřít okno platební brány:', e);
                 }
                 setIsProcessing(false);
             } catch (err: any) {
-                addToast('error', 'Chyba platby', err.message || 'Nepodařilo se inicializovat platbu GoPay.');
+                // Rollback: když se platba nepodařila inicializovat, uvolníme právě založený slot,
+                // ať nezůstane viset rezervace "čeká na platbu" bez platby.
+                if (bookingCreated) {
+                    await removeBooking(bookingId);
+                }
+                addToast('error', 'Platbu se nepodařilo spustit', (err.message || 'Nepodařilo se inicializovat platbu GoPay.') + ' Termín zůstává volný, zkuste to prosím znovu.');
                 setIsProcessing(false);
             }
             return;
@@ -648,20 +659,27 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                                 content = <span className="text-[10px] font-bold truncate px-1 uppercase">{eventName}</span>;
                                             } else {
                                                 const practitioner = practitionersList.find(p => p.id === data.booking?.bookedByUserId);
+                                                const isPending = data.booking?.status === 'awaiting_payment';
                                                 const colorClass = practitioner?.colorCode ? `${practitioner.colorCode} hover:opacity-90` : 'bg-emerald-500 hover:bg-emerald-600';
-                                                bgClass = `${colorClass} text-white shadow-sm flex flex-col items-center justify-center py-1 leading-tight`;
-                                                
-                                                const displayName = (currentUser.role === Role.ADMIN && data.booking?.bookedByUserId !== currentUser.id) 
+                                                bgClass = `${colorClass} text-white shadow-sm flex flex-col items-center justify-center py-1 leading-tight ${isPending ? 'opacity-70 ring-2 ring-amber-300 ring-inset' : ''}`;
+
+                                                const displayName = (currentUser.role === Role.ADMIN && data.booking?.bookedByUserId !== currentUser.id)
                                                     ? (data.booking?.bookedByName || 'Obsazeno')
                                                     : 'MOJE';
-                                                    
+
                                                 content = (
                                                     <>
                                                         <span className="text-[9px] font-bold truncate px-1 text-center uppercase">{displayName}</span>
-                                                        <div className="flex gap-1 mt-0.5">
-                                                            {data.booking?.equipment === 'table' && <Bed className="w-3 h-3 text-white/80" />}
-                                                            {data.booking?.equipment === 'futon' && <Layers className="w-3 h-3 text-white/80" />}
-                                                        </div>
+                                                        {isPending ? (
+                                                            <span className="flex items-center gap-0.5 text-[8px] font-bold text-amber-100 uppercase mt-0.5">
+                                                                <Clock className="w-2.5 h-2.5" /> platba
+                                                            </span>
+                                                        ) : (
+                                                            <div className="flex gap-1 mt-0.5">
+                                                                {data.booking?.equipment === 'table' && <Bed className="w-3 h-3 text-white/80" />}
+                                                                {data.booking?.equipment === 'futon' && <Layers className="w-3 h-3 text-white/80" />}
+                                                            </div>
+                                                        )}
                                                     </>
                                                 );
                                             }
@@ -671,15 +689,22 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                                 content = <span className="text-[9px] font-bold text-indigo-700 truncate px-1">Skupinová Událost</span>;
                                             } else {
                                                 const practitioner = practitionersList.find(p => p.id === data.booking?.bookedByUserId);
+                                                const isPending = data.booking?.status === 'awaiting_payment';
                                                 const colorClass = practitioner?.colorCode || 'bg-stone-200';
-                                                bgClass = `${colorClass} cursor-not-allowed text-white shadow-sm flex flex-col items-center justify-center py-1 leading-tight`;
+                                                bgClass = `${colorClass} cursor-not-allowed text-white shadow-sm flex flex-col items-center justify-center py-1 leading-tight ${isPending ? 'opacity-70 ring-2 ring-amber-300 ring-inset' : ''}`;
                                                 content = (
                                                     <>
                                                         <span className="text-[9px] font-bold truncate px-1 text-center">{data.booking?.bookedByName}</span>
-                                                        <div className="flex gap-1 mt-0.5">
-                                                            {data.booking?.equipment === 'table' && <Bed className="w-3 h-3 text-white/80" />}
-                                                            {data.booking?.equipment === 'futon' && <Layers className="w-3 h-3 text-white/80" />}
-                                                        </div>
+                                                        {isPending ? (
+                                                            <span className="flex items-center gap-0.5 text-[8px] font-bold text-amber-100 uppercase mt-0.5">
+                                                                <Clock className="w-2.5 h-2.5" /> platba
+                                                            </span>
+                                                        ) : (
+                                                            <div className="flex gap-1 mt-0.5">
+                                                                {data.booking?.equipment === 'table' && <Bed className="w-3 h-3 text-white/80" />}
+                                                                {data.booking?.equipment === 'futon' && <Layers className="w-3 h-3 text-white/80" />}
+                                                            </div>
+                                                        )}
                                                     </>
                                                 );
                                             }
