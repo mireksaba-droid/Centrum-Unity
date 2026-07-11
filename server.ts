@@ -78,6 +78,7 @@ async function startServer() {
     const clientId = process.env.GOPAY_CLIENT_ID;
     const clientSecret = process.env.GOPAY_CLIENT_SECRET;
     
+    
     if (!gopayId || !clientId || !clientSecret) {
       throw new Error("GoPay credentials are not fully configured in environment variables.");
     }
