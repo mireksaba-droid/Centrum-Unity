@@ -656,7 +656,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         <TrendingUp className="w-5 h-5 text-indigo-600" /> Vývoj tržeb (Posledních 6 měsíců)
                                     </h3>
                                     <div className="h-64 min-w-0 min-h-0">
-                                        <ResponsiveContainer width="100%" height="100%">
+                                        <ResponsiveContainer width="100%" height="100%" minHeight={0} minWidth={0}>
                                             <BarChart data={stats.revenueTrendData}>
                                                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                                                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12}} />
@@ -681,7 +681,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     </h3>
                                     <p className="text-xs text-stone-500 mb-6">Kteří lektoři generují nejvyšší obrat studia.</p>
                                     <div className="h-64 min-w-0 min-h-0">
-                                        <ResponsiveContainer width="100%" height="100%">
+                                        <ResponsiveContainer width="100%" height="100%" minHeight={0} minWidth={0}>
                                             <BarChart data={stats.topPerformersData} layout="vertical" margin={{ left: 20 }}>
                                                 <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                                                 <XAxis type="number" hide />
@@ -717,7 +717,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     <p className="text-xs text-stone-500 mb-4">Kdy dochází ke zrušení rezervace před termínem.</p>
                                     
                                     <div className="h-48 w-full flex items-center min-w-0 min-h-0">
-                                        <ResponsiveContainer width="100%" height="100%">
+                                        <ResponsiveContainer width="100%" height="100%" minHeight={0} minWidth={0}>
                                             <PieChart>
                                                 <Pie data={stats.cancellationLeadTimeData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2} dataKey="value">
                                                     {stats.cancellationLeadTimeData.map((entry, index) => (
@@ -739,7 +739,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 <Clock className="w-5 h-5 text-indigo-600" /> Vytíženost v čase (Peak Hours)
                             </h3>
                             <div className="h-64 min-w-0 min-h-0">
-                                <ResponsiveContainer width="100%" height="100%">
+                                <ResponsiveContainer width="100%" height="100%" minHeight={0} minWidth={0}>
                                     <AreaChart data={stats.peakHoursData}>
                                         <defs>
                                             <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
@@ -765,7 +765,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 <div className="flex-1 flex flex-col min-w-0 min-h-0">
                                     <p className="text-xs text-center font-bold text-stone-400 mb-2">VYBAVENÍ</p>
                                     <div className="flex-1 min-h-0">
-                                        <ResponsiveContainer width="100%" height="100%">
+                                        <ResponsiveContainer width="100%" height="100%" minHeight={0} minWidth={0}>
                                             <PieChart>
                                                 <Pie data={stats.equipmentData} cx="50%" cy="50%" innerRadius={30} outerRadius={50} dataKey="value">
                                                     {stats.equipmentData.map((entry, index) => <Cell key={index} fill={entry.color} />)}
@@ -779,7 +779,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 <div className="flex-1 flex flex-col min-w-0 min-h-0">
                                     <p className="text-xs text-center font-bold text-stone-400 mb-2">MÍSTNOSTI</p>
                                     <div className="flex-1 min-h-0">
-                                        <ResponsiveContainer width="100%" height="100%">
+                                        <ResponsiveContainer width="100%" height="100%" minHeight={0} minWidth={0}>
                                             <PieChart>
                                                 <Pie data={stats.roomData} cx="50%" cy="50%" innerRadius={30} outerRadius={50} dataKey="value">
                                                     {stats.roomData.map((entry, index) => <Cell key={index} fill={entry.color} />)}
