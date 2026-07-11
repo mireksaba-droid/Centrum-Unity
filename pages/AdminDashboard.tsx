@@ -655,7 +655,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     <h3 className="text-lg font-bold text-stone-900 mb-6 flex items-center gap-2">
                                         <TrendingUp className="w-5 h-5 text-indigo-600" /> Vývoj tržeb (Posledních 6 měsíců)
                                     </h3>
-                                    <div className="h-64">
+                                    <div className="h-64 min-w-0 min-h-0">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <BarChart data={stats.revenueTrendData}>
                                                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -680,7 +680,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         <Trophy className="w-5 h-5 text-amber-500" /> Kdo generuje tržby
                                     </h3>
                                     <p className="text-xs text-stone-500 mb-6">Kteří lektoři generují nejvyšší obrat studia.</p>
-                                    <div className="h-64">
+                                    <div className="h-64 min-w-0 min-h-0">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <BarChart data={stats.topPerformersData} layout="vertical" margin={{ left: 20 }}>
                                                 <CartesianGrid strokeDasharray="3 3" horizontal={false} />
@@ -716,7 +716,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     </h3>
                                     <p className="text-xs text-stone-500 mb-4">Kdy dochází ke zrušení rezervace před termínem.</p>
                                     
-                                    <div className="h-48 w-full flex items-center">
+                                    <div className="h-48 w-full flex items-center min-w-0 min-h-0">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <PieChart>
                                                 <Pie data={stats.cancellationLeadTimeData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2} dataKey="value">
@@ -738,7 +738,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <h3 className="text-lg font-bold text-stone-900 mb-6 flex items-center gap-2">
                                 <Clock className="w-5 h-5 text-indigo-600" /> Vytíženost v čase (Peak Hours)
                             </h3>
-                            <div className="h-64">
+                            <div className="h-64 min-w-0 min-h-0">
                                 <ResponsiveContainer width="100%" height="100%">
                                     <AreaChart data={stats.peakHoursData}>
                                         <defs>
@@ -761,30 +761,34 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <h3 className="text-lg font-bold text-stone-900 mb-2 w-full text-left flex items-center gap-2">
                                 <Layers className="w-5 h-5 text-stone-600" /> Preference Vybavení vs. Místností
                             </h3>
-                            <div className="h-64 w-full flex gap-4">
-                                <div className="flex-1">
+                            <div className="h-64 w-full flex gap-4 min-w-0 min-h-0">
+                                <div className="flex-1 flex flex-col min-w-0 min-h-0">
                                     <p className="text-xs text-center font-bold text-stone-400 mb-2">VYBAVENÍ</p>
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <PieChart>
-                                            <Pie data={stats.equipmentData} cx="50%" cy="50%" innerRadius={30} outerRadius={50} dataKey="value">
-                                                {stats.equipmentData.map((entry, index) => <Cell key={index} fill={entry.color} />)}
-                                            </Pie>
-                                            <Tooltip />
-                                            <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                                        </PieChart>
-                                    </ResponsiveContainer>
+                                    <div className="flex-1 min-h-0">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <PieChart>
+                                                <Pie data={stats.equipmentData} cx="50%" cy="50%" innerRadius={30} outerRadius={50} dataKey="value">
+                                                    {stats.equipmentData.map((entry, index) => <Cell key={index} fill={entry.color} />)}
+                                                </Pie>
+                                                <Tooltip />
+                                                <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                                            </PieChart>
+                                        </ResponsiveContainer>
+                                    </div>
                                 </div>
-                                <div className="flex-1">
+                                <div className="flex-1 flex flex-col min-w-0 min-h-0">
                                     <p className="text-xs text-center font-bold text-stone-400 mb-2">MÍSTNOSTI</p>
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <PieChart>
-                                            <Pie data={stats.roomData} cx="50%" cy="50%" innerRadius={30} outerRadius={50} dataKey="value">
-                                                {stats.roomData.map((entry, index) => <Cell key={index} fill={entry.color} />)}
-                                            </Pie>
-                                            <Tooltip />
-                                            <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                                        </PieChart>
-                                    </ResponsiveContainer>
+                                    <div className="flex-1 min-h-0">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <PieChart>
+                                                <Pie data={stats.roomData} cx="50%" cy="50%" innerRadius={30} outerRadius={50} dataKey="value">
+                                                    {stats.roomData.map((entry, index) => <Cell key={index} fill={entry.color} />)}
+                                                </Pie>
+                                                <Tooltip />
+                                                <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                                            </PieChart>
+                                        </ResponsiveContainer>
+                                    </div>
                                 </div>
                             </div>
                         </div>
