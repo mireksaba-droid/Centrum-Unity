@@ -77,7 +77,23 @@ export const useStore = create<AppState>()(
         try {
           const practitioners = await loadPractitioners();
           if (practitioners.length > 0) {
-              set({ practitionersList: sortPractitioners(practitioners) });
+              // Vynutíme si aktuální URL obrázků z konstant (PRACTITIONERS)
+              const mapped = practitioners.map(p => {
+                  const staticDef = PRACTITIONERS.find(s => s.id === p.id);
+                  if (staticDef) {
+                      return { ...p, imageUrl: staticDef.imageUrl };
+                  }
+                  return p;
+              });
+              
+              // Přidáme i ty, co v DB vůbec nejsou, ale v konstantách ano (fallback)
+              for (const staticDef of PRACTITIONERS) {
+                  if (!mapped.find(p => p.id === staticDef.id)) {
+                      mapped.push(staticDef);
+                  }
+              }
+
+              set({ practitionersList: sortPractitioners(mapped) });
           }
         } catch (e) {
              console.error("Failed to initialize practitioners:", e);
@@ -337,24 +353,27 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'centrum-unity-storage', // name of the item in the storage (must be unique)
-      version: 1,
+      version: 2,
       migrate: (persistedState: any, version: number) => {
-        if (version === 0) {
-          const state = persistedState;
+        const state = persistedState;
+        if (version < 2) {
           const currentList = state.practitionersList || [];
           const newList = [...currentList];
           
-          // Přidání všech nových lektorů z konstant, kteří ještě chybí v lokálním storu
+          // Přidání všech nových lektorů a synchronizace obrázků z konstant
           for (const practitioner of PRACTITIONERS) {
-             if (!newList.find((existing: any) => existing.id === practitioner.id)) {
+             const existingIdx = newList.findIndex((existing: any) => existing.id === practitioner.id);
+             if (existingIdx === -1) {
                  newList.push(practitioner);
+             } else {
+                 // Force update image URLs to the latest mapped versions
+                 newList[existingIdx].imageUrl = practitioner.imageUrl;
              }
           }
           
           state.practitionersList = sortPractitioners(newList);
-          return state;
         }
-        return persistedState as any;
+        return state;
       }
     }
   )
