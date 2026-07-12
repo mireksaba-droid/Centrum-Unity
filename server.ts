@@ -246,27 +246,47 @@ async function startServer() {
     }
   });
 
-  // Login endpoint
-  app.post("/api/login", (req, res) => {
+  // Login endpoint - PIN se ověřuje na SERVERU (ne v prohlížeči).
+  // Jméno a role se berou z uloženého záznamu, ne od klienta (nejde je podvrhnout).
+  app.post("/api/login", async (req, res) => {
     try {
-      const { userId, name, role } = req.body;
-      
-      if (!userId || !name || !role) {
-        return res.status(400).json({ error: "Chybí informace o uživateli" });
+      const { userId, pin } = req.body;
+
+      if (!userId || pin === undefined || pin === null || String(pin).length === 0) {
+        return res.status(400).json({ error: "Chybí ID uživatele nebo PIN" });
       }
 
-      // PIN validity was already verified on the client safely
-      // Give signed JWT based on client claims
+      // Najdeme uživatele: primárně z databáze (admin mohl PIN změnit), jinak ze seed konstant.
+      let record: any = null;
+      try {
+        const snap = await getDoc(doc(db, "practitioners", String(userId)));
+        if (snap.exists()) record = snap.data();
+      } catch (e) {
+        // pokud DB selže, zkusíme fallback níže
+      }
+      if (!record) {
+        record = (PRACTITIONERS as any[]).find((p) => p.id === userId) || null;
+      }
+
+      if (!record || record.pin === undefined) {
+        return res.status(401).json({ error: "Neplatné přihlášení." });
+      }
+
+      // Vlastní ověření PINu na serveru
+      if (String(record.pin) !== String(pin)) {
+        return res.status(401).json({ error: "Nesprávný PIN." });
+      }
+
       const token = jwt.sign(
-        { id: userId, role: role, name: name },
-        process.env.JWT_SECRET || "default_dev_secret_key",
+        { id: userId, role: record.role, name: record.name },
+        getJwtSecret(),
         { expiresIn: "1d" }
       );
 
-      res.json({ success: true, token, user: { id: userId, name, role } });
+      res.json({ success: true, token, user: { id: userId, name: record.name, role: record.role } });
     } catch (error: any) {
       console.error("Login Error:", error);
-      res.status(500).json({ error: error.message || "Interní chyba serveru" });
+      res.status(500).json({ error: "Interní chyba serveru" });
     }
   });
 

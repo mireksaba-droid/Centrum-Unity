@@ -27,29 +27,25 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       e.preventDefault();
       if (!selectedUser) return;
 
-      // Validate PIN directly on the client (using data synced from Firebase/Store)
-      if (String(pin) !== String(selectedUser.pin)) {
-          setError('Nesprávný PIN.');
-          setPin('');
-          return;
-      }
-
+      // PIN se ověřuje na serveru - posíláme ID profilu a zadaný PIN.
       try {
           const response = await fetch('/api/login', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ userId: selectedUser.id, name: selectedUser.name, role: selectedUser.role })
+              body: JSON.stringify({ userId: selectedUser.id, pin })
           });
-          
+
           if (!response.ok) {
-              const data = await response.json();
-              setError(data.error || 'Nastala chyba na serveru.');
+              const data = await response.json().catch(() => ({}));
+              setError(data.error || 'Nesprávný PIN.');
               setPin('');
               return;
           }
 
           const data = await response.json();
-          onLogin(selectedUser, data.token);
+          // Roli bereme ze serverové odpovědi (autoritativní), jinak z vybraného profilu.
+          const authUser = { ...selectedUser, role: data.user?.role ?? selectedUser.role };
+          onLogin(authUser, data.token);
       } catch (err) {
           setError('Vyskytla se chyba při přihlašování.');
           setPin('');
