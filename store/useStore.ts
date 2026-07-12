@@ -41,6 +41,7 @@ interface AppState {
   // Practitioners
   updatePractitioner: (updatedP: Practitioner) => void;
   addPractitioner: (newPractitioner: Practitioner) => void;
+  deletePractitioner: (id: string) => Promise<void>;
   
   // Group Events
   createGroupEvent: (event: GroupEvent) => Promise<void>;
@@ -282,6 +283,19 @@ export const useStore = create<AppState>()(
         set((state) => ({
           practitionersList: sortPractitioners([...state.practitionersList, newPractitioner])
         }));
+      },
+
+      deletePractitioner: async (id) => {
+        const state = get();
+        const res = await fetch(`/api/practitioners/${id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${state.token}` }
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Smazání lektora se nezdařilo.');
+        }
+        set((s) => ({ practitionersList: s.practitionersList.filter(p => p.id !== id) }));
       },
 
       createGroupEvent: async (event) => {

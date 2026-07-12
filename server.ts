@@ -257,13 +257,21 @@ async function startServer() {
         return res.status(403).json({ error: "Nedostatečná oprávnění. Pouze admin." });
       }
       const list = PRACTITIONERS as any[];
+      const keepIds = new Set(list.map((p) => p.id));
+      const existing = await getDocs(collection(db, "practitioners"));
       const batch = writeBatch(db);
+      // Smažeme lektory, kteří nejsou v konfiguraci (nejsou v tabulce)
+      let removed = 0;
+      existing.docs.forEach((d) => {
+        if (!keepIds.has(d.id)) { batch.delete(d.ref); removed++; }
+      });
+      // Zapíšeme/aktualizujeme lektory z konfigurace
       for (const p of list) {
         batch.set(doc(db, "practitioners", p.id), p);
       }
       await batch.commit();
-      console.log(`[Admin] ${req.user.name} synchronizoval ${list.length} lektorů z konfigurace.`);
-      res.json({ success: true, count: list.length });
+      console.log(`[Admin] ${req.user.name} synchronizoval ${list.length} lektorů (odebráno ${removed}).`);
+      res.json({ success: true, count: list.length, removed });
     } catch (error: any) {
       console.error("Sync Practitioners Error:", error.message);
       res.status(500).json({ error: error.message });
@@ -350,6 +358,19 @@ async function startServer() {
       if (!practitioner.id) return res.status(400).json({ error: "Missing ID" });
       
       await setDoc(doc(db, "practitioners", practitioner.id), practitioner, { merge: true });
+      res.json({ success: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Delete practitioner (Admin only)
+  app.delete("/api/practitioners/:id", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      if (!isAdmin(req)) return res.status(403).json({ error: "Unauthorized" });
+      const { id } = req.params;
+      if (id === "admin" || id === "guest") {
+        return res.status(400).json({ error: "Profil administrátora a hosta nelze smazat." });
+      }
+      await deleteDoc(doc(db, "practitioners", String(id)));
       res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
