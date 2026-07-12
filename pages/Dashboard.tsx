@@ -32,7 +32,7 @@ const Dashboard: React.FC<DashboardProps> = ({ bookings }) => {
         <div className="bg-white p-6 rounded-xl shadow-sm border border-stone-100 md:col-span-2">
           <h2 className="text-lg font-bold text-stone-900 mb-4 font-heading">Můj Wellness Skóre (Týdenní)</h2>
           <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+            <ResponsiveContainer width="100%" height="100%">
               <BarChart data={data}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e5e5" />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#78716c'}} />

@@ -59,6 +59,18 @@ async function startServer() {
 
   app.set("trust proxy", 1); // správná klientská IP za reverzní proxy (rate limiting)
   app.use(express.json());
+
+  // Diagnostika prostředí při startu - vypíše, které proměnné jsou načtené (nikdy jejich hodnoty).
+  const envSet = (name: string) => (process.env[name] && String(process.env[name]).trim() ? "✓ nastaveno" : "✗ CHYBÍ");
+  console.log("=== Konfigurace prostředí (env) ===");
+  console.log("  GOPAY_GOID:          ", envSet("GOPAY_GOID"));
+  console.log("  GOPAY_CLIENT_ID:     ", envSet("GOPAY_CLIENT_ID"));
+  console.log("  GOPAY_CLIENT_SECRET: ", envSet("GOPAY_CLIENT_SECRET"));
+  console.log("  GoPay režim:         ", process.env.GOPAY_ENV === "production" ? "PRODUCTION" : "sandbox");
+  console.log("  SMTP_HOST/USER/PASS: ", envSet("SMTP_HOST"), "/", envSet("SMTP_USER"), "/", envSet("SMTP_PASS"));
+  console.log("  JWT_SECRET:          ", envSet("JWT_SECRET"));
+  console.log("  CRON_SECRET:         ", envSet("CRON_SECRET"));
+  console.log("===================================");
   app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     if (err instanceof SyntaxError && 'body' in err) {
       console.error("JSON Parse error:", err);
@@ -73,11 +85,15 @@ async function startServer() {
         ? "https://gate.gopay.cz/api"
         : "https://gw.sandbox.gopay.com/api");
 
+  // Veřejná adresa TÉTO aplikace - kam GoPay posílá webhook a návrat z platby.
+  // MUSÍ ukazovat na tento běžící server (na Renderu např. https://vase-sluzba.onrender.com),
+  // jinak webhook nedorazí a potvrzení po platbě se neodešle.
+  const APP_BASE_URL = (process.env.APP_BASE_URL || "https://rezervace.centrumunity.cz").replace(/\/+$/, "");
+
   async function getGoPayToken() {
     const gopayId = process.env.GOPAY_GOID;
     const clientId = process.env.GOPAY_CLIENT_ID;
     const clientSecret = process.env.GOPAY_CLIENT_SECRET;
-    
     
     if (!gopayId || !clientId || !clientSecret) {
       throw new Error("GoPay credentials are not fully configured in environment variables.");
@@ -430,8 +446,8 @@ async function startServer() {
           order_description: `Rezervace místnosti ${room} (${bookingId})`,
           items: [{ name: `Pronájem místnosti ${room} (${durationMinutes} min)`, amount: amount, count: 1 }],
           callback: {
-              return_url: returnUrl || "https://rezervace.centrumunity.cz/",
-              notification_url: "https://rezervace.centrumunity.cz/api/gopay/notify"
+              return_url: returnUrl || `${APP_BASE_URL}/`,
+              notification_url: `${APP_BASE_URL}/api/gopay/notify`
           },
           target: {
               type: "ACCOUNT",
@@ -526,8 +542,8 @@ async function startServer() {
           order_description: `Rezervace místnosti ${room} (${bookingId})`,
           items: [{ name: `Pronájem místnosti ${room} (${durationMinutes} min)`, amount: amount, count: 1 }],
           callback: {
-              return_url: returnUrl || "https://rezervace.centrumunity.cz/",
-              notification_url: "https://rezervace.centrumunity.cz/api/gopay/notify"
+              return_url: returnUrl || `${APP_BASE_URL}/`,
+              notification_url: `${APP_BASE_URL}/api/gopay/notify`
           },
           target: {
               type: "ACCOUNT",
@@ -887,9 +903,7 @@ async function startServer() {
                          continue;
                      }
                      
-                     const paymentLink = `https://rezervace.centrumunity.cz/#/pay/${doc.id}`;
-                     
-                     const emailHtml = generatePaymentRequestEmail(booking);
+                     const emailHtml = generatePaymentRequestEmail(booking, APP_BASE_URL);
 
                      // Odešleme notifikaci e-mailem
                      await getMailer().sendMail({
