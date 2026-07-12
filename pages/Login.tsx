@@ -4,6 +4,7 @@ import { Practitioner, Role } from '../types';
 import Button from '../components/Button';
 import { Lock, ArrowRight, X, User, Leaf } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { toVocative } from '../utils/vocative';
 
 interface LoginProps {
   onLogin: (user: Practitioner, token?: string) => void;
@@ -117,7 +118,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-sage-500 mb-4 shadow-md bg-[#f8f5f0]">
                     <img src={selectedUser.imageUrl} alt={selectedUser.name} className="w-full h-full object-cover" />
                 </div>
-                <h2 className="text-xl font-bold text-stone-900">Ahoj, {selectedUser.name}!</h2>
+                <h2 className="text-xl font-bold text-stone-900">Ahoj, {toVocative(selectedUser.name)}!</h2>
                 <p className="text-stone-600 text-sm">Zadejte svůj PIN pro vstup</p>
             </div>
 
