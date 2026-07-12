@@ -198,10 +198,12 @@ async function startServer() {
       const snap = await getDoc(doc(db, "practitioners", userId));
       if (snap.exists()) {
         const email = (snap.data() as any)?.email;
-        return typeof email === "string" ? email.trim() : "";
+        if (typeof email === "string" && email.trim()) return email.trim();
       }
     } catch { /* ignore */ }
-    return "";
+    // Fallback na seed konstanty (kdyby v DB e-mail chyběl)
+    const seed = (PRACTITIONERS as any[]).find((p) => p.id === userId);
+    return seed && typeof seed.email === "string" ? seed.email.trim() : "";
   }
 
   // Příjemci e-mailů k rezervaci: klient (pokud vyplněn) + lektor, který ji vytvořil. Bez duplicit.
@@ -243,6 +245,28 @@ async function startServer() {
     } catch (error: any) {
       console.error("Reset Data Error:", error.message);
       res.status(500).json({ error: "Interní chyba při mazání dat." });
+    }
+  });
+
+  // Admin endpoint: přepíše lektory v databázi daty z konfigurace (constants.ts / Excel).
+  // Použije se po úpravě seznamu lektorů, aby se změny (PIN, e-mail, fotka, role) projevily,
+  // protože aplikace čte lektory primárně z databáze.
+  app.post("/api/admin/sync-practitioners", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      if (!isAdmin(req)) {
+        return res.status(403).json({ error: "Nedostatečná oprávnění. Pouze admin." });
+      }
+      const list = PRACTITIONERS as any[];
+      const batch = writeBatch(db);
+      for (const p of list) {
+        batch.set(doc(db, "practitioners", p.id), p);
+      }
+      await batch.commit();
+      console.log(`[Admin] ${req.user.name} synchronizoval ${list.length} lektorů z konfigurace.`);
+      res.json({ success: true, count: list.length });
+    } catch (error: any) {
+      console.error("Sync Practitioners Error:", error.message);
+      res.status(500).json({ error: error.message });
     }
   });
 

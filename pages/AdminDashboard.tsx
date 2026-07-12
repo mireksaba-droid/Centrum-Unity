@@ -795,6 +795,37 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </>
             )}
 
+            <div className="bg-white p-6 rounded-xl border border-emerald-200 shadow-sm flex flex-col items-center justify-center py-10 mt-8">
+                <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mb-4">
+                    <Users className="w-8 h-8" />
+                </div>
+                <h3 className="text-xl font-bold text-stone-900">Synchronizace lektorů</h3>
+                <p className="text-stone-500 mb-6 max-w-md text-center text-sm">
+                    Přepíše lektory v databázi aktuální konfigurací (PINy, e-maily, fotky, role).
+                    Použij po úpravě seznamu lektorů, aby se změny projevily.
+                </p>
+                <button
+                    onClick={async () => {
+                        if (!window.confirm('Přepsat lektory v databázi aktuální konfigurací? Aktualizuje PINy, e-maily, fotky a role u všech lektorů.')) return;
+                        try {
+                            const res = await fetch('/api/admin/sync-practitioners', {
+                                method: 'POST',
+                                headers: { 'Authorization': `Bearer ${useStore.getState().token}` }
+                            });
+                            const data = await res.json();
+                            if (!res.ok) throw new Error(data.error || 'Synchronizace selhala.');
+                            addToast('success', 'Hotovo', `Synchronizováno ${data.count} lektorů. Obnovuji stránku…`);
+                            setTimeout(() => window.location.reload(), 1200);
+                        } catch (e: any) {
+                            addToast('error', 'Chyba', e.message || 'Synchronizace selhala.');
+                        }
+                    }}
+                    className="bg-emerald-600 text-white px-6 py-3 rounded-lg hover:bg-emerald-700 transition-colors font-medium flex items-center gap-2"
+                >
+                    <Users className="w-4 h-4" /> Synchronizovat lektory z konfigurace
+                </button>
+            </div>
+
             <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm flex flex-col items-center justify-center py-12 mt-8">
                 <div className="w-16 h-16 bg-red-50 text-red-600 rounded-full flex items-center justify-center mb-4">
                     <AlertTriangle className="w-8 h-8" />
