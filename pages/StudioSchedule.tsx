@@ -9,6 +9,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useStore } from '../store/useStore';
 import { checkBookingCollision, calculateRentalPrice, timeToMinutes } from '../utils/scheduler';
 import { generateConfirmationEmail } from '../utils/emailTemplates';
+import { capitalizeName } from '../utils/vocative';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 
 declare global {
@@ -457,7 +458,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
         try {
             await onBook({
                 bookedByUserId: currentUser.id,
-                bookedByName: isGuest ? guestName : currentUser.name,
+                bookedByName: isGuest ? capitalizeName(guestName) : currentUser.name,
                 date: selectedSlot.date,
                 time: selectedSlot.time,
                 durationMinutes: duration,
@@ -465,7 +466,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                 price: finalPrice,
                 status: status,
                 paymentMethod: paymentMethod,
-                clientName: clientName,
+                clientName: capitalizeName(clientName),
                 clientEmail: isGuest ? guestEmail : undefined,
                 clientPhone: isGuest ? guestPhone : undefined,
                 equipment: equipment,
@@ -477,7 +478,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                 sendConfirmationEmail({
                     id: 'temp', // Not strictly needed for email
                     bookedByUserId: currentUser.id,
-                    bookedByName: isGuest ? guestName : currentUser.name,
+                    bookedByName: isGuest ? capitalizeName(guestName) : currentUser.name,
                     date: selectedSlot.date,
                     time: selectedSlot.time,
                     durationMinutes: duration,
@@ -485,7 +486,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                     price: finalPrice,
                     status: status,
                     paymentMethod: paymentMethod,
-                    clientName: clientName,
+                    clientName: capitalizeName(clientName),
                     clientEmail: isGuest ? guestEmail : undefined,
                     clientPhone: isGuest ? guestPhone : undefined,
                     equipment: equipment,

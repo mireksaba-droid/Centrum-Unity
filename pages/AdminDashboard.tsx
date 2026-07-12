@@ -473,8 +473,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         let count = 0;
 
         for (const booking of dueFutureBookings) {
-            const targetEmail = booking.clientEmail || 'mirek.saba@gmail.com'; // fallback
-            
+            // Výzva k platbě jde klientovi; když nemá e-mail, alespoň lektorovi, který rezervoval
+            const practitionerEmail = practitioners.find(p => p.id === booking.bookedByUserId)?.email;
+            const targetEmail = booking.clientEmail || practitionerEmail;
+            if (!targetEmail) continue; // nemáme kam poslat - přeskočíme
+
             // Note: Since we use HashRouter, the URL looks like /#/pay/ID
             const emailHtml = generatePaymentRequestEmail(booking, window.location.origin);
 

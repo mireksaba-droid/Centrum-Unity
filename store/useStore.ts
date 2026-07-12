@@ -108,19 +108,23 @@ export const useStore = create<AppState>()(
 
         await saveBookingToFirestore(newBooking);
         set((state) => ({ bookings: [...state.bookings, newBooking] }));
-        // Odeslání potvrzovacího e-mailu pro ne-online platby
+        // Odeslání potvrzovacího e-mailu pro ne-online platby - klientovi i lektorovi
         if (newBooking.paymentMethod !== "online" || newBooking.price === 0) {
-            const emailTarget = newBooking.clientEmail || (newBooking.bookedByUserId !== "guest" ? "mirek.saba@gmail.com" : null);
-            if (emailTarget) {
+            const practitioner = get().practitionersList.find(p => p.id === newBooking.bookedByUserId);
+            const recipients = [newBooking.clientEmail, practitioner?.email]
+                .map(x => (x || '').trim())
+                .filter(Boolean)
+                .join(', ');
+            if (recipients) {
                 try {
                     const html = generateConfirmationEmail(newBooking, newBooking.status === "paid" || newBooking.price === 0);
                     sendTransactionalEmail({
-                        to: emailTarget,
+                        to: recipients,
                         subject: "Potvrzení rezervace - Centrum Unity",
                         text: "Potvrzení rezervace pro: " + newBooking.date + " v " + newBooking.time,
                         html: html
                     }).catch(e => console.error("Nepodařilo se odeslat potvrzovací e-mail:", e.message));
-                    console.log("Pokus o odeslání potvrzovacího e-mailu na:", emailTarget);
+                    console.log("Pokus o odeslání potvrzovacího e-mailu na:", recipients);
                 } catch (e: any) {
                     console.error("Chyba při přípravě e-mailu:", e.message);
                 }

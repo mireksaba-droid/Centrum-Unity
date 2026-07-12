@@ -104,9 +104,23 @@ function surnameToVocative(name: string): string {
   return name + 'e';
 }
 
+// První písmeno velké, zbytek malé - pro jedno slovo
+const capitalizeWord = (w: string): string =>
+  w ? w.charAt(0).toLocaleUpperCase('cs-CZ') + w.slice(1).toLocaleLowerCase('cs-CZ') : w;
+
 /**
- * Vrátí oslovení ve 5. pádě. Skloní křestní jméno (první slovo) i příjmení (ostatní slova).
- * Např. "Eva" → "Evo", "Honza Novák" → "Honzo Nováku", "Jana Nováková" → "Jano Nováková".
+ * Normalizuje jméno na velké počáteční písmeno u každého slova.
+ * Např. "honza novák" → "Honza Novák", "EVA" → "Eva".
+ */
+export function capitalizeName(fullName?: string): string {
+  if (!fullName) return '';
+  return fullName.trim().split(/\s+/).map(capitalizeWord).join(' ');
+}
+
+/**
+ * Vrátí oslovení ve 5. pádě. Skloní křestní jméno (první slovo) i příjmení (ostatní slova)
+ * a zajistí velké počáteční písmeno u každého slova.
+ * Např. "honza novák" → "Honzo Nováku", "eva" → "Evo", "Jana Nováková" → "Jano Nováková".
  */
 export function toVocative(fullName?: string): string {
   if (!fullName) return '';
@@ -115,5 +129,6 @@ export function toVocative(fullName?: string): string {
   const parts = trimmed.split(/\s+/);
   return parts
     .map((part, i) => (i === 0 ? nameToVocative(part) : surnameToVocative(part)))
+    .map(capitalizeWord)
     .join(' ');
 }
