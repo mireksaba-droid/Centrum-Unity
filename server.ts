@@ -2,6 +2,7 @@ import "dotenv/config"; // Načte proměnné z .env do process.env (musí být �
 import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import jwt from "jsonwebtoken";
 
 import { runTransaction, getDoc, DocumentReference, db, collection, doc, updateDoc, deleteDoc, getDocs, query, where, setDoc, writeBatch } from "./server-firebase";
@@ -67,7 +68,9 @@ async function startServer() {
   console.log("  GOPAY_CLIENT_ID:     ", envSet("GOPAY_CLIENT_ID"));
   console.log("  GOPAY_CLIENT_SECRET: ", envSet("GOPAY_CLIENT_SECRET"));
   console.log("  GoPay režim:         ", process.env.GOPAY_ENV === "production" ? "PRODUCTION" : "sandbox");
+  console.log("  RESEND_API_KEY:      ", envSet("RESEND_API_KEY"));
   console.log("  SMTP_HOST/USER/PASS: ", envSet("SMTP_HOST"), "/", envSet("SMTP_USER"), "/", envSet("SMTP_PASS"));
+  console.log("  Odesílání e-mailů:   ", process.env.RESEND_API_KEY ? "Resend (API)" : (process.env.SMTP_HOST ? "SMTP" : "VYPNUTO"));
   console.log("  JWT_SECRET:          ", envSet("JWT_SECRET"));
   console.log("  CRON_SECRET:         ", envSet("CRON_SECRET"));
   console.log("===================================");
@@ -88,7 +91,10 @@ async function startServer() {
   // Veřejná adresa TÉTO aplikace - kam GoPay posílá webhook a návrat z platby.
   // MUSÍ ukazovat na tento běžící server (na Renderu např. https://vase-sluzba.onrender.com),
   // jinak webhook nedorazí a potvrzení po platbě se neodešle.
-  const APP_BASE_URL = (process.env.APP_BASE_URL || "https://rezervace.centrumunity.cz").replace(/\/+$/, "");
+  // Pojistka: ořízneme mezery/lomítka a doplníme https://, když chybí schéma
+  // (GoPay jinak notification_url odmítne jako neplatnou).
+  const rawBaseUrl = (process.env.APP_BASE_URL || "https://rezervace.centrumunity.cz").trim().replace(/\/+$/, "");
+  const APP_BASE_URL = /^https?:\/\//i.test(rawBaseUrl) ? rawBaseUrl : `https://${rawBaseUrl}`;
 
   async function getGoPayToken() {
     const gopayId = process.env.GOPAY_GOID;
@@ -137,8 +143,38 @@ async function startServer() {
     return mailTransporter;
   }
 
-  // Odesílací adresa (musí patřit pod vaši doménu na webkitty)
+  // Odesílací adresa
   const getFromEmail = () => process.env.FROM_EMAIL || process.env.SMTP_USER || "info@centrumunity.cz";
+
+  // Resend (HTTPS API) - spolehlivé odesílání z cloudu (Render). Použije se přednostně,
+  // když je nastaven RESEND_API_KEY; jinak se použije SMTP (nodemailer) jako záloha.
+  let resendClient: Resend | null = null;
+  const getResend = (): Resend => (resendClient ||= new Resend(process.env.RESEND_API_KEY));
+
+  // Je nakonfigurované aspoň jedno odesílání e-mailů?
+  const emailConfigured = (): boolean =>
+    !!(process.env.RESEND_API_KEY || (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS));
+
+  // Jednotné odeslání e-mailu: přednostně Resend, jinak SMTP.
+  async function sendEmail(opts: { to: string | string[]; subject: string; html: string }): Promise<{ id?: string }> {
+    if (process.env.RESEND_API_KEY) {
+      const { data, error } = await getResend().emails.send({
+        from: getFromEmail(),
+        to: Array.isArray(opts.to) ? opts.to : [opts.to],
+        subject: opts.subject,
+        html: opts.html,
+      });
+      if (error) throw new Error((error as any).message || JSON.stringify(error));
+      return { id: (data as any)?.id };
+    }
+    const info = await getMailer().sendMail({
+      from: getFromEmail(),
+      to: opts.to,
+      subject: opts.subject,
+      html: opts.html,
+    });
+    return { id: info.messageId };
+  }
 
   // --- Sdílené platební helpery ---
   const isAdmin = (req: AuthRequest) => req.user?.role === "ADMIN";
@@ -813,14 +849,13 @@ async function startServer() {
 
     // Potvrzovací e-mail posíláme JEN když jsme rezervaci právě teď překlopili na 'paid'
     // (ne opakovaně) - tím zajistíme právě jedno odeslání napříč webhookem i návratem z brány.
-    if (transitionedToPaid && process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+    if (transitionedToPaid && emailConfigured()) {
       try {
         const finalDoc = await getDoc(bookingRef!);
         const bookingData = finalDoc.data() as any;
         const recipients = await recipientsFor(bookingData); // klient + lektor
         if (recipients.length) {
-          await getMailer().sendMail({
-            from: getFromEmail(),
+          await sendEmail({
             to: recipients,
             subject: 'Potvrzení zaplacené rezervace - Centrum Unity',
             html: generateConfirmationEmail(bookingData, true)
@@ -906,8 +941,7 @@ async function startServer() {
                      const emailHtml = generatePaymentRequestEmail(booking, APP_BASE_URL);
 
                      // Odešleme notifikaci e-mailem
-                     await getMailer().sendMail({
-                        from: getFromEmail(),
+                     await sendEmail({
                         to: targetEmail,
                         subject: 'Výzva k platbě rezervace - Centrum Unity',
                         html: emailHtml
@@ -965,9 +999,8 @@ async function startServer() {
         || await getPractitionerEmail("admin")
         || getFromEmail();
 
-      if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS && adminEmail) {
-        await getMailer().sendMail({
-          from: getFromEmail(),
+      if (emailConfigured() && adminEmail) {
+        await sendEmail({
           to: adminEmail,
           subject: `Denní souhrn rezervací – Centrum Unity (${newBookings.length} nových, ${cancelledBookings.length} zrušených)`,
           html: generateAdminDailySummaryEmail(newBookings, cancelledBookings, `za posledních ${hours} h`)
@@ -987,22 +1020,17 @@ async function startServer() {
     try {
       const { to, subject, html } = req.body;
 
-      if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
-        console.log("SMTP není nakonfigurováno. Mockuji odeslání e-mailu:");
+      if (!emailConfigured()) {
+        console.log("E-mail není nakonfigurován (Resend ani SMTP). Mockuji odeslání:");
         console.log(`To: ${to}\nSubject: ${subject}`);
         return res.json({ success: true, mocked: true });
       }
 
-      const info = await getMailer().sendMail({
-        from: getFromEmail(),
-        to: [to],
-        subject: subject,
-        html: html,
-      });
+      const info = await sendEmail({ to, subject, html });
 
-      res.json({ success: true, data: { id: info.messageId } });
+      res.json({ success: true, data: { id: info.id } });
     } catch (error: any) {
-      console.error("SMTP Error:", error.message);
+      console.error("Email Error:", error.message);
       res.status(400).json({ error: error.message });
     }
   });
@@ -1034,19 +1062,18 @@ async function startServer() {
 
       const html = generateConfirmationEmail(sampleBooking, true);
 
-      if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
-        console.log("SMTP není nakonfigurováno - test e-mail nebyl odeslán.");
-        return res.json({ success: false, mocked: true, message: "SMTP proměnné nejsou nastaveny." });
+      if (!emailConfigured()) {
+        console.log("E-mail není nakonfigurován - test nebyl odeslán.");
+        return res.json({ success: false, mocked: true, message: "Není nastaven ani Resend, ani SMTP." });
       }
 
-      const info = await getMailer().sendMail({
-        from: getFromEmail(),
+      const info = await sendEmail({
         to,
         subject: "TEST – Potvrzení rezervace | Centrum Unity",
         html,
       });
 
-      res.json({ success: true, messageId: info.messageId, to });
+      res.json({ success: true, messageId: info.id, to });
     } catch (error: any) {
       console.error("Test Email Error:", error.message);
       res.status(400).json({ error: error.message });
@@ -1078,9 +1105,8 @@ async function startServer() {
         return res.json({ skipped: true });
       }
 
-      if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-        await getMailer().sendMail({
-          from: getFromEmail(),
+      if (emailConfigured()) {
+        await sendEmail({
           to: booking.data.clientEmail,
           subject: 'Zrušení rezervace - Centrum Unity',
           html: generateCancellationEmail(booking.data, "Rezervace byla zrušena na Vaši žádost.")
@@ -1169,11 +1195,10 @@ async function startServer() {
         // Best-effort: pošleme storno e-maily (klientovi i lektorovi), kterým vypršela výzva k platbě
         for (const booking of toNotify) {
           try {
-            if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+            if (emailConfigured()) {
               const recipients = await recipientsFor(booking);
               if (recipients.length) {
-                await getMailer().sendMail({
-                  from: getFromEmail(),
+                await sendEmail({
                   to: recipients,
                   subject: 'Zrušení rezervace - Centrum Unity',
                   html: generateCancellationEmail(booking),
