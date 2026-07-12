@@ -321,8 +321,12 @@ async function startServer() {
       
       await runTransaction(db, async (transaction: any) => {
           const bookingDoc = await transaction.get(bookingRef);
-          if (bookingDoc.exists) {
-              throw new Error("Tento termín je již rezervován. Prosím, obnovte stránku a vyberte jiný čas.");
+          if (bookingDoc.exists()) {
+              const existing = bookingDoc.data() || {};
+              // Zrušené / refundované termíny lze znovu obsadit; blokujeme jen aktivní rezervace.
+              if (!['cancelled', 'refunded'].includes(existing.status)) {
+                  throw new Error("Tento termín je již rezervován. Prosím, obnovte stránku a vyberte jiný čas.");
+              }
           }
           transaction.set(bookingRef, booking);
       });

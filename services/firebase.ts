@@ -83,7 +83,12 @@ export const saveBookingToFirestore = async (booking: Booking) => {
         await runTransaction(db, async (transaction) => {
             const bookingDoc = await transaction.get(bookingRef);
             if (bookingDoc.exists()) {
-                throw new Error("Tento termín je již rezervován. Prosím, obnovte stránku a vyberte jiný čas.");
+                const existing = bookingDoc.data() as any;
+                // Zrušené / refundované rezervace nblokují termín - povolíme je přepsat.
+                // Blokujeme jen aktivní rezervace.
+                if (!['cancelled', 'refunded'].includes(existing?.status)) {
+                    throw new Error("Tento termín je již rezervován. Prosím, obnovte stránku a vyberte jiný čas.");
+                }
             }
             transaction.set(bookingRef, booking as any);
         });

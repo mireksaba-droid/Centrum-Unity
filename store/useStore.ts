@@ -107,7 +107,8 @@ export const useStore = create<AppState>()(
         if (bookingData.paymentId) newBooking.paymentId = bookingData.paymentId;
 
         await saveBookingToFirestore(newBooking);
-        set((state) => ({ bookings: [...state.bookings, newBooking] }));
+        // Nahradíme případnou starou (zrušenou) rezervaci se stejným ID, ať tam není duplikát
+        set((state) => ({ bookings: [...state.bookings.filter(b => b.id !== newBooking.id), newBooking] }));
         // Odeslání potvrzovacího e-mailu pro ne-online platby - klientovi i lektorovi
         if (newBooking.paymentMethod !== "online" || newBooking.price === 0) {
             const practitioner = get().practitionersList.find(p => p.id === newBooking.bookedByUserId);
