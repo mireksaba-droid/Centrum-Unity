@@ -56,14 +56,43 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const [editingPractitionerId, setEditingPractitionerId] = useState<string | null>(null);
     
     // Form State
-    const [practitionerForm, setPractitionerForm] = useState<{name: string, title: string, pin: string, email: string, role: Role, category: string}>({
+    const [practitionerForm, setPractitionerForm] = useState<{name: string, title: string, pin: string, email: string, role: Role, category: string, imageUrl: string}>({
         name: '',
         title: '',
         pin: '',
         email: '',
         role: Role.PRACTITIONER,
-        category: 'Terapie 1-1'
+        category: 'Terapie 1-1',
+        imageUrl: ''
     });
+
+    // Nahrání fotky lektora: zmenšíme na čtvercový náhled 256px a uložíme jako base64 (přímo k lektorovi)
+    const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+            addToast('error', 'Chyba', 'Vyberte prosím obrázek (JPG/PNG).');
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const img = new Image();
+            img.onload = () => {
+                const size = 256;
+                const canvas = document.createElement('canvas');
+                canvas.width = size; canvas.height = size;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return;
+                const scale = Math.max(size / img.width, size / img.height);
+                const w = img.width * scale, h = img.height * scale;
+                ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+                setPractitionerForm(f => ({ ...f, imageUrl: dataUrl }));
+            };
+            img.src = ev.target?.result as string;
+        };
+        reader.readAsDataURL(file);
+    };
 
     // Event Modal State
     const [isEventModalOpen, setIsEventModalOpen] = useState(false);
@@ -359,7 +388,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             pin: '',
             email: '',
             role: Role.PRACTITIONER,
-            category: 'Terapie 1-1'
+            category: 'Terapie 1-1',
+            imageUrl: ''
         });
         setIsPractitionerModalOpen(true);
     };
@@ -382,7 +412,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             pin: p.pin || '',
             email: p.email || '',
             role: p.role || Role.PRACTITIONER,
-            category: p.category
+            category: p.category,
+            imageUrl: p.imageUrl || ''
         });
         setIsPractitionerModalOpen(true);
     };
@@ -407,7 +438,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     email: practitionerForm.email.trim(),
                     category: practitionerForm.category,
                     role: practitionerForm.role,
-                    specialties: [practitionerForm.category]
+                    specialties: [practitionerForm.category],
+                    imageUrl: practitionerForm.imageUrl || existing.imageUrl
                 };
                 updatePractitioner(updated);
                 addToast('success', 'Uloženo', `Profil ${updated.name} byl upraven.`);
@@ -415,7 +447,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         } else {
             // ADD NEW
             const id = practitionerForm.name.toLowerCase().replace(/ /g, '-').normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-            const imageUrl = `https://images.unsplash.com/photo-${Math.random() > 0.5 ? '1544005313-94ddf0286df2' : '1500648767791-00dcc994a43e'}?auto=format&fit=crop&q=80&w=400`;
+            const imageUrl = practitionerForm.imageUrl || `https://images.unsplash.com/photo-${Math.random() > 0.5 ? '1544005313-94ddf0286df2' : '1500648767791-00dcc994a43e'}?auto=format&fit=crop&q=80&w=400`;
 
             const newP: Practitioner = {
                 id,
@@ -1255,6 +1287,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </div>
                         
                         <form onSubmit={handlePractitionerSubmit} className="p-6 space-y-4">
+                            <div className="flex items-center gap-4">
+                                <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-stone-200 bg-stone-100 flex items-center justify-center shrink-0">
+                                    {practitionerForm.imageUrl
+                                        ? <img src={practitionerForm.imageUrl} alt="Náhled" className="w-full h-full object-cover" />
+                                        : <Users className="w-8 h-8 text-stone-300" />}
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-stone-700 mb-1">Fotka lektora</label>
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={handlePhotoUpload}
+                                        className="block w-full text-xs text-stone-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 file:font-medium hover:file:bg-indigo-100 cursor-pointer"
+                                    />
+                                    <p className="text-[10px] text-stone-500 mt-1">Fotka se automaticky zmenší a uloží k profilu. Nepovinné.</p>
+                                </div>
+                            </div>
+
                             <div>
                                 <label className="block text-sm font-bold text-stone-700 mb-1">Jméno a Příjmení</label>
                                 <input 

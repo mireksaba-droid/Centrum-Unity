@@ -44,7 +44,7 @@ export interface Booking {
   
   // Expanded fields for dashboard compatibility and CRM
   serviceName?: string;
-  equipment?: 'table' | 'futon';
+  equipment?: 'table' | 'futon' | 'none';
   
   date: string; // ISO date string "YYYY-MM-DD"
   time: string; // "HH:MM"

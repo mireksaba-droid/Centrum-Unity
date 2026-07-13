@@ -59,6 +59,7 @@ export const generateConfirmationEmail = (booking: Partial<Booking>, isPaid: boo
     // Vybavení místnosti (co si klient zvolil)
     const equipmentLabel = booking.equipment === 'futon' ? 'Futon'
         : booking.equipment === 'table' ? 'Lehátko'
+        : booking.equipment === 'none' ? 'Bez vybavení'
         : '';
 
     const row = (label: string, value: string | number | undefined) => `

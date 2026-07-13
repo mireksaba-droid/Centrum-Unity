@@ -126,7 +126,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
     // Booking Form State
     const [duration, setDuration] = useState<number>(60);
     const [clientName, setClientName] = useState(''); 
-    const [equipment, setEquipment] = useState<'table' | 'futon'>('table'); 
+    const [equipment, setEquipment] = useState<'table' | 'futon' | 'none'>('table');
     const [isProcessing, setIsProcessing] = useState(false);
 
     const [paymentIntentIdState, setPaymentIntentIdState] = useState<string | null>(null);
@@ -789,12 +789,12 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                             {/* Equipment Selection */}
                             <div>
                                 <label className="block text-sm font-bold text-stone-700 mb-2">Jaké vybavení potřebujete?</label>
-                                <div className="grid grid-cols-2 gap-3">
+                                <div className="grid grid-cols-3 gap-3">
                                     <button
                                         onClick={() => setEquipment('table')}
                                         className={`p-4 rounded-xl border-2 flex flex-col items-center justify-center gap-2 transition-all ${
-                                            equipment === 'table' 
-                                            ? 'border-sage-600 bg-sage-50 text-sage-900 shadow-sm' 
+                                            equipment === 'table'
+                                            ? 'border-sage-600 bg-sage-50 text-sage-900 shadow-sm'
                                             : 'border-stone-200 text-stone-500 hover:border-sage-200 hover:bg-stone-50'
                                         }`}
                                     >
@@ -804,13 +804,24 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                     <button
                                         onClick={() => setEquipment('futon')}
                                         className={`p-4 rounded-xl border-2 flex flex-col items-center justify-center gap-2 transition-all ${
-                                            equipment === 'futon' 
-                                            ? 'border-sage-600 bg-sage-50 text-sage-900 shadow-sm' 
+                                            equipment === 'futon'
+                                            ? 'border-sage-600 bg-sage-50 text-sage-900 shadow-sm'
                                             : 'border-stone-200 text-stone-500 hover:border-sage-200 hover:bg-stone-50'
                                         }`}
                                     >
                                         <Layers className="w-6 h-6" />
                                         <span className="font-bold text-sm">Futon (Země)</span>
+                                    </button>
+                                    <button
+                                        onClick={() => setEquipment('none')}
+                                        className={`p-4 rounded-xl border-2 flex flex-col items-center justify-center gap-2 transition-all ${
+                                            equipment === 'none'
+                                            ? 'border-sage-600 bg-sage-50 text-sage-900 shadow-sm'
+                                            : 'border-stone-200 text-stone-500 hover:border-sage-200 hover:bg-stone-50'
+                                        }`}
+                                    >
+                                        <X className="w-6 h-6" />
+                                        <span className="font-bold text-sm">Bez vybavení</span>
                                     </button>
                                 </div>
                             </div>
