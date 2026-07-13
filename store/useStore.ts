@@ -81,7 +81,8 @@ export const useStore = create<AppState>()(
               // Vynutíme si aktuální URL obrázků z konstant (PRACTITIONERS)
               const mapped = practitioners.map(p => {
                   const staticDef = PRACTITIONERS.find(s => s.id === p.id);
-                  if (staticDef) {
+                  // Použijeme data z databáze. Pokud v databázi chybí obrázek, použijeme fallback z konstant.
+                  if (staticDef && (!p.imageUrl || p.imageUrl.includes('unsplash.com'))) {
                       return { ...p, imageUrl: staticDef.imageUrl };
                   }
                   return p;
