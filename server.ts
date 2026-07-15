@@ -156,11 +156,31 @@ async function startServer() {
     !!(process.env.RESEND_API_KEY || (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS));
 
   // Jednotné odeslání e-mailu: přednostně Resend, jinak SMTP.
+  // Vyčistí příjemce: rozdělí čárkou spojené adresy, ořízne mezery, ověří formát a odstraní duplicity.
+  const EMAIL_RE = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/;
+  function normalizeRecipients(to: string | string[]): string[] {
+    const raw = Array.isArray(to) ? to : [to];
+    const out: string[] = [];
+    for (const item of raw) {
+      for (const part of String(item ?? "").split(",")) {
+        const e = part.trim();
+        if (!e) continue;
+        if (EMAIL_RE.test(e)) out.push(e);
+        else console.warn(`sendEmail: přeskakuji neplatnou e-mailovou adresu "${e}"`);
+      }
+    }
+    return Array.from(new Set(out));
+  }
+
   async function sendEmail(opts: { to: string | string[]; subject: string; html: string }): Promise<{ id?: string }> {
+    const toList = normalizeRecipients(opts.to);
+    if (!toList.length) {
+      throw new Error(`Žádný platný příjemce e-mailu (vstup: ${JSON.stringify(opts.to)})`);
+    }
     if (process.env.RESEND_API_KEY) {
       const { data, error } = await getResend().emails.send({
         from: getFromEmail(),
-        to: Array.isArray(opts.to) ? opts.to : [opts.to],
+        to: toList,
         subject: opts.subject,
         html: opts.html,
       });
@@ -169,7 +189,7 @@ async function startServer() {
     }
     const info = await getMailer().sendMail({
       from: getFromEmail(),
-      to: opts.to,
+      to: toList.join(", "),
       subject: opts.subject,
       html: opts.html,
     });
