@@ -12,7 +12,7 @@ import firebaseConfig from "./firebase-applet-config.json";
 
 import { PRACTITIONERS } from "./constants";
 import { calculateRentalPrice } from "./utils/scheduler";
-import { generatePaymentRequestEmail, generateConfirmationEmail, generateCancellationEmail, generateAdminDailySummaryEmail } from "./utils/emailTemplates";
+import { generatePaymentRequestEmail, generateConfirmationEmail, generateCancellationEmail, generateAdminDailySummaryEmail, generatePaymentReminderEmail } from "./utils/emailTemplates";
 
 async function safeJson(res: any) {
   const text = await res.text();
@@ -294,6 +294,47 @@ async function startServer() {
       res.json({ success: true, count: list.length, removed });
     } catch (error: any) {
       console.error("Sync Practitioners Error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Admin: pošle lektorovi výzvu k platbě k existující rezervaci a spustí 24h okno.
+  // Rezervaci nastaví na 'awaiting_payment' + paymentRequestedAt = teď (od toho běží lhůta i připomínka).
+  app.post("/api/admin/request-payment", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      if (!isAdmin(req)) return res.status(403).json({ error: "Nedostatečná oprávnění. Pouze admin." });
+      const { bookingId } = req.body;
+      if (!bookingId) return res.status(400).json({ error: "Chybí bookingId." });
+
+      const booking = await loadBooking(bookingId);
+      if (!booking) return res.status(404).json({ error: "Rezervace nebyla nalezena." });
+      if (booking.data.status === "paid") return res.status(400).json({ error: "Rezervace je již zaplacena." });
+
+      // Příjemci = lektor (a případně klient), musí existovat aspoň jedna adresa
+      const recipients = await recipientsFor(booking.data);
+      if (!recipients.length) {
+        return res.status(400).json({ error: "Lektor nemá vyplněný e-mail, není kam poslat výzvu." });
+      }
+
+      const now = new Date().toISOString();
+      await updateDoc(booking.ref, {
+        status: "awaiting_payment",
+        paymentRequestedAt: now,
+        reminderSentAt: null
+      });
+
+      if (emailConfigured()) {
+        await sendEmail({
+          to: recipients,
+          subject: "Výzva k platbě rezervace - Centrum Unity",
+          html: generatePaymentRequestEmail({ ...booking.data, id: bookingId }, APP_BASE_URL)
+        });
+      }
+
+      console.log(`[Admin] ${req.user.name} poslal výzvu k platbě pro rezervaci ${bookingId} → ${recipients.join(", ")}`);
+      res.json({ success: true, recipients });
+    } catch (error: any) {
+      console.error("Request Payment Error:", error.message);
       res.status(500).json({ error: error.message });
     }
   });
@@ -1243,6 +1284,7 @@ async function startServer() {
       const now = Date.now();
       const fifteenMinutesAgo = new Date(now - 15 * 60 * 1000).toISOString();
       const twentyFourHoursAgo = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+      const eighteenHoursAgo = new Date(now - 18 * 60 * 60 * 1000).toISOString(); // připomínka 6 h před koncem
 
       const snapshot = await getDocs(query(collection(db, "bookings"), where("status", "==", "awaiting_payment")));
       if (snapshot.empty) return;
@@ -1250,6 +1292,7 @@ async function startServer() {
       const batch = writeBatch(db);
       let count = 0;
       const toNotify: any[] = []; // rezervace s výzvou k platbě, u kterých pošleme storno e-mail
+      const toRemind: any[] = []; // rezervace, kterým pošleme připomínku před vypršením
 
       snapshot.docs.forEach((doc) => {
         const data = doc.data();
@@ -1274,8 +1317,34 @@ async function startServer() {
           if (data.paymentRequestedAt) {
              toNotify.push({ id: doc.id, ...data });
           }
+        } else if (
+          data.paymentRequestedAt &&
+          data.paymentRequestedAt < eighteenHoursAgo &&  // je po hranici pro připomínku
+          !data.reminderSentAt                            // a připomínku jsme ještě neposlali
+        ) {
+          toRemind.push({ id: doc.id, ref: doc.ref, ...data });
         }
       });
+
+      // Připomínky (mimo cancel batch) - nastavíme reminderSentAt a pošleme e-mail
+      for (const booking of toRemind) {
+        try {
+          await updateDoc(booking.ref, { reminderSentAt: new Date().toISOString() });
+          if (emailConfigured()) {
+            const recipients = await recipientsFor(booking);
+            if (recipients.length) {
+              const hoursLeft = Math.max(1, Math.round(24 - (now - new Date(booking.paymentRequestedAt).getTime()) / (60 * 60 * 1000)));
+              await sendEmail({
+                to: recipients,
+                subject: 'Připomínka platby rezervace - Centrum Unity',
+                html: generatePaymentReminderEmail(booking, hoursLeft, APP_BASE_URL),
+              });
+            }
+          }
+        } catch (remErr: any) {
+          console.error(`Nepodařilo se odeslat připomínku pro rezervaci ${booking.id}:`, remErr.message);
+        }
+      }
 
       if (count > 0) {
         await batch.commit();

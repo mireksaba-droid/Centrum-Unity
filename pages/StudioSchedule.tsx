@@ -141,6 +141,10 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
     const [paymentMethod, setPaymentMethod] = useState<'invoice' | 'online'>('online');
 
     const isGuest = currentUser.id === 'guest';
+    const isAdmin = currentUser.role === Role.ADMIN;
+
+    // Admin: rezervace "za lektora" s výzvou k platbě (id vybraného lektora, '' = běžná rezervace)
+    const [adminForPractitioner, setAdminForPractitioner] = useState<string>('');
 
     // Reset fields when modal opens/closes
     useEffect(() => {
@@ -153,6 +157,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
             setGuestPhone('');
             setIsTestPayment(false);
             setPaymentMethod('online');
+            setAdminForPractitioner('');
         }
     }, [selectedSlot, isGuest]);
 
@@ -521,6 +526,69 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
         }
 
         setIsProcessing(false);
+    };
+
+    // Admin: vytvoří rezervaci ZA vybraného lektora a pošle mu výzvu k platbě (24h okno).
+    const handleAdminPaymentBooking = async () => {
+        if (!selectedSlot) return;
+        const practitioner = practitionersList.find(p => p.id === adminForPractitioner);
+        if (!practitioner) {
+            addToast('error', 'Vyberte lektora', 'Zvolte prosím lektora, za kterého rezervaci vytváříte.');
+            return;
+        }
+        if (!practitioner.email || !practitioner.email.trim()) {
+            addToast('error', 'Chybí e-mail', `Lektor ${practitioner.name} nemá vyplněný e-mail — nelze poslat výzvu k platbě.`);
+            return;
+        }
+
+        const { hasCollision, reason } = checkBookingCollision({
+            newDate: selectedSlot.date,
+            newTime: selectedSlot.time,
+            durationMinutes: duration,
+            room: selectedSlot.room,
+            userId: practitioner.id,
+            allBookings: combinedBookings
+        });
+        if (hasCollision) {
+            addToast('error', 'Nelze rezervovat', reason);
+            return;
+        }
+
+        setIsProcessing(true);
+        const bookingId = `${selectedSlot.room}_${selectedSlot.date}_${selectedSlot.time}`;
+        const price = calculateRentalPrice(practitioner.id, duration, selectedSlot.room);
+        try {
+            // 1. Založíme rezervaci za lektora ve stavu "čeká na platbu"
+            await onBook({
+                bookedByUserId: practitioner.id,
+                bookedByName: practitioner.name,
+                date: selectedSlot.date,
+                time: selectedSlot.time,
+                durationMinutes: duration,
+                room: selectedSlot.room,
+                price,
+                status: 'awaiting_payment',
+                paymentMethod: 'online',
+                clientName: capitalizeName(clientName),
+                equipment
+            });
+
+            // 2. Server pošle lektorovi výzvu k platbě a spustí 24h okno
+            const res = await fetch('/api/admin/request-payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ bookingId })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Nepodařilo se odeslat výzvu k platbě.');
+
+            addToast('success', 'Výzva odeslána', `Lektorovi ${practitioner.name} byla odeslána výzva k platbě. Termín se uvolní, pokud nezaplatí do 24 hodin.`);
+            setSelectedSlot(null);
+        } catch (e: any) {
+            addToast('error', 'Chyba', e.message || 'Rezervaci se nepodařilo vytvořit.');
+        } finally {
+            setIsProcessing(false);
+        }
     };
 
     return (
@@ -925,6 +993,34 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                 </div>
                                 )}
 
+                            {/* ADMIN: rezervace za lektora s výzvou k platbě */}
+                            {isAdmin && !isGuest && (
+                                <div className="mt-4 border border-amber-200 bg-amber-50 p-4 rounded-xl">
+                                    <label className="block text-sm font-bold text-amber-800 mb-1 flex items-center gap-2">
+                                        <User className="w-4 h-4" /> Rezervace za lektora (výzva k platbě)
+                                    </label>
+                                    <select
+                                        value={adminForPractitioner}
+                                        onChange={e => setAdminForPractitioner(e.target.value)}
+                                        className="w-full p-2 border border-amber-200 rounded-lg text-sm bg-white"
+                                    >
+                                        <option value="">— běžná rezervace (za mě) —</option>
+                                        {practitionersList
+                                            .filter(p => p.id !== 'admin' && p.id !== 'guest' && p.isActive !== false)
+                                            .map(p => (
+                                                <option key={p.id} value={p.id}>
+                                                    {p.name}{p.email ? '' : ' (chybí e-mail)'}
+                                                </option>
+                                            ))}
+                                    </select>
+                                    {adminForPractitioner && (
+                                        <p className="text-[11px] text-amber-700 leading-tight mt-2">
+                                            Lektorovi přijde e-mail s výzvou k platbě. Když nezaplatí do 24 hodin, rezervace se automaticky zruší a termín se uvolní.
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
                             {/* Payment Method Selection */}
                             <div className="mt-4 border-t border-stone-200 pt-4">
                                 <label className="block text-sm font-bold text-stone-700 mb-2">Způsob úhrady</label>
@@ -943,11 +1039,11 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                 <div>
                                     <div className="text-xs font-bold text-stone-500 uppercase">Cena celkem</div>
                                     <div className="text-xl font-bold text-stone-900">
-                                        {calculateRentalPrice(currentUser.id, duration, selectedSlot.room)} Kč
+                                        {calculateRentalPrice(adminForPractitioner || currentUser.id, duration, selectedSlot.room)} Kč
                                     </div>
                                 </div>
                                 {paymentUrl ? (
-                                    <a 
+                                    <a
                                         href={paymentUrl}
                                         target="_blank"
                                         rel="noopener noreferrer"
@@ -956,12 +1052,12 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                         Pokračovat na platební bránu
                                     </a>
                                 ) : (
-                                    <Button 
-                                        onClick={handleConfirmBooking} 
+                                    <Button
+                                        onClick={adminForPractitioner ? handleAdminPaymentBooking : handleConfirmBooking}
                                         disabled={isProcessing}
                                         className="text-white px-6 w-full md:w-auto bg-indigo-600 hover:bg-indigo-700"
                                     >
-                                        {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Zaplatit online'}
+                                        {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : (adminForPractitioner ? 'Odeslat výzvu k platbě' : 'Zaplatit online')}
                                     </Button>
                                 )}
                             </div>

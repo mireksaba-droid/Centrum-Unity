@@ -43,6 +43,33 @@ export const generatePaymentRequestEmail = (booking: Partial<Booking>, baseUrl: 
     `;
 };
 
+// Připomínka platby - pošle se pár hodin před vypršením lhůty, když rezervace stále není zaplacená.
+export const generatePaymentReminderEmail = (booking: Partial<Booking>, hoursLeft: number = 6, baseUrl: string = 'https://rezervace.centrumunity.cz') => {
+    const paymentLink = `${baseUrl}/#/pay/${booking.id}`;
+    const dateParts = booking.date?.split('-') || [];
+    const formattedDate = dateParts.length === 3 ? `${dateParts[2]}. ${dateParts[1]}. ${dateParts[0]}` : booking.date;
+    return `
+    <div style="background-color:#f1e9dc;padding:32px 16px;font-family:Helvetica,Arial,sans-serif;">
+      <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06);">
+        ${emailHeader()}
+        <div style="padding:32px;">
+            <div style="display:inline-block;background:#fef3c7;color:#92400e;font-size:13px;font-weight:700;padding:6px 14px;border-radius:999px;margin-bottom:16px;">Připomínka platby</div>
+            <h1 style="margin:0 0 8px;font-size:21px;color:#1c1917;">Rezervace čeká na úhradu</h1>
+            <p style="margin:0 0 20px;color:#57534e;font-size:15px;line-height:1.6;">
+                Dobrý den,<br/>připomínáme, že Vaše rezervace zatím není uhrazená. Zbývá přibližně <strong>${hoursLeft} h</strong> na platbu, poté bude rezervace automaticky zrušena a termín uvolněn.
+            </p>
+            <div style="background:#faf7f2;border:1px solid #ece3d6;border-radius:12px;padding:18px 24px;margin-bottom:24px;">
+                <p style="margin:6px 0;color:#1c1917;font-size:15px;"><strong>Termín:</strong> ${formattedDate} v ${booking.time}</p>
+                <p style="margin:6px 0;color:#1c1917;font-size:15px;"><strong>Částka k úhradě:</strong> ${booking.price} Kč</p>
+            </div>
+            <a href="${paymentLink}" style="display:inline-block;background-color:#6b8f71;color:#ffffff;padding:14px 28px;text-decoration:none;border-radius:8px;font-weight:700;">Zaplatit online</a>
+        </div>
+        ${emailFooter()}
+      </div>
+    </div>
+    `;
+};
+
 export const generateConfirmationEmail = (booking: Partial<Booking>, isPaid: boolean = false) => {
     const dateParts = booking.date?.split('-') || [];
     const formattedDate = dateParts.length === 3 ? `${dateParts[2]}. ${dateParts[1]}. ${dateParts[0]}` : booking.date;
