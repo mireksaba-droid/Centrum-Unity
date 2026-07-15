@@ -325,6 +325,23 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
         setBookingToCancel(null);
     };
 
+    // Admin: uvolní termín BEZ pokusu o refundaci přes aplikaci.
+    // Použije se, když admin vrátil peníze přímo v GoPay a chce jen odstranit rezervaci z kalendáře.
+    const handleForceCancelNoRefund = async () => {
+        if (!bookingToCancel) return;
+        if (!window.confirm('Uvolnit termín bez vrácení peněz přes aplikaci? Použij jen když refundace už proběhla přímo v GoPay.')) return;
+        setIsProcessing(true);
+        try {
+            await onCancel(bookingToCancel.id);
+            addToast('success', 'Termín uvolněn', 'Rezervace byla odstraněna z kalendáře (bez refundace přes aplikaci).');
+        } catch (e: any) {
+            addToast('error', 'Chyba', e.message || 'Nepodařilo se uvolnit termín.');
+        } finally {
+            setIsProcessing(false);
+            setBookingToCancel(null);
+        }
+    };
+
     const handleConfirmBooking = async () => {
         if (!selectedSlot) return;
 
@@ -994,7 +1011,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                 >
                                     Zpět
                                 </Button>
-                                <Button 
+                                <Button
                                     className={`flex-1 text-white ${isTooLate ? 'bg-stone-300 hover:bg-stone-300 cursor-not-allowed opacity-50' : 'bg-red-600 hover:bg-red-700'}`}
                                     onClick={handleConfirmCancel}
                                     disabled={isProcessing || isTooLate}
@@ -1002,6 +1019,18 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                     {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Zrušit termín'}
                                 </Button>
                             </div>
+
+                            {currentUser.role === Role.ADMIN && (
+                                <div className="mt-3 pt-3 border-t border-stone-200">
+                                    <button
+                                        onClick={handleForceCancelNoRefund}
+                                        disabled={isProcessing}
+                                        className="w-full text-sm text-stone-500 hover:text-red-600 font-medium underline disabled:opacity-50"
+                                    >
+                                        Uvolnit termín bez refundace (peníze už vráceny přímo v GoPay)
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
