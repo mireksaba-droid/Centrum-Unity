@@ -78,11 +78,15 @@ export const useStore = create<AppState>()(
         try {
           const practitioners = await loadPractitioners();
           if (practitioners.length > 0) {
-              // Vynutíme si aktuální URL obrázků z konstant (PRACTITIONERS)
+              // Vynutíme si aktuální URL obrázků z konstant (PRACTITIONERS),
+              // kromě případů, kdy má lektor v databázi nahranou vlastní fotku (base64)
               const mapped = practitioners.map(p => {
                   const staticDef = PRACTITIONERS.find(s => s.id === p.id);
                   if (staticDef) {
-                      return { ...p, imageUrl: staticDef.imageUrl };
+                      const hasCustomDbImage = p.imageUrl && p.imageUrl.startsWith('data:image/');
+                      if (!hasCustomDbImage) {
+                          return { ...p, imageUrl: staticDef.imageUrl };
+                      }
                   }
                   return p;
               });
@@ -380,8 +384,11 @@ export const useStore = create<AppState>()(
              if (existingIdx === -1) {
                  newList.push(practitioner);
              } else {
-                 // Force update image URLs to the latest mapped versions
-                 newList[existingIdx].imageUrl = practitioner.imageUrl;
+                 // Aktualizujeme pouze pokud nemá nahranou vlastní fotku (base64)
+                 const currentImageUrl = newList[existingIdx].imageUrl;
+                 if (!currentImageUrl || !currentImageUrl.startsWith('data:image/')) {
+                     newList[existingIdx].imageUrl = practitioner.imageUrl;
+                 }
              }
           }
           
