@@ -146,6 +146,9 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
     // Admin: rezervace "za lektora" s výzvou k platbě (id vybraného lektora, '' = běžná rezervace)
     const [adminForPractitioner, setAdminForPractitioner] = useState<string>('');
 
+    // Host: e-mail pro ověření při rušení vlastní rezervace
+    const [guestCancelEmail, setGuestCancelEmail] = useState('');
+
     // Reset fields when modal opens/closes
     useEffect(() => {
         if (selectedSlot) {
@@ -283,7 +286,35 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
 
     const handleConfirmCancel = async () => {
         if (!bookingToCancel) return;
-        
+
+        // HOST ruší svoji rezervaci → ověření e-mailu na serveru (aby nemohl zrušit cizí hostovskou rezervaci)
+        if (isGuest && bookingToCancel.bookedByUserId === 'guest') {
+            if (!guestCancelEmail.trim()) {
+                addToast('error', 'Zadejte e-mail', 'Zadejte e-mail, na který byla rezervace vytvořena.');
+                return;
+            }
+            setIsProcessing(true);
+            try {
+                const res = await fetch('/api/guest-cancel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ bookingId: bookingToCancel.id, email: guestCancelEmail.trim() })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || 'Zrušení se nezdařilo.');
+                // Promítneme do lokálního stavu (server už rezervaci zrušil i případně refundoval)
+                updateBookingStatus(bookingToCancel.id, 'cancelled');
+                addToast('success', 'Rezervace zrušena', data.message || 'Termín byl uvolněn.');
+            } catch (err: any) {
+                addToast('error', 'Chyba storna', err.message || 'Nepodařilo se zrušit rezervaci.');
+            } finally {
+                setIsProcessing(false);
+                setBookingToCancel(null);
+                setGuestCancelEmail('');
+            }
+            return;
+        }
+
         setIsProcessing(true);
         if (bookingToCancel.paymentId) {
             try {
@@ -1098,6 +1129,22 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                     </span>
                                 )}
                             </p>
+
+                            {/* Host musí ověřit vlastnictví zadáním e-mailu z rezervace */}
+                            {isGuest && bookingToCancel.bookedByUserId === 'guest' && (
+                                <div className="mb-4 text-left">
+                                    <label className="block text-xs font-bold text-stone-600 mb-1">Pro zrušení zadejte e-mail z rezervace</label>
+                                    <input
+                                        type="email"
+                                        value={guestCancelEmail}
+                                        onChange={e => setGuestCancelEmail(e.target.value)}
+                                        className="w-full p-2 border border-stone-300 rounded-lg text-sm"
+                                        placeholder="vas@email.cz"
+                                    />
+                                    <p className="text-[10px] text-stone-500 mt-1">Ověříme, že rušíte skutečně svoji rezervaci.</p>
+                                </div>
+                            )}
+
                             <div className="flex gap-2">
                                 <Button 
                                     variant="outline" 

@@ -1249,6 +1249,94 @@ async function startServer() {
     }
   });
 
+  // Hostovské storno: host zruší SVOJI rezervaci ověřením e-mailu (proti clientEmail u rezervace).
+  // U zaplacené rezervace a >24 h do termínu automaticky refunduje přes GoPay. Rate-limitováno.
+  app.post("/api/guest-cancel", async (req: Request, res: Response) => {
+    try {
+      const ip = req.ip || 'unknown';
+      const now = Date.now();
+      const key = "guestcancel:" + ip;
+      const limit = paymentRateLimits.get(key);
+      if (limit && limit.resetTime > now) {
+        if (limit.count >= 8) return res.status(429).json({ error: "Příliš mnoho pokusů. Zkuste to prosím později." });
+        limit.count++;
+      } else {
+        paymentRateLimits.set(key, { count: 1, resetTime: now + 60000 });
+      }
+
+      const { bookingId, email } = req.body;
+      if (!bookingId || !email) return res.status(400).json({ error: "Chybí identifikátor rezervace nebo e-mail." });
+
+      const booking = await loadBooking(bookingId);
+      if (!booking) return res.status(404).json({ error: "Rezervace nebyla nalezena." });
+      const data = booking.data;
+
+      // Jen hostovské rezervace se ruší přes ověření e-mailem
+      if (data.bookedByUserId !== 'guest') {
+        return res.status(403).json({ error: "Tuto rezervaci nelze zrušit tímto způsobem." });
+      }
+      // Ověření e-mailu (bez ohledu na velikost písmen / mezery)
+      const stored = String(data.clientEmail || '').trim().toLowerCase();
+      const given = String(email).trim().toLowerCase();
+      if (!stored || stored !== given) {
+        return res.status(403).json({ error: "Zadaný e-mail nesouhlasí s e-mailem u rezervace." });
+      }
+      if (data.status === 'cancelled' || data.status === 'refunded') {
+        return res.json({ success: true, message: "Rezervace už byla zrušena." });
+      }
+
+      // Refundace jen u zaplacené rezervace a jen >24 h před termínem
+      let refundMessage = "";
+      if (data.paymentId) {
+        const [y, m, d] = String(data.date).split('-').map(Number);
+        const [hh, mm] = String(data.time).split(':').map(Number);
+        const reservationTime = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0).getTime();
+        const hoursToReservation = (reservationTime - now) / (1000 * 60 * 60);
+        if (hoursToReservation < 24) {
+          return res.status(400).json({ error: "Zrušení s vrácením peněz je možné jen více než 24 hodin před termínem. Kontaktujte prosím studio." });
+        }
+        const token = await getGoPayToken();
+        const statusRes = await fetch(`${GOPAY_URL}/payments/payment/${data.paymentId}`, {
+          method: "GET", headers: { "Accept": "application/json", "Authorization": `Bearer ${token}` }
+        });
+        const paymentStatus = await safeJson(statusRes);
+        if (paymentStatus.state === 'PAID') {
+          const refundRes = await fetch(`${GOPAY_URL}/payments/payment/${data.paymentId}/refund`, {
+            method: "POST",
+            headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded", "Authorization": `Bearer ${token}` },
+            body: `amount=${paymentStatus.amount}`
+          });
+          const rtext = await refundRes.text();
+          if (!refundRes.ok) {
+            return res.status(400).json({ error: `Platbu se nepodařilo vrátit: ${rtext}. Kontaktujte prosím studio.` });
+          }
+          refundMessage = "Zaplacená částka Vám bude vrácena.";
+        }
+      }
+
+      await updateDoc(booking.ref, {
+        status: 'cancelled',
+        cancelledAt: new Date().toISOString(),
+        note: (data.note ? data.note + '\n' : '') + 'Zrušeno hostem (ověřeno e-mailem).'
+      });
+
+      if (emailConfigured() && data.clientEmail) {
+        try {
+          await sendEmail({
+            to: data.clientEmail,
+            subject: 'Zrušení rezervace - Centrum Unity',
+            html: generateCancellationEmail(data, "Rezervace byla zrušena na Vaši žádost.")
+          });
+        } catch (e: any) { console.error("Guest cancel email error:", e.message); }
+      }
+
+      res.json({ success: true, message: refundMessage || "Rezervace byla zrušena." });
+    } catch (error: any) {
+      console.error("Guest Cancel Error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // 404 guard for /api routes
   app.use("/api", (req, res) => res.status(404).json({ error: "Not found" }));
 
