@@ -4,6 +4,7 @@ import path from "path";
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 
 import { runTransaction, getDoc, DocumentReference, db, collection, doc, updateDoc, deleteDoc, getDocs, query, where, setDoc, writeBatch } from "./server-firebase";
 import firebaseConfig from "./firebase-applet-config.json";
@@ -1334,6 +1335,83 @@ async function startServer() {
     } catch (error: any) {
       console.error("Guest Cancel Error:", error.message);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- Napojení na osobní kalendář (ICS odběr) ---
+
+  // Vrátí přihlášenému lektorovi jeho odkaz pro odběr kalendáře (vytvoří token, pokud chybí).
+  app.get("/api/my-calendar-url", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const id = req.user?.id;
+      if (!id || id === "guest") return res.status(400).json({ error: "Pro tento profil není kalendář dostupný." });
+      const ref = doc(db, "practitioners", id);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return res.status(404).json({ error: "Profil nenalezen." });
+      let token = (snap.data() as any).calendarSyncToken;
+      if (!token) {
+        token = crypto.randomBytes(24).toString("hex");
+        await updateDoc(ref, { calendarSyncToken: token });
+      }
+      res.json({ url: `${APP_BASE_URL}/api/calendar/${id}/${token}` });
+    } catch (error: any) {
+      console.error("Calendar URL Error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Veřejný ICS feed rezervací lektora (zabezpečený tajným tokenem). Do Google se přidá "z adresy URL".
+  app.get("/api/calendar/:id/:token", async (req: Request, res: Response) => {
+    try {
+      const { id, token } = req.params;
+      const snap = await getDoc(doc(db, "practitioners", id));
+      if (!snap.exists() || (snap.data() as any).calendarSyncToken !== token) {
+        return res.status(404).send("Not found");
+      }
+      const practitionerName = (snap.data() as any).name || "Lektor";
+
+      const bsnap = await getDocs(query(collection(db, "bookings"), where("bookedByUserId", "==", id)));
+      const active = ["awaiting_payment", "deferred_payment", "paid", "completed", "payment_review"];
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const floatFmt = (dt: Date) => `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}T${pad(dt.getHours())}${pad(dt.getMinutes())}00`;
+      const esc = (s: any) => String(s ?? "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+
+      let ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Centrum Unity//Rezervace//CZ\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\n";
+      ics += `X-WR-CALNAME:${esc("Centrum Unity - " + practitionerName)}\r\n`;
+
+      bsnap.docs.forEach((d) => {
+        const b: any = d.data();
+        if (!active.includes(b.status)) return;
+        const [y, mo, da] = String(b.date).split("-").map(Number);
+        const [hh, mm] = String(b.time).split(":").map(Number);
+        if (!y || !mo || !da) return;
+        const start = new Date(y, mo - 1, da, hh || 0, mm || 0);
+        const end = new Date(start.getTime() + (b.durationMinutes || 60) * 60000);
+        const summary = `Rezervace ${b.room === 1 ? "M1" : "M2"}${b.clientName ? " – " + b.clientName : ""}`;
+        const descParts: string[] = [];
+        if (b.clientPhone) descParts.push("Tel: " + b.clientPhone);
+        if (b.clientEmail) descParts.push("E-mail: " + b.clientEmail);
+        if (b.note) descParts.push("Poznámka: " + b.note);
+        if (b.equipment) descParts.push("Vybavení: " + (b.equipment === "futon" ? "Futon" : b.equipment === "table" ? "Lehátko" : "Bez"));
+
+        ics += "BEGIN:VEVENT\r\n";
+        ics += `UID:${d.id}@centrumunity.cz\r\n`;
+        ics += `DTSTAMP:${floatFmt(new Date())}\r\n`;
+        ics += `DTSTART:${floatFmt(start)}\r\n`;
+        ics += `DTEND:${floatFmt(end)}\r\n`;
+        ics += `SUMMARY:${esc(summary)}\r\n`;
+        ics += `LOCATION:${esc("Šmilovského 1268/9, Vinohrady, Praha 2")}\r\n`;
+        if (descParts.length) ics += `DESCRIPTION:${esc(descParts.join("\n"))}\r\n`;
+        ics += "END:VEVENT\r\n";
+      });
+
+      ics += "END:VCALENDAR\r\n";
+      res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+      res.setHeader("Content-Disposition", 'inline; filename="centrum-unity.ics"');
+      res.send(ics);
+    } catch (error: any) {
+      console.error("Calendar Feed Error:", error.message);
+      res.status(500).send("Error");
     }
   });
 

@@ -401,6 +401,23 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
         setBookingToCancel(null);
   };
 
+  // Google/osobní kalendář - odběr přes ICS odkaz
+  const [calUrl, setCalUrl] = useState<string | null>(null);
+  const [calLoading, setCalLoading] = useState(false);
+  const handleGetCalendarUrl = async () => {
+    setCalLoading(true);
+    try {
+      const res = await fetch('/api/my-calendar-url', { headers: { 'Authorization': `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Nepodařilo se získat odkaz.');
+      setCalUrl(data.url);
+    } catch (e: any) {
+      alert(e.message || 'Nepodařilo se získat odkaz do kalendáře.');
+    } finally {
+      setCalLoading(false);
+    }
+  };
+
   // .ICS Export Logic
   const downloadCalendar = () => {
     if (myBookings.length === 0) {
@@ -509,16 +526,58 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
 
                   {/* My Bookings List */}
                   <div className="flex-[2]">
-                    <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
                         <h2 className="text-xl font-bold font-heading text-stone-900">Moje rezervace</h2>
-                        <button 
-                            onClick={downloadCalendar}
-                            className="text-sage-700 hover:text-sage-900 hover:bg-sage-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-2 text-sm font-bold border border-sage-200"
-                        >
-                            <Download className="w-4 h-4" /> Export (.ics)
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={handleGetCalendarUrl}
+                                disabled={calLoading}
+                                className="text-indigo-700 hover:text-indigo-900 hover:bg-indigo-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-2 text-sm font-bold border border-indigo-200 disabled:opacity-50"
+                            >
+                                {calLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calendar className="w-4 h-4" />} Přidat do kalendáře
+                            </button>
+                            <button
+                                onClick={downloadCalendar}
+                                className="text-sage-700 hover:text-sage-900 hover:bg-sage-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-2 text-sm font-bold border border-sage-200"
+                            >
+                                <Download className="w-4 h-4" /> Export (.ics)
+                            </button>
+                        </div>
                     </div>
-                    
+
+                    {calUrl && (
+                        <div className="mb-4 bg-indigo-50 border border-indigo-200 rounded-xl p-4 text-sm">
+                            <p className="font-bold text-indigo-900 mb-1 flex items-center gap-2"><Calendar className="w-4 h-4" /> Napojení na kalendář (Google / Apple)</p>
+                            <p className="text-indigo-800 mb-2 text-xs leading-relaxed">
+                                <strong>Google:</strong> „+" → Přidat kalendář → Z adresy URL → vlož odkaz.<br/>
+                                <strong>Apple (Mac):</strong> Kalendář → Soubor → Nový odběr kalendáře → vlož odkaz.<br/>
+                                <strong>iPhone:</strong> klepni na tlačítko „Přidat do Apple kalendáře" níže.<br/>
+                                Rezervace se pak aktualizují samy (kalendáře je obnovují po několika hodinách).
+                            </p>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    readOnly
+                                    value={calUrl}
+                                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                                    className="flex-1 p-2 border border-indigo-200 rounded-lg text-xs bg-white font-mono"
+                                />
+                                <button
+                                    onClick={() => { navigator.clipboard?.writeText(calUrl); addToast('success', 'Zkopírováno', 'Odkaz je ve schránce.'); }}
+                                    className="bg-indigo-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-indigo-700 shrink-0"
+                                >
+                                    Kopírovat
+                                </button>
+                            </div>
+                            <a
+                                href={calUrl.replace(/^https?:\/\//, 'webcal://')}
+                                className="mt-2 inline-flex items-center gap-2 bg-stone-900 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-stone-800"
+                            >
+                                <Apple className="w-4 h-4" /> Přidat do Apple kalendáře
+                            </a>
+                            <p className="text-[10px] text-indigo-500 mt-2">Odkaz je osobní — nesdílej ho, kdokoli s ním uvidí tvé rezervace.</p>
+                        </div>
+                    )}
+
                     <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
                         {sortedBookings.length === 0 ? (
                             <div className="bg-stone-50 p-8 rounded-xl text-center border border-stone-100 mt-4">
