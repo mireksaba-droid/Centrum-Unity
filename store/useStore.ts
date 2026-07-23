@@ -78,8 +78,8 @@ export const useStore = create<AppState>()(
         try {
           const practitioners = await loadPractitioners();
           if (practitioners.length > 0) {
-              // Vynutíme si aktuální URL obrázků z konstant (PRACTITIONERS),
-              // kromě případů, kdy má lektor v databázi nahranou vlastní fotku (base64)
+              // URL obrázků z konstant použijeme JEN pokud lektor nemá v DB nahranou vlastní fotku (base64).
+              // Tím se nepřepíše fotka, kterou admin nahrál v aplikaci (ukládá se jako data:image/...).
               const mapped = practitioners.map(p => {
                   const staticDef = PRACTITIONERS.find(s => s.id === p.id);
                   if (staticDef) {
@@ -384,7 +384,8 @@ export const useStore = create<AppState>()(
              if (existingIdx === -1) {
                  newList.push(practitioner);
              } else {
-                 // Aktualizujeme pouze pokud nemá nahranou vlastní fotku (base64)
+                 // Fotku z konstant aplikujeme jen pokud lektor nemá nahranou vlastní (base64),
+                 // ať se admin-nahraná fotka nepřepíše.
                  const currentImageUrl = newList[existingIdx].imageUrl;
                  if (!currentImageUrl || !currentImageUrl.startsWith('data:image/')) {
                      newList[existingIdx].imageUrl = practitioner.imageUrl;

@@ -280,15 +280,20 @@ async function startServer() {
       const list = PRACTITIONERS as any[];
       const keepIds = new Set(list.map((p) => p.id));
       const existing = await getDocs(collection(db, "practitioners"));
+      const existingById = new Map(existing.docs.map((d) => [d.id, d.data() as any]));
       const batch = writeBatch(db);
       // Smažeme lektory, kteří nejsou v konfiguraci (nejsou v tabulce)
       let removed = 0;
       existing.docs.forEach((d) => {
         if (!keepIds.has(d.id)) { batch.delete(d.ref); removed++; }
       });
-      // Zapíšeme/aktualizujeme lektory z konfigurace
+      // Zapíšeme/aktualizujeme lektory z konfigurace.
+      // Fotku admin-nahranou v aplikaci (base64) zachováme, ať ji sync nepřepíše.
       for (const p of list) {
-        batch.set(doc(db, "practitioners", p.id), p);
+        const cur = existingById.get(p.id);
+        const keepImg = cur && typeof cur.imageUrl === "string" && cur.imageUrl.startsWith("data:image/");
+        const toWrite = keepImg ? { ...p, imageUrl: cur.imageUrl } : p;
+        batch.set(doc(db, "practitioners", p.id), toWrite);
       }
       await batch.commit();
       console.log(`[Admin] ${req.user.name} synchronizoval ${list.length} lektorů (odebráno ${removed}).`);
