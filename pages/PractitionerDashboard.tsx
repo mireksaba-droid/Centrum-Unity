@@ -567,8 +567,13 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
                                             </div>
                                             
                                             {/* CRM Info Display */}
-                                            {(booking.clientEmail || booking.clientPhone || booking.note) && (
+                                            {(booking.clientName || booking.clientEmail || booking.clientPhone || booking.note) && (
                                                 <div className="mt-4 pt-3 border-t border-stone-100 space-y-2 text-sm">
+                                                    {booking.clientName && (
+                                                        <div className="flex items-center gap-2 text-stone-800 font-semibold">
+                                                            <User className="w-4 h-4 text-stone-400" /> {booking.clientName}
+                                                        </div>
+                                                    )}
                                                     {booking.clientPhone && (
                                                         <div className="flex items-center gap-2 text-stone-600">
                                                             <Phone className="w-4 h-4 text-stone-400" /> {booking.clientPhone}
