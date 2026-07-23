@@ -939,16 +939,20 @@ async function startServer() {
     if (!newStatus) return { state };
 
     let transitionedToPaid = false;
+    let transitionedToCancelled = false;
     let amountMismatch = false;
 
     await runTransaction(db, async (tx: any) => {
       transitionedToPaid = false; // reset pro případ opakování transakce
+      transitionedToCancelled = false;
       amountMismatch = false;
       const snap = await tx.get(bookingRef!);
       if (!snap.exists()) return;
       const current = snap.data() || {};
 
-      // Idempotence: ze stavu 'paid' už nepřecházíme na 'paid' ani zpět na 'cancelled'
+      // Idempotence: už zrušenou/refundovanou rezervaci znovu neměníme (aby se e-mail neposlal 2x)
+      if (current.status === "cancelled" || current.status === "refunded") return;
+      // Ze stavu 'paid' už nepřecházíme na 'paid' ani zpět na 'cancelled'
       if (current.status === "paid" && (newStatus === "paid" || newStatus === "cancelled")) return;
 
       // Ověření částky u PAID - nesmí být nižší než očekávaná cena z rezervace
@@ -972,6 +976,7 @@ async function startServer() {
       }
       tx.update(bookingRef!, updateData);
       if (newStatus === "paid") transitionedToPaid = true;
+      if (newStatus === "cancelled") transitionedToCancelled = true;
     });
 
     if (amountMismatch) {
@@ -997,6 +1002,25 @@ async function startServer() {
         }
       } catch (e: any) {
         console.error("Failed to send confirmation email after payment:", e.message);
+      }
+    }
+
+    // Když platba neproběhla (zrušena/vypršela) a rezervaci jsme právě zrušili → informujeme + termín je volný.
+    if (transitionedToCancelled && emailConfigured()) {
+      try {
+        const finalDoc = await getDoc(bookingRef!);
+        const bookingData = finalDoc.data() as any;
+        const recipients = await recipientsFor(bookingData);
+        if (recipients.length) {
+          await sendEmail({
+            to: recipients,
+            subject: 'Platba neproběhla – rezervace zrušena - Centrum Unity',
+            html: generateCancellationEmail(bookingData, "Platba bohužel neproběhla, proto byla rezervace automaticky zrušena a termín se uvolnil. Pokud máte i nadále zájem, můžete si vytvořit novou rezervaci.")
+          });
+          console.log(`Payment-failed email sent to ${recipients.join(', ')} for booking ${bookingId}`);
+        }
+      } catch (e: any) {
+        console.error("Failed to send payment-failed email:", e.message);
       }
     }
 
@@ -1480,9 +1504,8 @@ async function startServer() {
              note: (data.note ? data.note + '\n' : '') + 'Automaticky zrušeno - platba nebyla uhrazena včas.'
           });
           count++;
-          if (data.paymentRequestedAt) {
-             toNotify.push({ id: doc.id, ...data });
-          }
+          // E-mail "platba neproběhla" pošleme vždy (15min i 24h okno)
+          toNotify.push({ id: doc.id, ...data });
         } else if (
           data.paymentRequestedAt &&
           data.paymentRequestedAt < eighteenHoursAgo &&  // je po hranici pro připomínku
@@ -1516,7 +1539,7 @@ async function startServer() {
         await batch.commit();
         console.log(`Automatically cancelled ${count} expired pending bookings`);
 
-        // Best-effort: pošleme storno e-maily (klientovi i lektorovi), kterým vypršela výzva k platbě
+        // Best-effort: pošleme e-mail "platba neproběhla" (klientovi i lektorovi)
         for (const booking of toNotify) {
           try {
             if (emailConfigured()) {
@@ -1524,13 +1547,13 @@ async function startServer() {
               if (recipients.length) {
                 await sendEmail({
                   to: recipients,
-                  subject: 'Zrušení rezervace - Centrum Unity',
-                  html: generateCancellationEmail(booking),
+                  subject: 'Platba neproběhla – rezervace zrušena - Centrum Unity',
+                  html: generateCancellationEmail(booking, "Platba bohužel neproběhla, proto byla rezervace automaticky zrušena a termín se uvolnil. Pokud máte i nadále zájem, můžete si vytvořit novou rezervaci."),
                 });
               }
             }
           } catch (mailErr: any) {
-            console.error(`Nepodařilo se odeslat storno e-mail pro rezervaci ${booking.id}:`, mailErr.message);
+            console.error(`Nepodařilo se odeslat e-mail o zrušení pro rezervaci ${booking.id}:`, mailErr.message);
           }
         }
       }

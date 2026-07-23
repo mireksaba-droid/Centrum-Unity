@@ -212,7 +212,7 @@ export const generateAdminDailySummaryEmail = (
     };
     const roomShort = (r?: number) => (r === 1 ? 'M1' : r === 2 ? 'M2' : '—');
     const statusLabel: Record<string, string> = {
-        paid: 'Zaplaceno', awaiting_payment: 'Čeká na platbu', deferred_payment: 'Odložená platba',
+        paid: 'Zaplaceno', awaiting_payment: 'Čeká na platbu', deferred_payment: 'Čeká na platbu',
         created: 'Nová', completed: 'Dokončeno', cancelled: 'Zrušeno', refunded: 'Refundováno',
         payment_review: 'Ke kontrole'
     };

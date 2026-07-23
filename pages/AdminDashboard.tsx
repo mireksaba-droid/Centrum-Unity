@@ -685,6 +685,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                             {' — '}{b.bookedByName}{b.clientName ? ` / ${b.clientName}` : ''}, {b.room === 1 ? 'M1' : 'M2'}, {resDate} {b.time}
                                                         </span>
                                                     </div>
+                                                    {(() => {
+                                                        const map: Record<string, [string, string]> = {
+                                                            paid: ['Zaplaceno', 'bg-emerald-100 text-emerald-700'],
+                                                            awaiting_payment: ['Čeká na platbu', 'bg-amber-100 text-amber-700'],
+                                                            deferred_payment: ['Čeká na platbu', 'bg-amber-100 text-amber-700'],
+                                                            payment_review: ['Ke kontrole', 'bg-red-100 text-red-700'],
+                                                            refunded: ['Refundováno', 'bg-sky-100 text-sky-700'],
+                                                            cancelled: ['Zrušeno', 'bg-stone-100 text-stone-500'],
+                                                            completed: ['Dokončeno', 'bg-stone-100 text-stone-600'],
+                                                            created: ['Nová', 'bg-stone-100 text-stone-600'],
+                                                        };
+                                                        const [label, cls] = map[b.status as string] || [b.status || '', 'bg-stone-100 text-stone-500'];
+                                                        return <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${cls}`}>{label}</span>;
+                                                    })()}
                                                     <span className="text-xs text-stone-400 shrink-0">{when}</span>
                                                 </div>
                                             );
