@@ -1393,7 +1393,7 @@ async function startServer() {
   app.get("/api/calendar/:id/:token", async (req: Request, res: Response) => {
     try {
       const { id, token } = req.params;
-      const snap = await getDoc(doc(db, "practitioners", id));
+      const snap = await getDoc(doc(db, "practitioners", id as string));
       if (!snap.exists() || (snap.data() as any).calendarSyncToken !== token) {
         return res.status(404).send("Not found");
       }
