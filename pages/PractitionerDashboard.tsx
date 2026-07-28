@@ -481,12 +481,10 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
 
   // Sort bookings: Today first, then ascending
   const sortedBookings = useMemo(() => {
-      const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD local time
-      return [...myBookings].sort((a, b) => {
-          if (a.date === today && b.date !== today) return -1;
-          if (b.date === today && a.date !== today) return 1;
-          return parseLocalDate(a.date, a.time).getTime() - parseLocalDate(b.date, b.time).getTime();
-      });
+      // Nejaktuálnější (nejbližší) nahoře, nejstarší úplně dole = sestupně dle data a času
+      return [...myBookings].sort((a, b) =>
+          parseLocalDate(b.date, b.time).getTime() - parseLocalDate(a.date, a.time).getTime()
+      );
   }, [myBookings]);
 
   return (

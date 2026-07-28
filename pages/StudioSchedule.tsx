@@ -1132,6 +1132,22 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                 )}
                             </p>
 
+                            {/* Poznámka / klient u rezervace */}
+                            {(bookingToCancel.clientName || bookingToCancel.note) && (
+                                <div className="mb-4 text-left bg-stone-50 border border-stone-200 rounded-lg p-3 text-sm">
+                                    {bookingToCancel.clientName && (
+                                        <div className="flex items-center gap-2 text-stone-800 font-semibold">
+                                            <User className="w-4 h-4 text-stone-400 shrink-0" /> {bookingToCancel.clientName}
+                                        </div>
+                                    )}
+                                    {bookingToCancel.note && (
+                                        <div className="flex items-start gap-2 text-stone-600 italic mt-1">
+                                            <Info className="w-4 h-4 text-stone-400 mt-0.5 shrink-0" /> "{bookingToCancel.note}"
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
                             {/* Host musí ověřit vlastnictví zadáním e-mailu z rezervace */}
                             {isGuest && bookingToCancel.bookedByUserId === 'guest' && (
                                 <div className="mb-4 text-left">
