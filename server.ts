@@ -1408,6 +1408,25 @@ async function startServer() {
       let ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Centrum Unity//Rezervace//CZ\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\n";
       ics += `X-WR-CALNAME:${esc("Centrum Unity - " + practitionerName)}\r\n`;
       ics += `X-WR-TIMEZONE:Europe/Prague\r\n`;
+      // Kompletní definice časové zóny – zajistí správný čas ve VŠECH kalendářích (Google, Apple, Outlook)
+      ics += "BEGIN:VTIMEZONE\r\n";
+      ics += "TZID:Europe/Prague\r\n";
+      ics += "X-LIC-LOCATION:Europe/Prague\r\n";
+      ics += "BEGIN:DAYLIGHT\r\n";
+      ics += "TZOFFSETFROM:+0100\r\n";
+      ics += "TZOFFSETTO:+0200\r\n";
+      ics += "TZNAME:CEST\r\n";
+      ics += "DTSTART:19700329T020000\r\n";
+      ics += "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\n";
+      ics += "END:DAYLIGHT\r\n";
+      ics += "BEGIN:STANDARD\r\n";
+      ics += "TZOFFSETFROM:+0200\r\n";
+      ics += "TZOFFSETTO:+0100\r\n";
+      ics += "TZNAME:CET\r\n";
+      ics += "DTSTART:19701025T030000\r\n";
+      ics += "RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\n";
+      ics += "END:STANDARD\r\n";
+      ics += "END:VTIMEZONE\r\n";
 
       const now = new Date();
       const stampFmt = (dt: Date) => `${dt.getUTCFullYear()}${pad(dt.getUTCMonth() + 1)}${pad(dt.getUTCDate())}T${pad(dt.getUTCHours())}${pad(dt.getUTCMinutes())}${pad(dt.getUTCSeconds())}Z`;
