@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Booking, Practitioner, Service, Role, GroupEvent, EventRegistration } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link } from 'lucide-react';
+import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronRight } from 'lucide-react';
 import Button from '../components/Button';
 import StudioSchedule from './StudioSchedule';
 import RescheduleModal from '../components/RescheduleModal';
@@ -47,6 +47,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const [activeTab, setActiveTab] = useState<'calendar' | 'analytics' | 'schedule' | 'team' | 'events'>('calendar');
     const [searchQuery, setSearchQuery] = useState('');
     const [scheduleFilter, setScheduleFilter] = useState<'all' | 'today' | 'upcoming'>('all');
+    const [expandedActivity, setExpandedActivity] = useState<Record<string, boolean>>({});
+    const [expandedActivityRow, setExpandedActivityRow] = useState<Record<string, boolean>>({});
     
     // Reschedule Modal State
     const [reschedulingBooking, setReschedulingBooking] = useState<Booking | null>(null);
@@ -358,16 +360,80 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }, [allBookings]);
 
     // Feed poslední aktivity: nové rezervace (dle createdAt) a zrušení (dle cancelledAt)
-    const recentActivity = useMemo(() => {
-        const items: { type: 'new' | 'cancel'; at: string; booking: Booking }[] = [];
+    // Poslední aktivita seskupená podle lektora – jeden řádek na rezervaci (ne na akci),
+    // aby se admin vyznal, i když 20 lektorů nadělá spoustu rezervací a zrušení.
+    const lastActivityAt = (b: Booking) => Math.max(
+        b.createdAt ? new Date(b.createdAt).getTime() : 0,
+        b.paymentRequestedAt ? new Date(b.paymentRequestedAt).getTime() : 0,
+        b.reminderSentAt ? new Date(b.reminderSentAt).getTime() : 0,
+        b.cancelledAt ? new Date(b.cancelledAt).getTime() : 0,
+    );
+    const activityByPractitioner = useMemo(() => {
+        const groups: Record<string, { name: string; bookings: Booking[]; lastAt: number }> = {};
         allBookings.forEach(b => {
-            if (b.createdAt) items.push({ type: 'new', at: b.createdAt, booking: b });
-            if (b.cancelledAt && (b.status === 'cancelled' || b.status === 'refunded')) {
-                items.push({ type: 'cancel', at: b.cancelledAt, booking: b });
-            }
+            if (!b.createdAt && !b.cancelledAt) return;
+            const key = b.bookedByUserId || b.bookedByName || 'unknown';
+            if (!groups[key]) groups[key] = { name: b.bookedByName || 'Neznámý lektor', bookings: [], lastAt: 0 };
+            groups[key].bookings.push(b);
+            const t = lastActivityAt(b);
+            if (t > groups[key].lastAt) groups[key].lastAt = t;
         });
-        return items.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 12);
+        return Object.entries(groups).map(([key, g]) => ({
+            key,
+            name: g.name,
+            lastAt: g.lastAt,
+            bookings: g.bookings.sort((a, b) => lastActivityAt(b) - lastActivityAt(a)).slice(0, 25),
+            counts: {
+                total: g.bookings.length,
+                cancelled: g.bookings.filter(x => x.status === 'cancelled' || x.status === 'refunded').length,
+                awaiting: g.bookings.filter(x => x.status === 'awaiting_payment' || x.status === 'deferred_payment').length,
+                paid: g.bookings.filter(x => x.status === 'paid').length,
+            },
+        })).sort((a, b) => b.lastAt - a.lastAt);
     }, [allBookings]);
+
+    const statusBadge = (status?: string): [string, string] => {
+        const map: Record<string, [string, string]> = {
+            paid: ['Zaplaceno', 'bg-emerald-100 text-emerald-700'],
+            awaiting_payment: ['Čeká na platbu', 'bg-amber-100 text-amber-700'],
+            deferred_payment: ['Čeká na platbu', 'bg-amber-100 text-amber-700'],
+            payment_review: ['Ke kontrole', 'bg-red-100 text-red-700'],
+            refunded: ['Refundováno', 'bg-sky-100 text-sky-700'],
+            cancelled: ['Zrušeno', 'bg-stone-200 text-stone-500'],
+            completed: ['Dokončeno', 'bg-stone-100 text-stone-600'],
+            created: ['Nová', 'bg-stone-100 text-stone-600'],
+        };
+        return map[status as string] || [status || '', 'bg-stone-100 text-stone-500'];
+    };
+    const fmtDateTime = (iso?: string) => iso ? new Date(iso).toLocaleString('cs-CZ', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+    // Čitelný důvod zrušení – aby admin poznal, PROČ termín padl (nezaplaceno vs. zrušeno člověkem vs. refundace)
+    const cancelReasonInfo = (b: Booking): [string, string] | null => {
+        if (b.status !== 'cancelled' && b.status !== 'refunded') return null;
+        const map: Record<string, [string, string]> = {
+            payment_expired: ['nezaplaceno včas', 'bg-amber-100 text-amber-700'],
+            payment_cancelled: ['platba zrušena v bráně', 'bg-orange-100 text-orange-700'],
+            payment_failed: ['platba selhala', 'bg-red-100 text-red-700'],
+            cancelled_by_guest: ['zrušil klient', 'bg-stone-200 text-stone-600'],
+            cancelled_by_guest_refunded: ['zrušil klient · vráceno', 'bg-sky-100 text-sky-700'],
+            cancelled_by_practitioner: ['zrušil lektor', 'bg-stone-200 text-stone-600'],
+            cancelled_by_admin: ['zrušil admin', 'bg-violet-100 text-violet-700'],
+            cancelled_by_admin_paid: ['zrušil admin (bylo zaplaceno)', 'bg-violet-100 text-violet-700'],
+            refunded: ['refundováno', 'bg-sky-100 text-sky-700'],
+        };
+        if (b.cancellationReason && map[b.cancellationReason]) return map[b.cancellationReason];
+        if (b.status === 'refunded') return map.refunded;
+        // Bez uloženého důvodu (starší rezervace) – odhad podle toho, zda byla platba
+        return b.paymentId ? ['zrušeno (bylo zaplaceno)', 'bg-stone-200 text-stone-600'] : ['důvod neznámý', 'bg-stone-100 text-stone-400'];
+    };
+    const buildTimeline = (b: Booking): { label: string; at?: string; color: string }[] => {
+        const ev: { label: string; at?: string; color: string }[] = [];
+        if (b.createdAt) ev.push({ label: 'Vytvořeno', at: b.createdAt, color: 'bg-emerald-500' });
+        if (b.paymentRequestedAt) ev.push({ label: 'Výzva k platbě', at: b.paymentRequestedAt, color: 'bg-indigo-500' });
+        if (b.reminderSentAt) ev.push({ label: 'Připomínka', at: b.reminderSentAt, color: 'bg-amber-500' });
+        if (b.status === 'paid' || b.status === 'completed') ev.push({ label: 'Zaplaceno', color: 'bg-emerald-600' });
+        if (b.cancelledAt) ev.push({ label: b.status === 'refunded' ? 'Zrušeno + refundace' : 'Zrušeno', at: b.cancelledAt, color: 'bg-red-500' });
+        return ev;
+    };
 
     // --- TEAM MANAGEMENT HANDLERS ---
     const handleToggleActive = (practitioner: Practitioner) => {
@@ -660,46 +726,91 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </div>
                     ) : (
                         <>
-                            {/* SECTION 0: POSLEDNÍ AKTIVITA */}
+                            {/* SECTION 0: POSLEDNÍ AKTIVITA – seskupeno podle lektora */}
                             <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm">
-                                <h3 className="text-lg font-bold text-stone-900 mb-4 flex items-center gap-2">
+                                <h3 className="text-lg font-bold text-stone-900 mb-1 flex items-center gap-2">
                                     <Activity className="w-5 h-5 text-indigo-600" /> Poslední aktivita
                                 </h3>
-                                {recentActivity.length === 0 ? (
+                                <p className="text-xs text-stone-400 mb-4">Seskupeno podle lektora. Klikni na lektora pro rozbalení, na rezervaci pro časovou osu.</p>
+                                {activityByPractitioner.length === 0 ? (
                                     <p className="text-sm text-stone-500">Zatím žádná aktivita.</p>
                                 ) : (
-                                    <div className="divide-y divide-stone-100">
-                                        {recentActivity.map((it, idx) => {
-                                            const b = it.booking;
-                                            const when = new Date(it.at).toLocaleString('cs-CZ', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
-                                            const dateParts = (b.date || '').split('-');
-                                            const resDate = dateParts.length === 3 ? `${dateParts[2]}.${dateParts[1]}.` : b.date;
+                                    <div className="space-y-2">
+                                        {activityByPractitioner.map((grp) => {
+                                            const open = !!expandedActivity[grp.key];
                                             return (
-                                                <div key={idx} className="flex items-center gap-3 py-2.5">
-                                                    <span className={`w-2 h-2 rounded-full shrink-0 ${it.type === 'new' ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
-                                                    <div className="flex-1 min-w-0">
-                                                        <span className={`text-sm font-semibold ${it.type === 'new' ? 'text-emerald-700' : 'text-red-700'}`}>
-                                                            {it.type === 'new' ? 'Nová rezervace' : 'Zrušená rezervace'}
-                                                        </span>
-                                                        <span className="text-sm text-stone-600">
-                                                            {' — '}{b.bookedByName}{b.clientName ? ` / ${b.clientName}` : ''}, {b.room === 1 ? 'M1' : 'M2'}, {resDate} {b.time}
-                                                        </span>
-                                                    </div>
-                                                    {(() => {
-                                                        const map: Record<string, [string, string]> = {
-                                                            paid: ['Zaplaceno', 'bg-emerald-100 text-emerald-700'],
-                                                            awaiting_payment: ['Čeká na platbu', 'bg-amber-100 text-amber-700'],
-                                                            deferred_payment: ['Čeká na platbu', 'bg-amber-100 text-amber-700'],
-                                                            payment_review: ['Ke kontrole', 'bg-red-100 text-red-700'],
-                                                            refunded: ['Refundováno', 'bg-sky-100 text-sky-700'],
-                                                            cancelled: ['Zrušeno', 'bg-stone-100 text-stone-500'],
-                                                            completed: ['Dokončeno', 'bg-stone-100 text-stone-600'],
-                                                            created: ['Nová', 'bg-stone-100 text-stone-600'],
-                                                        };
-                                                        const [label, cls] = map[b.status as string] || [b.status || '', 'bg-stone-100 text-stone-500'];
-                                                        return <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${cls}`}>{label}</span>;
-                                                    })()}
-                                                    <span className="text-xs text-stone-400 shrink-0">{when}</span>
+                                                <div key={grp.key} className="border border-stone-200 rounded-lg overflow-hidden">
+                                                    {/* Hlavička lektora */}
+                                                    <button
+                                                        onClick={() => setExpandedActivity(s => ({ ...s, [grp.key]: !s[grp.key] }))}
+                                                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-stone-50 transition-colors text-left"
+                                                    >
+                                                        {open ? <ChevronDown className="w-4 h-4 text-stone-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-stone-400 shrink-0" />}
+                                                        <span className="font-semibold text-stone-800 flex-1 min-w-0 truncate">{grp.name}</span>
+                                                        <div className="flex items-center gap-1.5 shrink-0">
+                                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-stone-100 text-stone-600">{grp.counts.total} rezervací</span>
+                                                            {grp.counts.awaiting > 0 && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{grp.counts.awaiting} čeká</span>}
+                                                            {grp.counts.cancelled > 0 && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600">{grp.counts.cancelled} zrušených</span>}
+                                                        </div>
+                                                        <span className="text-xs text-stone-400 shrink-0 hidden sm:inline">{fmtDateTime(new Date(grp.lastAt).toISOString())}</span>
+                                                    </button>
+                                                    {/* Rezervace lektora */}
+                                                    {open && (
+                                                        <div className="divide-y divide-stone-100 border-t border-stone-200 bg-stone-50/50">
+                                                            {grp.bookings.map((b) => {
+                                                                const rowKey = grp.key + '_' + b.id;
+                                                                const rowOpen = !!expandedActivityRow[rowKey];
+                                                                const dateParts = (b.date || '').split('-');
+                                                                const resDate = dateParts.length === 3 ? `${dateParts[2]}.${dateParts[1]}.` : b.date;
+                                                                const [label, cls] = statusBadge(b.status);
+                                                                const timeline = buildTimeline(b);
+                                                                const reason = cancelReasonInfo(b);
+                                                                return (
+                                                                    <div key={rowKey}>
+                                                                        <button
+                                                                            onClick={() => setExpandedActivityRow(s => ({ ...s, [rowKey]: !s[rowKey] }))}
+                                                                            className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white transition-colors text-left"
+                                                                        >
+                                                                            <Clock className="w-3.5 h-3.5 text-stone-300 shrink-0" />
+                                                                            <span className="text-sm text-stone-700 flex-1 min-w-0 truncate">
+                                                                                {b.room === 1 ? 'M1' : 'M2'} · {resDate} {b.time}
+                                                                                {b.clientName ? <span className="text-stone-500"> / {b.clientName}</span> : ''}
+                                                                            </span>
+                                                                            {reason && <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${reason[1]}`}>{reason[0]}</span>}
+                                                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${cls}`}>{label}</span>
+                                                                        </button>
+                                                                        {/* Malá časová osa životního cyklu */}
+                                                                        {rowOpen && (
+                                                                            <div className="px-4 pb-3 pt-1 pl-11 space-y-1.5">
+                                                                                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                                                                                    {timeline.map((ev, i) => (
+                                                                                        <React.Fragment key={i}>
+                                                                                            {i > 0 && <span className="text-stone-300">→</span>}
+                                                                                            <span className="inline-flex items-center gap-1.5">
+                                                                                                <span className={`w-2 h-2 rounded-full ${ev.color}`}></span>
+                                                                                                <span className="text-xs text-stone-600">{ev.label}</span>
+                                                                                                {ev.at && <span className="text-[10px] text-stone-400">{fmtDateTime(ev.at)}</span>}
+                                                                                            </span>
+                                                                                        </React.Fragment>
+                                                                                    ))}
+                                                                                </div>
+                                                                                {reason && (
+                                                                                    <div className="text-xs text-stone-500">
+                                                                                        Důvod zrušení: <span className="font-semibold text-stone-700">{reason[0]}</span>
+                                                                                    </div>
+                                                                                )}
+                                                                                {b.note && (
+                                                                                    <div className="text-xs text-stone-500 whitespace-pre-line">
+                                                                                        Poznámka: <span className="text-stone-700">{b.note}</span>
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             );
                                         })}

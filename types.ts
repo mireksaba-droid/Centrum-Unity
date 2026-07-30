@@ -63,6 +63,7 @@ export interface Booking {
   note?: string; 
   
   cancelledAt?: string; // ISO date string
+  cancellationReason?: string; // Proč byla rezervace zrušena (payment_expired, payment_cancelled, cancelled_by_guest, cancelled_by_admin, ...)
   
   paymentId?: string; // Pro refundace testovacích nebo skutečných plateb před uplynutím termínu
 

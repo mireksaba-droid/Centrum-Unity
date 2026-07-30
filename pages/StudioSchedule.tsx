@@ -88,8 +88,8 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                         } else if (data.state === 'CANCELED' || data.state === 'TIMEOUTED') {
                             addToast('error', 'Platba neúspěšná', 'Platba byla zrušena nebo vypršela, termín se uvolnil. Můžete to zkusit znovu.');
                             // Server rezervaci zrušil i poslal e-mail v rámci /api/gopay/status.
-                            // Klient jen promítne stav lokálně (bez dalšího e-mailu).
-                            updateBookingStatus(booking.id, 'cancelled');
+                            // Klient jen promítne stav lokálně (bez dalšího e-mailu). Důvod dle stavu z brány.
+                            updateBookingStatus(booking.id, 'cancelled', data.state === 'TIMEOUTED' ? 'payment_expired' : 'payment_cancelled');
                         } else {
                             addToast('info', 'Zpracováváme platbu', 'Čekáme na potvrzení platby od banky.');
                         }
@@ -305,7 +305,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || 'Zrušení se nezdařilo.');
                 // Promítneme do lokálního stavu (server už rezervaci zrušil i případně refundoval)
-                updateBookingStatus(bookingToCancel.id, 'cancelled');
+                updateBookingStatus(bookingToCancel.id, 'cancelled', bookingToCancel.paymentId ? 'cancelled_by_guest_refunded' : 'cancelled_by_guest');
                 addToast('success', 'Rezervace zrušena', data.message || 'Termín byl uvolněn.');
             } catch (err: any) {
                 addToast('error', 'Chyba storna', err.message || 'Nepodařilo se zrušit rezervaci.');

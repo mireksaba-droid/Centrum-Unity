@@ -32,7 +32,7 @@ interface AppState {
   
   // Bookings
   addBooking: (bookingData: Partial<Booking>) => Promise<void>;
-  updateBookingStatus: (bookingId: string, status: string) => Promise<void>;
+  updateBookingStatus: (bookingId: string, status: string, reason?: string) => Promise<void>;
   attachPaymentId: (bookingId: string, paymentId: string) => void;
   removeBooking: (bookingId: string) => Promise<void>;
   cancelBooking: (bookingId: string) => Promise<void>;
@@ -154,10 +154,12 @@ export const useStore = create<AppState>()(
         }
       },
 
-      updateBookingStatus: async (bookingId: string, status: any) => {
+      updateBookingStatus: async (bookingId: string, status: any, reason?: string) => {
           // Při odeslání výzvy k platbě označíme čas, od kterého běží 15min okno na platbu
           const extra = status === 'awaiting_payment' ? { paymentRequestedAt: new Date().toISOString() } : {};
-          const data = { status, ...extra };
+          // Důvod zrušení (např. 'payment_failed' z návratu z brány) uložíme, aby admin poznal, proč termín padl
+          const cancelExtra = status === 'cancelled' && reason ? { cancellationReason: reason } : {};
+          const data = { status, ...extra, ...cancelExtra };
           await updateBookingInFirestore(bookingId, data);
           set((state) => ({
              bookings: state.bookings.map(b =>
@@ -203,7 +205,13 @@ export const useStore = create<AppState>()(
         }
 
         const cancelledAt = new Date().toISOString();
-        await updateBookingInFirestore(bookingId, { status: 'cancelled', cancelledAt });
+        // Kdo ruší → důvod, aby to admin v přehledu poznal
+        const cancellationReason = isAdmin
+            ? (booking.status === 'paid' ? 'cancelled_by_admin_paid' : 'cancelled_by_admin')
+            : isGuestBooking
+                ? 'cancelled_by_guest'
+                : 'cancelled_by_practitioner';
+        await updateBookingInFirestore(bookingId, { status: 'cancelled', cancelledAt, cancellationReason });
 
         // Odeslání storno e-mailu klientovi i lektorovi (pokud mají vyplněný e-mail).
         // Důvod rozlišíme podle toho, kdo rezervaci ruší.
@@ -246,8 +254,8 @@ export const useStore = create<AppState>()(
         }
 
         set((state) => ({
-          bookings: state.bookings.map(b => 
-            b.id === bookingId ? { ...b, status: 'cancelled', cancelledAt } : b
+          bookings: state.bookings.map(b =>
+            b.id === bookingId ? { ...b, status: 'cancelled', cancelledAt, cancellationReason } : b
           )
         }));
       },

@@ -978,6 +978,10 @@ async function startServer() {
       const updateData: any = { status: newStatus, paymentId: String(id) };
       if (newStatus === "cancelled" || newStatus === "refunded") {
         updateData.cancelledAt = new Date().toISOString();
+        // Důvod zrušení podle stavu z GoPay: CANCELED = zákazník platbu zrušil v bráně,
+        // TIMEOUTED = platba nebyla dokončena včas (vypršel čas)
+        const reasonMap: Record<string, string> = { CANCELED: "payment_cancelled", TIMEOUTED: "payment_expired", REFUNDED: "refunded" };
+        updateData.cancellationReason = reasonMap[state] || "payment_failed";
       }
       tx.update(bookingRef!, updateData);
       if (newStatus === "paid") transitionedToPaid = true;
@@ -1347,6 +1351,7 @@ async function startServer() {
       await updateDoc(booking.ref, {
         status: 'cancelled',
         cancelledAt: new Date().toISOString(),
+        cancellationReason: refundMessage ? 'cancelled_by_guest_refunded' : 'cancelled_by_guest',
         note: (data.note ? data.note + '\n' : '') + 'Zrušeno hostem (ověřeno e-mailem).'
       });
 
@@ -1529,6 +1534,7 @@ async function startServer() {
           batch.update(doc.ref, {
              status: 'cancelled',
              cancelledAt: new Date().toISOString(),
+             cancellationReason: 'payment_expired',
              note: (data.note ? data.note + '\n' : '') + 'Automaticky zrušeno - platba nebyla uhrazena včas.'
           });
           count++;
