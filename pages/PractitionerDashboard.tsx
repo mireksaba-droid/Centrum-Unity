@@ -584,8 +584,9 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
                         ) : (
                             sortedBookings.map(booking => {
                                 const isToday = booking.date === new Date().toLocaleDateString('en-CA');
+                                const isCancelled = booking.status === 'cancelled' || booking.status === 'refunded';
                                 return (
-                                <div key={booking.id} className={`flex flex-col gap-3 p-5 rounded-xl border relative transition-all ${isToday ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-stone-200 shadow-sm hover:shadow-md'}`}>
+                                <div key={booking.id} className={`flex flex-col gap-3 p-5 rounded-xl border relative transition-all ${isCancelled ? 'opacity-60 ' : ''}${isToday ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-stone-200 shadow-sm hover:shadow-md'}`}>
                                     {isToday && (
                                         <div className="absolute -top-3 -left-2 bg-indigo-600 text-white text-[10px] font-bold px-3 py-1 rounded-full shadow-sm z-10 uppercase tracking-widest">
                                             Dnes
@@ -603,12 +604,14 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
                                                     <div className="text-xs text-stone-400 font-medium mt-0.5">#{booking.id.slice(-6).toUpperCase()}</div>
                                                 </div>
                                                 <div className={`flex items-center gap-2 text-xs font-bold px-2.5 py-1.5 rounded-full w-fit ${
-                                                    booking.status === 'paid' 
-                                                    ? 'bg-green-100 text-green-800' 
+                                                    isCancelled
+                                                    ? 'bg-stone-200 text-stone-500'
+                                                    : booking.status === 'paid'
+                                                    ? 'bg-green-100 text-green-800'
                                                     : 'bg-yellow-100 text-yellow-800'
                                                 }`}>
-                                                    {booking.status === 'paid' ? <CreditCard className="w-3.5 h-3.5" /> : <Wallet className="w-3.5 h-3.5" />}
-                                                    {booking.status === 'paid' ? 'Zaplaceno' : `${booking.price} Kč`}
+                                                    {isCancelled ? <X className="w-3.5 h-3.5" /> : booking.status === 'paid' ? <CreditCard className="w-3.5 h-3.5" /> : <Wallet className="w-3.5 h-3.5" />}
+                                                    {isCancelled ? (booking.status === 'refunded' ? 'Refundováno' : 'Zrušeno') : booking.status === 'paid' ? 'Zaplaceno' : `${booking.price} Kč`}
                                                 </div>
                                             </div>
 
