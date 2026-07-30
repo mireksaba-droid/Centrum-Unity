@@ -614,7 +614,9 @@ async function startServer() {
           },
           amount: amount,
           currency: "CZK",
-          order_number: bookingId,
+          // Unikátní číslo objednávky pro každý pokus o platbu (znovu rezervace stejného slotu po stornu),
+          // aby GoPay neodmítlo duplicitní order_number. Párování běží přes additional_params.bookingId.
+          order_number: `${bookingId}-${Date.now()}`,
           order_description: `Rezervace místnosti ${room} (${bookingId})`,
           items: [{ name: `Pronájem místnosti ${room} (${durationMinutes} min)`, amount: amount, count: 1 }],
           callback: {
@@ -710,7 +712,8 @@ async function startServer() {
           },
           amount: amount,
           currency: "CZK",
-          order_number: String(bookingId),
+          // Unikátní číslo objednávky pro každý pokus (viz výše) – párování přes additional_params.bookingId.
+          order_number: `${String(bookingId)}-${Date.now()}`,
           order_description: `Rezervace místnosti ${room} (${bookingId})`,
           items: [{ name: `Pronájem místnosti ${room} (${durationMinutes} min)`, amount: amount, count: 1 }],
           callback: {

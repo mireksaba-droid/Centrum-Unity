@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, getDocs, query, where, doc, updateDoc, deleteDoc, runTransaction, initializeFirestore, setDoc } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, getDocs, query, where, doc, updateDoc, deleteDoc, runTransaction, initializeFirestore, setDoc, memoryLocalCache } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Booking, Practitioner } from '../types';
 import firebaseConfig from '../firebase-applet-config.json';
@@ -14,7 +14,10 @@ let authInitPromise: Promise<void> | null = null;
 try {
   const app = initializeApp(firebaseConfig);
   // @ts-ignore
-  db = initializeFirestore(app, { experimentalForceLongPolling: true }, (firebaseConfig as any).firestoreDatabaseId);
+  db = initializeFirestore(app, { 
+    experimentalForceLongPolling: true,
+    localCache: memoryLocalCache()
+  }, (firebaseConfig as any).firestoreDatabaseId);
   functions = getFunctions(app, 'europe-west1');
   
   // Firebase Auth is not used; we rely on JWT and public Firestore reads.
