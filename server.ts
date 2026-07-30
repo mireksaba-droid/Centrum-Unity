@@ -1407,6 +1407,10 @@ async function startServer() {
 
       let ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Centrum Unity//Rezervace//CZ\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\n";
       ics += `X-WR-CALNAME:${esc("Centrum Unity - " + practitionerName)}\r\n`;
+      ics += `X-WR-TIMEZONE:Europe/Prague\r\n`;
+
+      const now = new Date();
+      const stampFmt = (dt: Date) => `${dt.getUTCFullYear()}${pad(dt.getUTCMonth() + 1)}${pad(dt.getUTCDate())}T${pad(dt.getUTCHours())}${pad(dt.getUTCMinutes())}${pad(dt.getUTCSeconds())}Z`;
 
       bsnap.docs.forEach((d) => {
         const b: any = d.data();
@@ -1425,9 +1429,9 @@ async function startServer() {
 
         ics += "BEGIN:VEVENT\r\n";
         ics += `UID:${d.id}@centrumunity.cz\r\n`;
-        ics += `DTSTAMP:${floatFmt(new Date())}\r\n`;
-        ics += `DTSTART:${floatFmt(start)}\r\n`;
-        ics += `DTEND:${floatFmt(end)}\r\n`;
+        ics += `DTSTAMP:${stampFmt(now)}\r\n`;
+        ics += `DTSTART;TZID=Europe/Prague:${floatFmt(start)}\r\n`;
+        ics += `DTEND;TZID=Europe/Prague:${floatFmt(end)}\r\n`;
         ics += `SUMMARY:${esc(summary)}\r\n`;
         ics += `LOCATION:${esc("Šmilovského 1268/9, Vinohrady, Praha 2")}\r\n`;
         if (descParts.length) ics += `DESCRIPTION:${esc(descParts.join("\n"))}\r\n`;
