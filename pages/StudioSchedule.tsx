@@ -282,7 +282,15 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
         } else if (statusData.status === 'occupied') {
             addToast('info', 'Obsazeno', 'Tento termín je již rezervován jiným lektorem.');
         } else if (statusData.status === 'cleaning') {
-            addToast('info', 'Technická pauza', 'Čas na úklid a větrání po předchozí rezervaci.');
+            if (currentUser.role === Role.ADMIN) {
+                // Admin smí vstoupit do úklidové pauzy: pro STEJNÉHO lektora stačí 30 min.
+                // Zda je pauza dostatečná, rozhodne kontrola kolizí až po výběru lektora v okně
+                // (stejný lektor → 30 min povolí, jiný lektor → 60 min a nepovolí).
+                addToast('info', 'Úklidová pauza', 'Rezervujete v čase určeném na úklid. Vyberte v okně lektora — pro stejného lektora stačí 30 min a systém rezervaci povolí.');
+                setSelectedSlot({ date: formatDate(date), time, room });
+            } else {
+                addToast('info', 'Technická pauza', 'Čas na úklid a větrání po předchozí rezervaci.');
+            }
         }
     };
 
@@ -828,7 +836,9 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                                 );
                                             }
                                         } else if (data.status === 'cleaning') {
-                                            bgClass = "bg-amber-100 cursor-not-allowed repeating-linear-gradient-45";
+                                            bgClass = currentUser.role === Role.ADMIN
+                                                ? "bg-amber-100 cursor-pointer repeating-linear-gradient-45 hover:bg-amber-200"
+                                                : "bg-amber-100 cursor-not-allowed repeating-linear-gradient-45";
                                         }
 
                                         return (
