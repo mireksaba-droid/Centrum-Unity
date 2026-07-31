@@ -68,6 +68,7 @@ export interface Booking {
   paymentId?: string; // Pro refundace testovacích nebo skutečných plateb před uplynutím termínu
 
   createdAt: string;
+  paidAt?: string; // Kdy byla rezervace reálně zaplacena (pro finanční přehled a shodu s GoPay)
   paymentRequestedAt?: string; // Kdy byla odeslána výzva k platbě (od tohoto času se počítá okno na platbu)
   reminderSentAt?: string; // Kdy byla odeslána připomínka platby (aby se poslala jen jednou)
   recurringGroupId?: string; // Phase 1.5: ID pro spojení opakujících se rezervací

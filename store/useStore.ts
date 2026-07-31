@@ -126,6 +126,7 @@ export const useStore = create<AppState>()(
         if (bookingData.clientPhone) newBooking.clientPhone = bookingData.clientPhone;
         if (bookingData.equipment) newBooking.equipment = bookingData.equipment;
         if (bookingData.paymentId) newBooking.paymentId = bookingData.paymentId;
+        if (newBooking.status === 'paid') newBooking.paidAt = new Date().toISOString();
 
         await saveBookingToFirestore(newBooking);
         // Nahradíme případnou starou (zrušenou) rezervaci se stejným ID, ať tam není duplikát
@@ -157,9 +158,11 @@ export const useStore = create<AppState>()(
       updateBookingStatus: async (bookingId: string, status: any, reason?: string) => {
           // Při odeslání výzvy k platbě označíme čas, od kterého běží 15min okno na platbu
           const extra = status === 'awaiting_payment' ? { paymentRequestedAt: new Date().toISOString() } : {};
+          // Čas zaplacení pro finanční přehled (shoda s GoPay)
+          const paidExtra = status === 'paid' ? { paidAt: new Date().toISOString() } : {};
           // Důvod zrušení (např. 'payment_failed' z návratu z brány) uložíme, aby admin poznal, proč termín padl
           const cancelExtra = status === 'cancelled' && reason ? { cancellationReason: reason } : {};
-          const data = { status, ...extra, ...cancelExtra };
+          const data = { status, ...extra, ...paidExtra, ...cancelExtra };
           await updateBookingInFirestore(bookingId, data);
           set((state) => ({
              bookings: state.bookings.map(b =>

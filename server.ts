@@ -601,7 +601,7 @@ async function startServer() {
 
       // 2. Rezervace zdarma (např. admin) - žádná platba, rovnou paid
       if (amount <= 0) {
-        await updateDoc(booking.ref, { status: 'paid' });
+        await updateDoc(booking.ref, { status: 'paid', paidAt: new Date().toISOString() });
         return res.json({ paid: true, message: "Rezervace nevyžaduje platbu." });
       }
 
@@ -699,7 +699,7 @@ async function startServer() {
 
       // 3. Rezervace zdarma → rovnou paid, bez brány
       if (amount <= 0) {
-        await updateDoc(booking.ref, { status: 'paid' });
+        await updateDoc(booking.ref, { status: 'paid', paidAt: new Date().toISOString() });
         return res.json({ paid: true, message: "Rezervace nevyžaduje platbu." });
       }
 
@@ -979,6 +979,9 @@ async function startServer() {
       }
 
       const updateData: any = { status: newStatus, paymentId: String(id) };
+      if (newStatus === "paid" && !current.paidAt) {
+        updateData.paidAt = new Date().toISOString();
+      }
       if (newStatus === "cancelled" || newStatus === "refunded") {
         updateData.cancelledAt = new Date().toISOString();
         // Důvod zrušení podle stavu z GoPay: CANCELED = zákazník platbu zrušil v bráně,

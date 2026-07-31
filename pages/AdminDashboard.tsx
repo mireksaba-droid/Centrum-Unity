@@ -224,8 +224,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         console.log("Stats calculation with allBookings:", allBookings);
         const confirmedBookings = allBookings.filter(b => ['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status));
         const cancelledBookings = allBookings.filter(b => b.status === 'cancelled');
-        
-        const totalRevenue = confirmedBookings.reduce((sum, b) => sum + b.price, 0);
+
+        // --- FINANČNÍ KBELÍKY (aby seděly s GoPay) ---
+        const paidBookings = allBookings.filter(b => ['paid', 'completed'].includes(b.status));        // reálně zaplaceno
+        const pendingBookings = allBookings.filter(b => ['awaiting_payment', 'deferred_payment'].includes(b.status)); // čeká na platbu
+        const refundedBookings = allBookings.filter(b => b.status === 'refunded');                     // vrácené peníze
+
+        const realRevenue = paidBookings.reduce((sum, b) => sum + b.price, 0);       // peníze reálně v GoPay
+        const pendingRevenue = pendingBookings.reduce((sum, b) => sum + b.price, 0); // ještě nezaplaceno (pipeline)
+        const refundedRevenue = refundedBookings.reduce((sum, b) => sum + b.price, 0); // vráceno
+
+        const totalRevenue = realRevenue; // hlavní číslo = reálná tržba
         const totalBookings = confirmedBookings.length;
         
         // 1. Revenue by Day (Basic)
@@ -272,40 +281,45 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             { name: 'Velká (R2)', value: room2Count, color: '#7a573d' }, // Brown
         ];
 
-        // 5. Revenue Trend (Dynamic Last 6 Months)
+        // 5. Vývoj tržeb (posledních 6 měsíců) – DVĚ křivky:
+        //    'received'  = reálně přijaté peníze podle data platby (paidAt, fallback createdAt) MÍNUS vrácené (dle cancelledAt)
+        //    'scheduled' = zaplacené lekce podle data konání lekce (b.date)
         const today = new Date();
-        const last6Months = Array.from({ length: 6 }, (_, i) => {
-            const d = new Date(today.getFullYear(), today.getMonth() - (5 - i), 1);
-            return d;
-        });
+        const last6Months = Array.from({ length: 6 }, (_, i) => new Date(today.getFullYear(), today.getMonth() - (5 - i), 1));
+        const inMonth = (d: Date | null, m: number, y: number) => !!d && d.getMonth() === m && d.getFullYear() === y;
 
-        const revenueTrendData = last6Months.map((monthDate, index) => {
-            const monthKey = monthDate.getMonth();
-            const yearKey = monthDate.getFullYear();
-            
-            // Sum bookings for this month
-            const monthlySum = confirmedBookings.reduce((sum, b) => {
-                const bDate = parseLocalDate(b.date);
-                if (bDate.getMonth() === monthKey && bDate.getFullYear() === yearKey) {
-                    return sum + b.price;
-                }
-                return sum;
+        const revenueTrendData = last6Months.map((monthDate) => {
+            const m = monthDate.getMonth();
+            const y = monthDate.getFullYear();
+
+            // Přijaté peníze podle data platby
+            const receivedIn = paidBookings.reduce((sum, b) => {
+                const when = b.paidAt ? new Date(b.paidAt) : (b.createdAt ? new Date(b.createdAt) : null);
+                return inMonth(when, m, y) ? sum + b.price : sum;
+            }, 0);
+            // Vrácené peníze podle data storna
+            const refundedIn = refundedBookings.reduce((sum, b) => {
+                const when = b.cancelledAt ? new Date(b.cancelledAt) : null;
+                return inMonth(when, m, y) ? sum + b.price : sum;
+            }, 0);
+            // Naplánované lekce (zaplacené) podle data konání
+            const scheduledIn = paidBookings.reduce((sum, b) => {
+                return inMonth(parseLocalDate(b.date), m, y) ? sum + b.price : sum;
             }, 0);
 
-            // Czech month name
             const name = monthDate.toLocaleDateString('cs-CZ', { month: 'long' });
             const capitalizedName = name.charAt(0).toUpperCase() + name.slice(1);
 
             return {
                 name: capitalizedName,
-                revenue: monthlySum, 
-                isReal: true // All data is now real
+                received: receivedIn - refundedIn, // čistý příjem měsíce (po odečtení vrácených)
+                scheduled: scheduledIn,
             };
         });
 
-        // 6. REVENUE ATTRIBUTION
+        // 6. KDO GENERUJE TRŽBY – jen reálně zaplacené
         const revenueByPractitioner: Record<string, number> = {};
-        confirmedBookings.forEach(b => {
+        paidBookings.forEach(b => {
             const name = b.bookedByName || 'Neznámý';
             revenueByPractitioner[name] = (revenueByPractitioner[name] || 0) + b.price;
         });
@@ -345,10 +359,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             { name: '> 48h (Bezpečné)', value: leadTimes.safe, color: '#10b981' },
         ];
 
-        return { 
-            totalRevenue, 
-            totalBookings, 
-            chartData, 
+        return {
+            totalRevenue,
+            realRevenue,
+            pendingRevenue,
+            refundedRevenue,
+            totalBookings,
+            chartData,
             peakHoursData,
             equipmentData,
             roomData,
@@ -665,8 +682,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     
                     <div className="flex gap-4">
                         <div className="text-right hidden md:block">
-                            <div className="text-2xl font-bold">{stats.totalRevenue.toLocaleString()} Kč</div>
-                            <div className="text-indigo-300 text-sm">Celkové tržby</div>
+                            <div className="text-2xl font-bold">{stats.realRevenue.toLocaleString()} Kč</div>
+                            <div className="text-indigo-300 text-sm">Reálná tržba (GoPay)</div>
                         </div>
                         <div className="h-12 w-px bg-indigo-700 hidden md:block"></div>
                         <div className="text-right hidden md:block">
@@ -818,28 +835,53 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 )}
                             </div>
 
+                            {/* SECTION 0.5: FINANČNÍ KBELÍKY (shoda s GoPay) */}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <div className="bg-white p-5 rounded-xl border border-emerald-200 shadow-sm">
+                                    <div className="flex items-center gap-2 text-emerald-700 text-sm font-semibold mb-1">
+                                        <CheckCircle className="w-4 h-4" /> Reálná tržba
+                                    </div>
+                                    <div className="text-2xl font-bold text-stone-900">{stats.realRevenue.toLocaleString()} Kč</div>
+                                    <div className="text-xs text-stone-400 mt-1">Zaplaceno − vráceno. Odpovídá penězům v GoPay.</div>
+                                </div>
+                                <div className="bg-white p-5 rounded-xl border border-amber-200 shadow-sm">
+                                    <div className="flex items-center gap-2 text-amber-700 text-sm font-semibold mb-1">
+                                        <Clock className="w-4 h-4" /> Čeká na platbu
+                                    </div>
+                                    <div className="text-2xl font-bold text-stone-900">{stats.pendingRevenue.toLocaleString()} Kč</div>
+                                    <div className="text-xs text-stone-400 mt-1">Rezervace bez zaplacení (ještě ne cash).</div>
+                                </div>
+                                <div className="bg-white p-5 rounded-xl border border-sky-200 shadow-sm">
+                                    <div className="flex items-center gap-2 text-sky-700 text-sm font-semibold mb-1">
+                                        <XCircle className="w-4 h-4" /> Vráceno
+                                    </div>
+                                    <div className="text-2xl font-bold text-stone-900">{stats.refundedRevenue.toLocaleString()} Kč</div>
+                                    <div className="text-xs text-stone-400 mt-1">Storna s refundací přes GoPay.</div>
+                                </div>
+                            </div>
+
                             {/* SECTION 1: FINANCIAL PERFORMANCE */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 {/* Revenue Trend */}
                                 <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm">
-                                    <h3 className="text-lg font-bold text-stone-900 mb-6 flex items-center gap-2">
+                                    <h3 className="text-lg font-bold text-stone-900 mb-1 flex items-center gap-2">
                                         <TrendingUp className="w-5 h-5 text-indigo-600" /> Vývoj tržeb (Posledních 6 měsíců)
                                     </h3>
+                                    <p className="text-xs text-stone-500 mb-6">Přijaté peníze (dle data platby, mínus vrácené) vs. naplánované zaplacené lekce (dle data konání).</p>
                                     <div className="h-64">
                                         <ResponsiveContainer width="100%" height="100%">
-                                            <BarChart data={stats.revenueTrendData}>
+                                            <LineChart data={stats.revenueTrendData}>
                                                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                                                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12}} />
                                                 <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12}} />
-                                                <Tooltip 
-                                                    cursor={{fill: '#f1f5f9'}} 
-                                                    contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} 
-                                                    formatter={(value: any) => {
-                                                        return [`${value.toLocaleString()} Kč`, 'Tržba'];
-                                                    }}
+                                                <Tooltip
+                                                    contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
+                                                    formatter={(value: any, name: any) => [`${Number(value).toLocaleString()} Kč`, name === 'received' ? 'Přijaté peníze' : 'Naplánované lekce']}
                                                 />
-                                                <Bar dataKey="revenue" fill="#4f46e5" radius={[4, 4, 0, 0]} />
-                                            </BarChart>
+                                                <Legend formatter={(value: any) => value === 'received' ? 'Přijaté peníze' : 'Naplánované lekce'} />
+                                                <Line type="monotone" dataKey="received" stroke="#10b981" strokeWidth={3} dot={{ r: 3 }} />
+                                                <Line type="monotone" dataKey="scheduled" stroke="#4f46e5" strokeWidth={2} strokeDasharray="5 4" dot={{ r: 3 }} />
+                                            </LineChart>
                                         </ResponsiveContainer>
                                     </div>
                                 </div>
@@ -849,7 +891,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     <h3 className="text-lg font-bold text-stone-900 mb-2 flex items-center gap-2">
                                         <Trophy className="w-5 h-5 text-amber-500" /> Kdo generuje tržby
                                     </h3>
-                                    <p className="text-xs text-stone-500 mb-6">Kteří lektoři generují nejvyšší obrat studia.</p>
+                                    <p className="text-xs text-stone-500 mb-6">Kteří lektoři přinesli nejvyšší reálně zaplacenou tržbu.</p>
                                     <div className="h-64">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <BarChart data={stats.topPerformersData} layout="vertical" margin={{ left: 20 }}>
