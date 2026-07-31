@@ -13,8 +13,33 @@ const PaymentPage: React.FC = () => {
     
     const [isProcessing, setIsProcessing] = useState(false);
     const [statusMessage, setStatusMessage] = useState<{type: 'success' | 'error' | 'info', text: string} | null>(null);
+    const [fetchedBooking, setFetchedBooking] = useState<any>(null);
+    const [loadingBooking, setLoadingBooking] = useState(true);
 
-    const booking = bookings.find(b => b.id === bookingId);
+    const localBooking = bookings.find(b => b.id === bookingId);
+    // Rezervace bereme primárně z lokálního stavu; když lektor přijde z e-mailu a NENÍ přihlášený,
+    // lokální stav je prázdný, tak ji dotáhneme z veřejného endpointu podle ID.
+    const booking: any = localBooking || fetchedBooking;
+
+    useEffect(() => {
+        let active = true;
+        const load = async () => {
+            if (localBooking || !bookingId) { setLoadingBooking(false); return; }
+            try {
+                const r = await fetch(`/api/public-booking/${encodeURIComponent(bookingId)}`);
+                if (r.ok) {
+                    const d = await r.json();
+                    if (active) setFetchedBooking(d);
+                }
+            } catch (e) {
+                console.error("Nepodařilo se načíst rezervaci:", e);
+            } finally {
+                if (active) setLoadingBooking(false);
+            }
+        };
+        load();
+        return () => { active = false; };
+    }, [bookingId, localBooking]);
 
     useEffect(() => {
         const verifyPayment = async () => {
@@ -48,6 +73,14 @@ const PaymentPage: React.FC = () => {
 
         verifyPayment();
     }, [paymentId, booking, updateBookingStatus]);
+
+    if (loadingBooking && !booking) {
+        return (
+            <div className="min-h-screen bg-[#f1e9dc] flex items-center justify-center p-4">
+                <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
+            </div>
+        );
+    }
 
     if (!booking) {
         return (

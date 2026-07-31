@@ -22,7 +22,7 @@ const emailFooter = () => `
     </div>`;
 
 export const generatePaymentRequestEmail = (booking: Partial<Booking>, baseUrl: string = 'https://rezervace.centrumunity.cz') => {
-    const paymentLink = `${baseUrl}/#/pay/${booking.id}`;
+    const paymentLink = `${baseUrl}/pay/${encodeURIComponent(booking.id || '')}`;
     return `
     <div style="background-color:#f1e9dc;padding:32px 16px;font-family:Helvetica,Arial,sans-serif;">
       <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06);">
@@ -45,7 +45,7 @@ export const generatePaymentRequestEmail = (booking: Partial<Booking>, baseUrl: 
 
 // Připomínka platby - pošle se pár hodin před vypršením lhůty, když rezervace stále není zaplacená.
 export const generatePaymentReminderEmail = (booking: Partial<Booking>, hoursLeft: number = 6, baseUrl: string = 'https://rezervace.centrumunity.cz') => {
-    const paymentLink = `${baseUrl}/#/pay/${booking.id}`;
+    const paymentLink = `${baseUrl}/pay/${encodeURIComponent(booking.id || '')}`;
     const dateParts = booking.date?.split('-') || [];
     const formattedDate = dateParts.length === 3 ? `${dateParts[2]}. ${dateParts[1]}. ${dateParts[0]}` : booking.date;
     return `

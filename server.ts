@@ -560,6 +560,32 @@ async function startServer() {
   // Simple in-memory rate limiter for public payment endpoint
   const paymentRateLimits = new Map<string, { count: number, resetTime: number }>();
 
+  // Veřejné načtení rezervace pro platební stránku (bez přihlášení).
+  // Vrací jen bezpečná pole potřebná k zobrazení a úhradě – žádný e-mail/telefon klienta.
+  app.get("/api/public-booking/:id", async (req: Request, res: Response) => {
+    try {
+      const booking = await loadBooking(req.params.id);
+      if (!booking) {
+        return res.status(404).json({ error: "Rezervace nebyla nalezena." });
+      }
+      const d = booking.data;
+      res.json({
+        id: req.params.id,
+        date: d.date,
+        time: d.time,
+        room: d.room,
+        durationMinutes: d.durationMinutes,
+        price: d.price,
+        status: d.status,
+        bookedByName: d.bookedByName || null,
+        clientName: d.clientName || null,
+      });
+    } catch (error: any) {
+      console.error("Public booking load error:", error.message);
+      res.status(500).json({ error: "Rezervaci se nepodařilo načíst." });
+    }
+  });
+
   // Create a payment via GoPay (public endpoint without auth)
   app.post("/api/public-payment", async (req: Request, res: Response) => {
     try {
