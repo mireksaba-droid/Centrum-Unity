@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Booking, Practitioner, Service, Role, GroupEvent, EventRegistration } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronRight } from 'lucide-react';
+import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronRight, Loader2, Smartphone } from 'lucide-react';
 import Button from '../components/Button';
 import StudioSchedule from './StudioSchedule';
 import RescheduleModal from '../components/RescheduleModal';
@@ -47,6 +47,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const [activeTab, setActiveTab] = useState<'calendar' | 'analytics' | 'schedule' | 'team' | 'events'>('calendar');
     const [searchQuery, setSearchQuery] = useState('');
     const [scheduleFilter, setScheduleFilter] = useState<'all' | 'today' | 'upcoming'>('all');
+    const [masterCalUrl, setMasterCalUrl] = useState<string>('');
+    const [masterCalLoading, setMasterCalLoading] = useState(false);
+    const handleGetMasterCalendarUrl = async () => {
+        setMasterCalLoading(true);
+        try {
+            const res = await fetch('/api/master-calendar-url', { headers: { 'Authorization': `Bearer ${useStore.getState().token}` } });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Nepodařilo se získat odkaz.');
+            setMasterCalUrl(data.url);
+        } catch (e: any) {
+            addToast('error', 'Chyba', e.message || 'Nepodařilo se získat odkaz na kalendář.');
+        } finally {
+            setMasterCalLoading(false);
+        }
+    };
     const [expandedActivity, setExpandedActivity] = useState<Record<string, boolean>>({});
     const [expandedActivityRow, setExpandedActivityRow] = useState<Record<string, boolean>>({});
     
@@ -1298,7 +1313,49 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             {/* === CALENDAR TAB === */}
             {activeTab === 'calendar' && (
                 <div className="animate-in slide-in-from-bottom-2 fade-in">
-                    <StudioSchedule 
+                    {/* Master kalendář do telefonu (Apple / Google) */}
+                    <div className="mb-4 bg-white border border-stone-200 rounded-xl p-4">
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                            <div className="flex items-center gap-2 text-sm text-stone-600">
+                                <Smartphone className="w-4 h-4 text-indigo-600" />
+                                <span>Chceš mít <strong>celý kalendář studia</strong> (obě místnosti, všichni lektoři) v telefonu?</span>
+                            </div>
+                            <button
+                                onClick={handleGetMasterCalendarUrl}
+                                disabled={masterCalLoading}
+                                className="text-indigo-700 hover:text-indigo-900 hover:bg-indigo-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-2 text-sm font-bold border border-indigo-200 disabled:opacity-50"
+                            >
+                                {masterCalLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calendar className="w-4 h-4" />} Přidat do telefonu
+                            </button>
+                        </div>
+                        {masterCalUrl && (
+                            <div className="mt-3 bg-indigo-50 border border-indigo-200 rounded-xl p-4 text-sm">
+                                <p className="font-bold text-indigo-900 mb-1 flex items-center gap-2"><Calendar className="w-4 h-4" /> Napojení na kalendář (Google / Apple)</p>
+                                <p className="text-indigo-800 mb-2 text-xs leading-relaxed">
+                                    <strong>iPhone:</strong> klepni na „Přidat do Apple kalendáře" níže → potvrď odběr.<br/>
+                                    <strong>Google:</strong> „+" → Přidat kalendář → Z adresy URL → vlož odkaz.<br/>
+                                    <strong>Apple (Mac):</strong> Kalendář → Soubor → Nový odběr kalendáře → vlož odkaz.<br/>
+                                    Rezervace se aktualizují samy (kalendáře je obnovují po několika hodinách).
+                                </p>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <input
+                                        readOnly
+                                        value={masterCalUrl}
+                                        onClick={(e) => (e.target as HTMLInputElement).select()}
+                                        className="flex-1 min-w-[200px] p-2 border border-indigo-200 rounded-lg text-xs bg-white font-mono"
+                                    />
+                                    <a
+                                        href={masterCalUrl.replace(/^https?:\/\//, 'webcal://')}
+                                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap"
+                                    >
+                                        Přidat do Apple kalendáře
+                                    </a>
+                                </div>
+                                <p className="text-[11px] text-indigo-500 mt-2">Odkaz je tajný — kdo ho má, vidí obsazenost studia. Neposílej ho dál.</p>
+                            </div>
+                        )}
+                    </div>
+                    <StudioSchedule
                         currentUser={practitioners.find(p => p.role === Role.ADMIN) || practitioners[0]}
                         allBookings={allBookings}
                         groupEvents={groupEvents}

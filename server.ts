@@ -1504,6 +1504,91 @@ async function startServer() {
     }
   });
 
+  // Admin: odkaz na MASTER kalendář (všechny rezervace, obě místnosti) do telefonu.
+  app.get("/api/master-calendar-url", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      if (!isAdmin(req)) return res.status(403).json({ error: "Master kalendář je jen pro administrátora." });
+      const id = req.user?.id;
+      if (!id) return res.status(400).json({ error: "Neplatný profil." });
+      const ref = doc(db, "practitioners", id);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return res.status(404).json({ error: "Profil nenalezen." });
+      let token = (snap.data() as any).masterCalendarToken;
+      if (!token) {
+        token = crypto.randomBytes(24).toString("hex");
+        await updateDoc(ref, { masterCalendarToken: token });
+      }
+      res.json({ url: `${APP_BASE_URL}/api/master-calendar/${token}` });
+    } catch (error: any) {
+      console.error("Master calendar URL Error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Veřejný ICS feed VŠECH rezervací (master kalendář pro admina), zabezpečený tajným tokenem.
+  app.get("/api/master-calendar/:token", async (req: Request, res: Response) => {
+    try {
+      const { token } = req.params;
+      const holder = await getDocs(query(collection(db, "practitioners"), where("masterCalendarToken", "==", token)));
+      if (holder.empty) return res.status(404).send("Not found");
+
+      const bsnap = await getDocs(collection(db, "bookings"));
+      const active = ["awaiting_payment", "deferred_payment", "paid", "completed", "payment_review"];
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const floatFmt = (dt: Date) => `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}T${pad(dt.getHours())}${pad(dt.getMinutes())}00`;
+      const esc = (s: any) => String(s ?? "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+
+      let ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Centrum Unity//Master//CZ\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\n";
+      ics += `X-WR-CALNAME:${esc("Centrum Unity – celý kalendář")}\r\n`;
+      ics += `X-WR-TIMEZONE:Europe/Prague\r\n`;
+      ics += "BEGIN:VTIMEZONE\r\nTZID:Europe/Prague\r\nX-LIC-LOCATION:Europe/Prague\r\n";
+      ics += "BEGIN:DAYLIGHT\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nTZNAME:CEST\r\nDTSTART:19700329T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\nEND:DAYLIGHT\r\n";
+      ics += "BEGIN:STANDARD\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nTZNAME:CET\r\nDTSTART:19701025T030000\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\nEND:STANDARD\r\n";
+      ics += "END:VTIMEZONE\r\n";
+
+      const now = new Date();
+      const stampFmt = (dt: Date) => `${dt.getUTCFullYear()}${pad(dt.getUTCMonth() + 1)}${pad(dt.getUTCDate())}T${pad(dt.getUTCHours())}${pad(dt.getUTCMinutes())}${pad(dt.getUTCSeconds())}Z`;
+
+      bsnap.docs.forEach((d) => {
+        const b: any = d.data();
+        if (!active.includes(b.status)) return;
+        const [y, mo, da] = String(b.date).split("-").map(Number);
+        const [hh, mm] = String(b.time).split(":").map(Number);
+        if (!y || !mo || !da) return;
+        const start = new Date(y, mo - 1, da, hh || 0, mm || 0);
+        const end = new Date(start.getTime() + (b.durationMinutes || 60) * 60000);
+        const room = b.room === 1 ? "M1" : "M2";
+        // V master kalendáři je klíčové: která místnost + kdo (lektor) + pro koho (klient)
+        const summary = `${room} · ${b.bookedByName || "Rezervace"}${b.clientName ? " – " + b.clientName : ""}`;
+        const descParts: string[] = [];
+        if (b.bookedByName) descParts.push("Lektor: " + b.bookedByName);
+        if (b.clientName) descParts.push("Klient: " + b.clientName);
+        if (b.clientPhone) descParts.push("Tel: " + b.clientPhone);
+        if (b.note) descParts.push("Poznámka: " + b.note);
+        if (b.equipment) descParts.push("Vybavení: " + (b.equipment === "futon" ? "Futon" : b.equipment === "table" ? "Lehátko" : "Bez"));
+        descParts.push("Stav: " + (b.status === "paid" ? "Zaplaceno" : b.status === "awaiting_payment" || b.status === "deferred_payment" ? "Čeká na platbu" : b.status));
+
+        ics += "BEGIN:VEVENT\r\n";
+        ics += `UID:master-${d.id}@centrumunity.cz\r\n`;
+        ics += `DTSTAMP:${stampFmt(now)}\r\n`;
+        ics += `DTSTART;TZID=Europe/Prague:${floatFmt(start)}\r\n`;
+        ics += `DTEND;TZID=Europe/Prague:${floatFmt(end)}\r\n`;
+        ics += `SUMMARY:${esc(summary)}\r\n`;
+        ics += `LOCATION:${esc("Šmilovského 1268/9, Vinohrady, Praha 2")}\r\n`;
+        if (descParts.length) ics += `DESCRIPTION:${esc(descParts.join("\n"))}\r\n`;
+        ics += "END:VEVENT\r\n";
+      });
+
+      ics += "END:VCALENDAR\r\n";
+      res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+      res.setHeader("Content-Disposition", 'inline; filename="centrum-unity-master.ics"');
+      res.send(ics);
+    } catch (error: any) {
+      console.error("Master Calendar Feed Error:", error.message);
+      res.status(500).send("Error");
+    }
+  });
+
   // 404 guard for /api routes
   app.use("/api", (req, res) => res.status(404).json({ error: "Not found" }));
 
