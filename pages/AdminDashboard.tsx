@@ -342,30 +342,29 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             .map(([name, value]) => ({ name, value }))
             .sort((a, b) => b.value - a.value);
 
-        // 7. CANCELLATION METRICS (REAL CALCULATION)
-        const totalCancelled = cancelledBookings.length;
-        const totalAll = totalBookings + totalCancelled;
-        const cancellationRate = totalAll > 0 ? ((totalCancelled / totalAll) * 100).toFixed(1) : "0";
-        
-        // Calculate Lead Time distribution
+        // 7. MÍRA STORNA – jen REÁLNÁ storna: rezervace, které BYLY zaplacené a pak zrušené/refundované.
+        // Nedokončené / vypršelé platby (které se nikdy nepotvrdily) NEJSOU storno – jinak by se míra uměle nafoukla.
+        const wasPaidThenCancelled = (b: Booking) =>
+            b.status === 'refunded' ||
+            (b.status === 'cancelled' && (
+                !!b.paidAt ||
+                ['cancelled_by_admin_paid', 'cancelled_by_guest_refunded'].includes(b.cancellationReason || '')
+            ));
+        const stornoBookings = allBookings.filter(wasPaidThenCancelled);
+        const totalCancelled = stornoBookings.length;                       // reálně stornované (zaplacené) rezervace
+        const paidEverCount = paidBookings.length + stornoBookings.length;  // vše, co bylo někdy zaplaceno
+        const cancellationRate = paidEverCount > 0 ? ((totalCancelled / paidEverCount) * 100).toFixed(1) : "0";
+
+        // Lead time distribuce – jen z reálných storen
         const leadTimes = { critical: 0, warning: 0, safe: 0 };
-        
-        cancelledBookings.forEach(b => {
-            if (!b.cancelledAt) {
-                return; 
-            }
+        stornoBookings.forEach(b => {
+            if (!b.cancelledAt) return;
             const bookingDate = parseLocalDate(b.date, b.time);
             const cancelDate = new Date(b.cancelledAt);
-            const diffMs = bookingDate.getTime() - cancelDate.getTime();
-            const diffHours = diffMs / (1000 * 60 * 60);
-            
-            if (diffHours < 24) {
-                leadTimes.critical++;
-            } else if (diffHours < 48) {
-                leadTimes.warning++;
-            } else {
-                leadTimes.safe++;
-            }
+            const diffHours = (bookingDate.getTime() - cancelDate.getTime()) / (1000 * 60 * 60);
+            if (diffHours < 24) leadTimes.critical++;
+            else if (diffHours < 48) leadTimes.warning++;
+            else leadTimes.safe++;
         });
 
         const cancellationLeadTimeData = [
@@ -387,7 +386,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             revenueTrendData,
             topPerformersData,
             cancellationLeadTimeData,
-            cancellationRate
+            cancellationRate,
+            totalCancelled,
+            paidEverCount
         };
     }, [allBookings]);
 
@@ -933,7 +934,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         <AlertTriangle className="w-6 h-6 text-red-500" />
                                     </div>
                                     <h4 className="text-3xl font-bold text-stone-900">{stats.cancellationRate}%</h4>
-                                    <p className="text-sm text-stone-500 font-medium">Celková míra storna</p>
+                                    <p className="text-sm text-stone-500 font-medium">Míra storna zaplacených</p>
+                                    <p className="text-xs text-stone-400 mt-1">{stats.totalCancelled} z {stats.paidEverCount} zaplacených rezervací zrušeno</p>
                                 </div>
 
                                 {/* Cancellation Lead Time (Donut) */}
