@@ -564,7 +564,7 @@ async function startServer() {
   // Vrací jen bezpečná pole potřebná k zobrazení a úhradě – žádný e-mail/telefon klienta.
   app.get("/api/public-booking/:id", async (req: Request, res: Response) => {
     try {
-      const booking = await loadBooking(req.params.id);
+      const booking = await loadBooking(req.params.id as string);
       if (!booking) {
         return res.status(404).json({ error: "Rezervace nebyla nalezena." });
       }
