@@ -75,7 +75,10 @@ export const generateConfirmationEmail = (booking: Partial<Booking>, isPaid: boo
     const formattedDate = dateParts.length === 3 ? `${dateParts[2]}. ${dateParts[1]}. ${dateParts[0]}` : booking.date;
     const price = typeof booking.price === 'number' ? booking.price.toFixed(2).replace('.', ',') : booking.price;
     const roomLabel = booking.room === 1 ? 'M1 – Malá místnost' : 'M2 – Velká místnost';
-    const recipientName = booking.clientName || booking.bookedByName || '';
+    // E-mail je pro informování LEKTORA (nebo hosta) – oslovujeme jeho, ne klienta z poznámky.
+    const greetName = booking.bookedByName || '';
+    // Jméno z pole "Klient / Poznámka" u lektorské rezervace zmíníme jako info, ne jako oslovení.
+    const clientInfo = (booking.clientName && booking.bookedByUserId !== 'guest') ? String(booking.clientName) : '';
 
     // Barevný stav podle toho, zda je zaplaceno
     const badgeText = isPaid ? '✓ Zaplaceno' : 'K úhradě fakturou';
@@ -107,8 +110,10 @@ export const generateConfirmationEmail = (booking: Partial<Booking>, isPaid: boo
 
           <h1 style="margin:0 0 8px;font-size:22px;color:#1c1917;">Rezervace potvrzena</h1>
           <p style="margin:0 0 24px;color:#57534e;font-size:15px;line-height:1.6;">
-            ${recipientName ? `Dobrý den, ${toVocative(recipientName)},` : 'Dobrý den,'}<br/>
-            děkujeme za Vaši rezervaci v Centru Unity. Níže najdete její shrnutí.
+            ${greetName ? `Dobrý den, ${toVocative(greetName)},` : 'Dobrý den,'}<br/>
+            ${clientInfo
+              ? `byla vytvořena rezervace pro klienta ${clientInfo}. Níže najdete její shrnutí.`
+              : `děkujeme za Vaši rezervaci v Centru Unity. Níže najdete její shrnutí.`}
           </p>
 
           <!-- Detail rezervace -->
@@ -158,7 +163,9 @@ export const generateCancellationEmail = (
     const dateParts = booking.date?.split('-') || [];
     const formattedDate = dateParts.length === 3 ? `${dateParts[2]}. ${dateParts[1]}. ${dateParts[0]}` : booking.date;
     const roomLabel = booking.room === 1 ? 'M1 – Malá místnost' : 'M2 – Velká místnost';
-    const recipientName = booking.clientName || booking.bookedByName || '';
+    // Oslovujeme lektora (nebo hosta), klienta z poznámky zmíníme jako info.
+    const greetName = booking.bookedByName || '';
+    const clientInfo = (booking.clientName && booking.bookedByUserId !== 'guest') ? String(booking.clientName) : '';
 
     return `
     <div style="background-color:#f1e9dc;padding:32px 16px;font-family:Helvetica,Arial,sans-serif;">
@@ -171,8 +178,10 @@ export const generateCancellationEmail = (
 
           <h1 style="margin:0 0 8px;font-size:22px;color:#1c1917;">Vaše rezervace byla zrušena</h1>
           <p style="margin:0 0 20px;color:#57534e;font-size:15px;line-height:1.6;">
-            ${recipientName ? `Dobrý den, ${toVocative(recipientName)},` : 'Dobrý den,'}<br/>
-            Vaši rezervaci níže jsme bohužel museli zrušit.
+            ${greetName ? `Dobrý den, ${toVocative(greetName)},` : 'Dobrý den,'}<br/>
+            ${clientInfo
+              ? `rezervace pro klienta ${clientInfo} níže byla bohužel zrušena.`
+              : `Vaši rezervaci níže jsme bohužel museli zrušit.`}
           </p>
 
           <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:14px 18px;margin-bottom:24px;">
