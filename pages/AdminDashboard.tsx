@@ -12,6 +12,13 @@ import { useStore } from '../store/useStore';
 import { isDemoMode } from '../services/firebase';
 import { generatePaymentRequestEmail } from '../utils/emailTemplates';
 
+// Testovací / ignorovaná jména – nezobrazují se ve statistikách, aktivitě ani seznamu objednávek.
+// Normalizace = malá písmena + odstranění diakritiky + sjednocení mezer, ať to chytne i "MIREK SABA", "Mírek  Sába" apod.
+const normalizeName = (s?: string) =>
+  (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+const IGNORED_NAMES = ['Mirek Saba'].map(normalizeName);
+const isIgnoredName = (name?: string) => IGNORED_NAMES.includes(normalizeName(name));
+
 interface AdminDashboardProps {
   allBookings: Booking[];
   practitioners: Practitioner[];
@@ -240,14 +247,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     // --- ANALYTICS DATA ---
     const stats = useMemo(() => {
-        console.log("Stats calculation with allBookings:", allBookings);
-        const confirmedBookings = allBookings.filter(b => ['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status));
-        const cancelledBookings = allBookings.filter(b => b.status === 'cancelled');
+        // Vynecháme testovací/ignorovaná jména (např. "Mirek Saba"), ať nešpiní statistiky ani storna.
+        const src = allBookings.filter(b => !isIgnoredName(b.bookedByName));
+        const confirmedBookings = src.filter(b => ['awaiting_payment', 'deferred_payment', 'paid', 'completed'].includes(b.status));
+        const cancelledBookings = src.filter(b => b.status === 'cancelled');
 
         // --- FINANČNÍ KBELÍKY (aby seděly s GoPay) ---
-        const paidBookings = allBookings.filter(b => ['paid', 'completed'].includes(b.status));        // reálně zaplaceno
-        const pendingBookings = allBookings.filter(b => ['awaiting_payment', 'deferred_payment'].includes(b.status)); // čeká na platbu
-        const refundedBookings = allBookings.filter(b => b.status === 'refunded');                     // vrácené peníze
+        const paidBookings = src.filter(b => ['paid', 'completed'].includes(b.status));        // reálně zaplaceno
+        const pendingBookings = src.filter(b => ['awaiting_payment', 'deferred_payment'].includes(b.status)); // čeká na platbu
+        const refundedBookings = src.filter(b => b.status === 'refunded');                     // vrácené peníze
 
         const realRevenue = paidBookings.reduce((sum, b) => sum + b.price, 0);       // peníze reálně v GoPay
         const pendingRevenue = pendingBookings.reduce((sum, b) => sum + b.price, 0); // ještě nezaplaceno (pipeline)
@@ -354,7 +362,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 !!b.paidAt ||
                 ['cancelled_by_admin_paid', 'cancelled_by_guest_refunded'].includes(b.cancellationReason || '')
             ));
-        const stornoBookings = allBookings.filter(wasPaidThenCancelled);
+        const stornoBookings = src.filter(wasPaidThenCancelled);
         const totalCancelled = stornoBookings.length;                       // reálně stornované (zaplacené) rezervace
         const paidEverCount = paidBookings.length + stornoBookings.length;  // vše, co bylo někdy zaplaceno
         const cancellationRate = paidEverCount > 0 ? ((totalCancelled / paidEverCount) * 100).toFixed(1) : "0";
@@ -442,6 +450,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const activityByPractitioner = useMemo(() => {
         const groups: Record<string, { name: string; bookings: Booking[]; lastAt: number }> = {};
         allBookings.forEach(b => {
+            if (isIgnoredName(b.bookedByName)) return; // skryjeme testovací jména
             if (!b.createdAt && !b.cancelledAt) return;
             const key = b.bookedByUserId || b.bookedByName || 'unknown';
             if (!groups[key]) groups[key] = { name: b.bookedByName || 'Neznámý lektor', bookings: [], lastAt: 0 };
@@ -613,6 +622,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     // --- SCHEDULE FILTERING ---
     const filteredBookings = allBookings.filter(b => {
+        if (isIgnoredName(b.bookedByName)) return false; // skryjeme testovací jména
         const pName = b.bookedByName || '';
         const sName = b.serviceName || '';
         const matchesSearch = pName.toLowerCase().includes(searchQuery.toLowerCase()) || 
