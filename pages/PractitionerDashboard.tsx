@@ -180,7 +180,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
     return d;
   });
 
-  const formatDate = (date: Date) => date.toISOString().split('T')[0];
+  const formatDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
   const isTemplateAvailable = (dayIndex: number, time: string) => {
       const dayName = ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'][dayIndex];

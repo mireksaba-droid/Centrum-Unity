@@ -635,7 +635,7 @@ async function startServer() {
 
       const paymentData = {
           payer: {
-              allowed_payment_instruments: ["PAYMENT_CARD", "GPAY", "APPLE_PAY"],
+              allowed_payment_instruments: ["PAYMENT_CARD"],
               default_payment_instrument: "PAYMENT_CARD",
           },
           amount: amount,
@@ -733,7 +733,7 @@ async function startServer() {
 
       const paymentData = {
           payer: {
-              allowed_payment_instruments: ["PAYMENT_CARD", "GPAY", "APPLE_PAY"],
+              allowed_payment_instruments: ["PAYMENT_CARD"],
               default_payment_instrument: "PAYMENT_CARD",
           },
           amount: amount,

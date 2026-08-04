@@ -192,7 +192,8 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
         }
     }, [currentDate, viewMode]);
 
-    const formatDate = (date: Date) => date.toISOString().split('T')[0];
+    // Datum jako klíč "YYYY-MM-DD" z LOKÁLNÍCH složek (ne přes toISOString/UTC – to posouvalo datum o den).
+    const formatDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
     const combinedBookings = useMemo(() => {
         const mappedEvents: Booking[] = groupEvents.map(event => {

@@ -46,7 +46,7 @@ const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, onClose, onC
   const dates = Array.from({length: 14}, (_, i) => {
       const d = new Date();
       d.setDate(d.getDate() + i);
-      return d.toISOString().split('T')[0];
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   });
 
   return (
