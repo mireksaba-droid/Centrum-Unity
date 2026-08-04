@@ -57,7 +57,9 @@ Uživatel vybere profil a zadá PIN. Po ověření (dnes na klientovi) zavolá `
 ### B. Rezervace a storno
 1. Lektor/admin vybere volný slot v kalendáři (`StudioSchedule`).
 2. Vyplní údaje (klient, vybavení, doba trvání).
-3. Kontrola kolizí (`utils/scheduler.ts` → `checkBookingCollision`) včetně bufferů na úklid.
+3. Kontrola kolizí (`utils/scheduler.ts` → `checkBookingCollision`):
+   - **Tvrdá zábrana:** Kolize ve stejné místnosti (překryv + povinná pauza na úklid).
+   - **Měkké varování:** Lektor již má ve stejný čas rezervaci v druhé místnosti. Povoleno (např. párová terapie), ale vyžaduje potvrzení dialogu (`window.confirm`). Hosté (`guest`) jsou z tohoto varování vyňati.
 4. Cena se počítá funkcí `calculateRentalPrice` (admin má **0 Kč zdarma**).
 5. Uložení: lokální store + Firestore (`saveBookingToFirestore`, transakce proti dvojité rezervaci).
 6. Platba podle scénáře (viz sekce 6).
@@ -67,7 +69,13 @@ Uživatel vybere profil a zadá PIN. Po ověření (dnes na klientovi) zavolá `
 Admin vytvoří `GroupEvent` pro Velkou místnost s kapacitou a cenou. Vygeneruje se veřejná URL `/event/:eventId`. Klient se registruje; Firestore **transakce** hlídá, že se nepřekročí kapacita.
 
 ### D. Administrátorský tok
-Dashboard s metrikami (příjmy, vytíženost), master kalendář se jmény lektorů, správa profilů, rezervací a událostí. Při kolizi skupinové události s rezervací lektora se otevře modál pro přesun (Reschedule).
+Dashboard s pokročilými metrikami:
+- **Finanční přehled:** Celkové příjmy (včetně očekávaných), reálné příjmy (zaplacené), rozdělení podle lektorů.
+- **Naplněnost místností (%):** Výpočet využití z provozní doby (08:00–24:00 = 16 hodin denně × počet dní v měsíci) pro Malou (M1) a Velkou (M2) místnost po měsících.
+- **Analýza storen:** Míra storna zaplacených rezervací a detailní statistika podle lektorů (počet storen a míra vůči jejich celkovým zaplaceným rezervacím).
+- **Vytíženost časů a dní:** Interaktivní heatmapa vytíženosti hodin a koláčové grafy využití místností a vybavení.
+- **Master kalendář:** Kompletní přehled všech rezervací, obou místností a jmen lektorů.
+- **Master kalendář odkaz (ICS feed):** Možnost pro administrátora vygenerovat unikátní zabezpečený odkaz pro synchronizaci všech rezervací do kalendáře v telefonu (Apple Calendar, Google Calendar) přes zabezpečený veřejný ICS feed `/api/master-calendar/:token`.
 
 ## 5. Klíčové datové modely (`types.ts`)
 
@@ -124,6 +132,7 @@ Konfigurace je v `firebase-applet-config.json`. Klient i server používají web
 
 ### GoPay (platby)
 - Vytváření plateb: `/api/create-payment` (auth) a `/api/public-payment` (veřejné, rate-limit).
+- **Platební metody:** Aplikace explicitně předává GoPay povolené platební nástroje `["PAYMENT_CARD", "GPAY", "APPLE_PAY"]`, což zákazníkům nabízí pohodlné placení přes standardní platební karty, Google Pay a Apple Pay na podporovaných zařízeních.
 - Webhook: `/api/gopay/notify` asynchronně aktualizuje stav rezervace (`PAID` → `paid`, `CANCELED`/`TIMEOUTED` → `cancelled`, `REFUNDED` → `refunded`), idempotentně.
 - Ověření stavu po návratu: `/api/gopay/status`.
 - Refundace: `/api/refund` — jen vlastník nebo admin, a jen je-li do termínu **≥ 24 h**. Částky v haléřích.

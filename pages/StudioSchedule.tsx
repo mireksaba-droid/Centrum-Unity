@@ -401,7 +401,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
         }
 
         // --- NEW UTILITY USAGE FOR COLLISION CHECK ---
-        const { hasCollision, reason } = checkBookingCollision({
+        const { hasCollision, reason, warning } = checkBookingCollision({
             newDate: selectedSlot.date,
             newTime: selectedSlot.time,
             durationMinutes: duration,
@@ -412,6 +412,10 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
 
         if (hasCollision) {
             addToast('error', 'Nelze rezervovat', reason);
+            return;
+        }
+        // Měkké varování (paralelní rezervace v druhé místnosti) – povolíme po potvrzení
+        if (warning && !window.confirm(warning)) {
             return;
         }
 
@@ -583,7 +587,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
             return;
         }
 
-        const { hasCollision, reason } = checkBookingCollision({
+        const { hasCollision, reason, warning } = checkBookingCollision({
             newDate: selectedSlot.date,
             newTime: selectedSlot.time,
             durationMinutes: duration,
@@ -593,6 +597,9 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
         });
         if (hasCollision) {
             addToast('error', 'Nelze rezervovat', reason);
+            return;
+        }
+        if (warning && !window.confirm(`${warning}\n(Rezervace za lektora ${practitioner.name}.)`)) {
             return;
         }
 

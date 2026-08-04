@@ -185,7 +185,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 }))
         ];
 
-        const { hasCollision, reason, conflictingBooking } = checkBookingCollision({
+        const { hasCollision, reason, warning, conflictingBooking } = checkBookingCollision({
             newDate: eventForm.date!,
             newTime: eventForm.startTime!,
             durationMinutes: duration,
@@ -201,6 +201,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             } else {
                 addToast('error', 'Kolize v kalendáři', `Nelze uložit událost. Velká místnost je obsazena: ${reason}`);
             }
+            return;
+        }
+        // Měkké varování: lektor má ve stejný čas rezervaci v Malé místnosti
+        if (warning && !window.confirm(warning)) {
             return;
         }
 
@@ -373,6 +377,37 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             { name: '> 48h (Bezpečné)', value: leadTimes.safe, color: '#10b981' },
         ];
 
+        // 8. NAPLNĚNOST MÍSTNOSTÍ (% využití) po měsících.
+        // Jmenovatel = provozní doba (08:00–24:00 = 16 h) × počet dní v měsíci. Čitatel = odrezervované hodiny (aktivní rezervace).
+        const OPERATING_HOURS_PER_DAY = 16;
+        const daysInMonth = (yy: number, mm: number) => new Date(yy, mm + 1, 0).getDate();
+        const roomHoursInMonth = (room: 1 | 2, mm: number, yy: number) =>
+            confirmedBookings.reduce((sum, b) => {
+                if (b.room !== room) return sum;
+                return inMonth(parseLocalDate(b.date), mm, yy) ? sum + (b.durationMinutes || 0) / 60 : sum;
+            }, 0);
+        const occupancyTrend = last6Months.map((monthDate) => {
+            const mm = monthDate.getMonth();
+            const yy = monthDate.getFullYear();
+            const avail = OPERATING_HOURS_PER_DAY * daysInMonth(yy, mm);
+            const nm = monthDate.toLocaleDateString('cs-CZ', { month: 'short' });
+            return {
+                name: nm.charAt(0).toUpperCase() + nm.slice(1),
+                M1: avail > 0 ? Math.round((roomHoursInMonth(1, mm, yy) / avail) * 100) : 0,
+                M2: avail > 0 ? Math.round((roomHoursInMonth(2, mm, yy) / avail) * 100) : 0,
+            };
+        });
+        const currentOccupancy = occupancyTrend[occupancyTrend.length - 1] || { M1: 0, M2: 0, name: '' };
+
+        // 9. KDO DĚLÁ NEJVÍC STOREN – počet i míra (storna ÷ jeho zaplacené rezervace).
+        const perPract: Record<string, { paid: number; storno: number }> = {};
+        paidBookings.forEach(b => { const n = b.bookedByName || 'Neznámý'; (perPract[n] ||= { paid: 0, storno: 0 }).paid++; });
+        stornoBookings.forEach(b => { const n = b.bookedByName || 'Neznámý'; (perPract[n] ||= { paid: 0, storno: 0 }).storno++; });
+        const cancellationsByPractitioner = Object.entries(perPract)
+            .map(([name, v]) => ({ name, storno: v.storno, total: v.paid + v.storno, rate: (v.paid + v.storno) > 0 ? Math.round((v.storno / (v.paid + v.storno)) * 100) : 0 }))
+            .filter(x => x.storno > 0)
+            .sort((a, b) => (b.storno - a.storno) || (b.rate - a.rate));
+
         return {
             totalRevenue,
             realRevenue,
@@ -388,7 +423,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             cancellationLeadTimeData,
             cancellationRate,
             totalCancelled,
-            paidEverCount
+            paidEverCount,
+            occupancyTrend,
+            currentOccupancy,
+            cancellationsByPractitioner
         };
     }, [allBookings]);
 
@@ -958,6 +996,66 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                             </PieChart>
                                         </ResponsiveContainer>
                                     </div>
+                                </div>
+                            </div>
+
+                            {/* SECTION 2.5: NAPLNĚNOST MÍSTNOSTÍ + STORNA LEKTORŮ */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                {/* Naplněnost místností */}
+                                <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm">
+                                    <h3 className="text-lg font-bold text-stone-900 mb-1 flex items-center gap-2">
+                                        <BoxSelect className="w-5 h-5 text-indigo-600" /> Naplněnost místností
+                                    </h3>
+                                    <p className="text-xs text-stone-500 mb-2">% využití z provozní doby (08–24, 16 h/den × dny v měsíci).</p>
+                                    <div className="flex gap-4 mb-4">
+                                        <div className="flex-1 bg-amber-50 border border-amber-100 rounded-lg p-3 text-center">
+                                            <div className="text-2xl font-bold text-stone-900">{stats.currentOccupancy.M1}%</div>
+                                            <div className="text-xs text-stone-500">M1 (Malá) — {stats.currentOccupancy.name}</div>
+                                        </div>
+                                        <div className="flex-1 bg-stone-100 border border-stone-200 rounded-lg p-3 text-center">
+                                            <div className="text-2xl font-bold text-stone-900">{stats.currentOccupancy.M2}%</div>
+                                            <div className="text-xs text-stone-500">M2 (Velká) — {stats.currentOccupancy.name}</div>
+                                        </div>
+                                    </div>
+                                    <div className="h-56">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <BarChart data={stats.occupancyTrend}>
+                                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12}} />
+                                                <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12}} unit="%" domain={[0, 100]} />
+                                                <Tooltip cursor={{fill: '#f1f5f9'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} formatter={(v: any, n: any) => [`${v} %`, n]} />
+                                                <Legend />
+                                                <Bar dataKey="M1" fill="#ba8a5b" radius={[4, 4, 0, 0]} />
+                                                <Bar dataKey="M2" fill="#7a573d" radius={[4, 4, 0, 0]} />
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                    </div>
+                                </div>
+
+                                {/* Kdo dělá nejvíc storen */}
+                                <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm">
+                                    <h3 className="text-lg font-bold text-stone-900 mb-1 flex items-center gap-2">
+                                        <AlertTriangle className="w-5 h-5 text-red-500" /> Kdo dělá nejvíc storen
+                                    </h3>
+                                    <p className="text-xs text-stone-500 mb-4">Zrušené zaplacené rezervace a míra vůči objemu daného lektora.</p>
+                                    {stats.cancellationsByPractitioner.length === 0 ? (
+                                        <p className="text-sm text-stone-500">Zatím žádná storna zaplacených rezervací. 🎉</p>
+                                    ) : (
+                                        <div className="overflow-hidden">
+                                            <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 text-[11px] font-bold text-stone-400 uppercase tracking-wide pb-2 border-b border-stone-100">
+                                                <span>Lektor</span><span className="text-right">Storna</span><span className="text-right">Míra</span>
+                                            </div>
+                                            <div className="divide-y divide-stone-100">
+                                                {stats.cancellationsByPractitioner.map((p) => (
+                                                    <div key={p.name} className="grid grid-cols-[1fr_auto_auto] gap-x-4 items-center py-2.5">
+                                                        <span className="text-sm font-semibold text-stone-800 truncate">{p.name}</span>
+                                                        <span className="text-sm text-stone-700 text-right">{p.storno} <span className="text-stone-400">/ {p.total}</span></span>
+                                                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full justify-self-end ${p.rate >= 30 ? 'bg-red-100 text-red-700' : p.rate >= 15 ? 'bg-amber-100 text-amber-700' : 'bg-stone-100 text-stone-600'}`}>{p.rate}%</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
