@@ -586,6 +586,37 @@ async function startServer() {
     }
   });
 
+  // Veřejné načtení všech skupinových událostí.
+  app.get("/api/public-group-events", async (req: Request, res: Response) => {
+    try {
+      const snap = await getDocs(collection(db, "groupEvents"));
+      const events = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      res.json(events);
+    } catch (error: any) {
+      console.error("Error loading public group events:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Veřejné načtení anonymizovaných registrací pro počítání kapacity.
+  app.get("/api/public-event-registrations", async (req: Request, res: Response) => {
+    try {
+      const snap = await getDocs(collection(db, "eventRegistrations"));
+      const registrations = snap.docs.map(doc => {
+        const d = doc.data();
+        return {
+          id: doc.id,
+          eventId: d.eventId,
+          paymentStatus: d.paymentStatus || 'unpaid'
+        };
+      });
+      res.json(registrations);
+    } catch (error: any) {
+      console.error("Error loading public event registrations:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Create a payment via GoPay (public endpoint without auth)
   app.post("/api/public-payment", async (req: Request, res: Response) => {
     try {

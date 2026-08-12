@@ -108,18 +108,14 @@ export const useStore = create<AppState>()(
 
         try {
           const groupEvents = await loadGroupEvents();
-          if (groupEvents.length > 0) {
-              set({ groupEvents });
-          }
+          set({ groupEvents: groupEvents || [] });
         } catch (e) {
           console.error("Failed to initialize group events:", e);
         }
 
         try {
           const eventRegistrations = await loadEventRegistrations();
-          if (eventRegistrations.length > 0) {
-              set({ eventRegistrations });
-          }
+          set({ eventRegistrations: eventRegistrations || [] });
         } catch (e) {
           console.error("Failed to initialize event registrations:", e);
         }
@@ -334,19 +330,22 @@ export const useStore = create<AppState>()(
       },
 
       createGroupEvent: async (event) => {
-        await saveGroupEventToFirestore(event);
+        const token = get().token;
+        await saveGroupEventToFirestore(event, token);
         set((state) => ({ groupEvents: [...state.groupEvents, event] }));
       },
 
       updateGroupEvent: async (updatedEvent) => {
-        await updateGroupEventInFirestore(updatedEvent);
+        const token = get().token;
+        await updateGroupEventInFirestore(updatedEvent, token);
         set((state) => ({
           groupEvents: state.groupEvents.map(e => e.id === updatedEvent.id ? updatedEvent : e)
         }));
       },
 
       deleteGroupEvent: async (eventId) => {
-        await deleteGroupEventFromFirestore(eventId);
+        const token = get().token;
+        await deleteGroupEventFromFirestore(eventId, token);
         set((state) => ({
           groupEvents: state.groupEvents.filter(e => e.id !== eventId)
         }));

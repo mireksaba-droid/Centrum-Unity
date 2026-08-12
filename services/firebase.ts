@@ -198,7 +198,27 @@ export const updatePractitionerInFirestore = async (practitioner: Practitioner) 
 };
 
 // --- GROUP EVENTS SERVICES ---
-export const saveGroupEventToFirestore = async (event: any) => {
+export const saveGroupEventToFirestore = async (event: any, token?: string | null) => {
+    // Try server-side API first if we have an admin JWT token
+    if (token) {
+        try {
+            const response = await fetch('/api/groupEvents', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(event)
+            });
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success) return true;
+            }
+        } catch (error) {
+            console.warn("Server-side saveGroupEvent failed, falling back to direct Firestore:", error);
+        }
+    }
+
     if (!isFirebaseReady) {
         console.log("Mocking Firestore Write (GroupEvent):", event);
         return true;
@@ -212,7 +232,27 @@ export const saveGroupEventToFirestore = async (event: any) => {
     }
 };
 
-export const updateGroupEventInFirestore = async (event: any) => {
+export const updateGroupEventInFirestore = async (event: any, token?: string | null) => {
+    // Try server-side API first if we have an admin JWT token
+    if (token) {
+        try {
+            const response = await fetch(`/api/groupEvents/${event.id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(event)
+            });
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success) return true;
+            }
+        } catch (error) {
+            console.warn("Server-side updateGroupEvent failed, falling back to direct Firestore:", error);
+        }
+    }
+
     if (!isFirebaseReady) {
         console.log("Mocking Firestore Update (GroupEvent):", event);
         return true;
@@ -227,7 +267,25 @@ export const updateGroupEventInFirestore = async (event: any) => {
     }
 };
 
-export const deleteGroupEventFromFirestore = async (eventId: string) => {
+export const deleteGroupEventFromFirestore = async (eventId: string, token?: string | null) => {
+    // Try server-side API first if we have an admin JWT token
+    if (token) {
+        try {
+            const response = await fetch(`/api/groupEvents/${eventId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success) return true;
+            }
+        } catch (error) {
+            console.warn("Server-side deleteGroupEvent failed, falling back to direct Firestore:", error);
+        }
+    }
+
     if (!isFirebaseReady) {
         console.log("Mocking Firestore Delete (GroupEvent):", eventId);
         return true;
@@ -243,6 +301,23 @@ export const deleteGroupEventFromFirestore = async (eventId: string) => {
 };
 
 export const registerForGroupEvent = async (registration: any) => {
+    // Try server-side public API first (extremely robust and bypasses CORS/client policy blocks)
+    try {
+        const response = await fetch('/api/eventRegistrations', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(registration)
+        });
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) return true;
+        }
+    } catch (e) {
+        console.warn("Server-side registration failed, falling back to client-side transaction:", e);
+    }
+
     if (!isFirebaseReady) {
         console.log("Mocking Firestore Write (EventRegistration):", registration);
         return true;
@@ -287,6 +362,16 @@ export const registerForGroupEvent = async (registration: any) => {
 };
 
 export const loadGroupEvents = async (): Promise<any[]> => {
+    // Try server-side public API first (extremely resilient)
+    try {
+        const res = await fetch('/api/public-group-events');
+        if (res.ok) {
+            return await res.json();
+        }
+    } catch (e) {
+        console.warn("Public API for group events failed, falling back to direct Firestore:", e);
+    }
+
     if (!isFirebaseReady) return [];
     await waitForAuth();
     try {
@@ -294,12 +379,22 @@ export const loadGroupEvents = async (): Promise<any[]> => {
         const querySnapshot = await getDocs(q);
         return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     } catch (error) {
-        console.error("Error loading group events:", error);
+        console.error("Error loading group events via direct Firestore:", error);
         return [];
     }
 };
 
 export const loadEventRegistrations = async (): Promise<any[]> => {
+    // Try server-side public API first (extremely resilient)
+    try {
+        const res = await fetch('/api/public-event-registrations');
+        if (res.ok) {
+            return await res.json();
+        }
+    } catch (e) {
+        console.warn("Public API for event registrations failed, falling back to direct Firestore:", e);
+    }
+
     if (!isFirebaseReady) return [];
     await waitForAuth();
     try {
@@ -307,7 +402,7 @@ export const loadEventRegistrations = async (): Promise<any[]> => {
         const querySnapshot = await getDocs(q);
         return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     } catch (error) {
-        console.error("Error loading event registrations:", error);
+        console.error("Error loading event registrations via direct Firestore:", error);
         return [];
     }
 };
