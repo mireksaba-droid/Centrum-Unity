@@ -15,7 +15,9 @@ import {
   loadPractitioners, 
   savePractitionerToFirestore, 
   updatePractitionerInFirestore,
-  sendTransactionalEmail
+  sendTransactionalEmail,
+  loadGroupEvents,
+  loadEventRegistrations
 } from '../services/firebase';
 
 interface AppState {
@@ -102,6 +104,24 @@ export const useStore = create<AppState>()(
           }
         } catch (e) {
              console.error("Failed to initialize practitioners:", e);
+        }
+
+        try {
+          const groupEvents = await loadGroupEvents();
+          if (groupEvents.length > 0) {
+              set({ groupEvents });
+          }
+        } catch (e) {
+          console.error("Failed to initialize group events:", e);
+        }
+
+        try {
+          const eventRegistrations = await loadEventRegistrations();
+          if (eventRegistrations.length > 0) {
+              set({ eventRegistrations });
+          }
+        } catch (e) {
+          console.error("Failed to initialize event registrations:", e);
         }
       },
 

@@ -1358,7 +1358,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             const registeredCount = eventRegistrations.filter(r => r.eventId === event.id).length;
                             const isFull = registeredCount >= event.capacity;
                             const practitioner = practitioners.find(p => p.id === event.practitionerId);
-                            const eventUrl = `${window.location.origin}/#/event/${event.id}`;
+                            const isPreview = window.location.hostname.includes('usercontent.goog') || 
+                                              window.location.hostname.includes('webcontainer.io') ||
+                                              window.location.hostname.includes('idx.google.com');
+                            const eventUrl = isPreview 
+                                ? `${window.location.origin}/#/event/${event.id}` 
+                                : `${window.location.origin}/event/${event.id}`;
 
                             return (
                                 <div key={event.id} className="bg-white rounded-xl border border-stone-200 shadow-sm overflow-hidden flex flex-col">

@@ -48,7 +48,16 @@ const AppContent = () => {
 
   useEffect(() => {
     initializeBookings();
-  }, [initializeBookings]);
+
+    // Hash-to-Path redirect for production BrowserRouter:
+    // If a link with /#/event/... or /#/pay/... was clicked, but we are running in BrowserRouter,
+    // we want to dynamically redirect to the path-based equivalent (/event/... or /pay/...)
+    const hash = window.location.hash;
+    if (hash && hash.startsWith('#/')) {
+      const cleanPath = hash.substring(1); // removes the '#' (results in e.g. /event/id)
+      navigate(cleanPath, { replace: true });
+    }
+  }, [initializeBookings, navigate]);
 
   const handleLogin = (user: Practitioner, token?: string) => { 
       setCurrentUser(user, token); 

@@ -285,3 +285,29 @@ export const registerForGroupEvent = async (registration: any) => {
         return false;
     }
 };
+
+export const loadGroupEvents = async (): Promise<any[]> => {
+    if (!isFirebaseReady) return [];
+    await waitForAuth();
+    try {
+        const q = query(collection(db, 'groupEvents'));
+        const querySnapshot = await getDocs(q);
+        return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (error) {
+        console.error("Error loading group events:", error);
+        return [];
+    }
+};
+
+export const loadEventRegistrations = async (): Promise<any[]> => {
+    if (!isFirebaseReady) return [];
+    await waitForAuth();
+    try {
+        const q = query(collection(db, 'eventRegistrations'));
+        const querySnapshot = await getDocs(q);
+        return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (error) {
+        console.error("Error loading event registrations:", error);
+        return [];
+    }
+};
