@@ -108,8 +108,10 @@ export interface EventRegistration {
   clientName: string;
   clientEmail: string;
   clientPhone?: string;
-  paymentStatus: 'paid' | 'unpaid'; // Pro budoucí napojení platební brány
+  paymentStatus: 'paid' | 'unpaid' | 'awaiting_payment' | 'cancelled';
   registeredAt: string;
+  paymentId?: string;
+  paymentUrl?: string;
 }
 
 export interface ChatMessage {

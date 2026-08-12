@@ -13,7 +13,7 @@ import firebaseConfig from "./firebase-applet-config.json";
 
 import { PRACTITIONERS } from "./constants";
 import { calculateRentalPrice } from "./utils/scheduler";
-import { generatePaymentRequestEmail, generateConfirmationEmail, generateCancellationEmail, generateAdminDailySummaryEmail, generatePaymentReminderEmail } from "./utils/emailTemplates";
+import { generatePaymentRequestEmail, generateConfirmationEmail, generateCancellationEmail, generateAdminDailySummaryEmail, generatePaymentReminderEmail, generateEventRegistrationConfirmationEmail, generateEventRegistrationCancellationEmail } from "./utils/emailTemplates";
 
 async function safeJson(res: any) {
   const text = await res.text();
@@ -533,26 +533,137 @@ async function startServer() {
   app.post("/api/eventRegistrations", async (req: Request, res: Response) => {
     try {
       const registration = req.body;
-      
-      
-      await runTransaction(db, async (transaction: any) => {
-          const eventRef = doc(db, "groupEvents", registration.eventId);
-          const eventDoc = await transaction.get(eventRef);
+      const regId = registration.id || crypto.randomUUID();
+      registration.id = regId;
 
-          if (!eventDoc.exists) throw new Error("Event does not exist!");
+      const eventRef = doc(db, "groupEvents", registration.eventId);
+      const eventDoc = await getDoc(eventRef);
 
-          const currentRegistrations = eventDoc.data()?.currentRegistrations || 0;
-          const capacity = eventDoc.data()?.capacity || 0;
+      if (!eventDoc.exists) {
+        return res.status(404).json({ error: "Událost neexistuje!" });
+      }
 
-          if (currentRegistrations >= capacity) throw new Error("Capacity full");
+      const eventData = eventDoc.data() as any;
+      const price = Number(eventData.price) || 0;
 
-          const newRegRef = doc(db, "eventRegistrations", registration.id || doc(collection(db, "eventRegistrations")).id);
-          
-          transaction.set(newRegRef, { ...registration, id: newRegRef.id });
+      if (price <= 0) {
+        // --- EVENT JE ZDARMA ---
+        registration.paymentStatus = 'paid';
+        registration.paidAt = new Date().toISOString();
+
+        await runTransaction(db, async (transaction: any) => {
+          const currentDoc = await transaction.get(eventRef);
+          const currentRegistrations = currentDoc.data()?.currentRegistrations || 0;
+          const capacity = currentDoc.data()?.capacity || 0;
+
+          if (currentRegistrations >= capacity) throw new Error("Kapacita události je plná!");
+
+          const newRegRef = doc(db, "eventRegistrations", regId);
+          transaction.set(newRegRef, registration);
           transaction.update(eventRef, { currentRegistrations: currentRegistrations + 1 });
-      });
-      res.json({ success: true });
+        });
+
+        // Odeslat ihned potvrzení e-mailem
+        if (emailConfigured() && registration.clientEmail) {
+          try {
+            await sendEmail({
+              to: [registration.clientEmail],
+              subject: `Potvrzení registrace: ${eventData.title} - Centrum Unity`,
+              html: generateEventRegistrationConfirmationEmail(registration, eventData, true)
+            });
+          } catch (e: any) {
+            console.error("Chyba při odesílání e-mailu zdarma registrace:", e.message);
+          }
+        }
+
+        return res.json({ success: true });
+      } else {
+        // --- EVENT JE PLACENÝ ---
+        registration.paymentStatus = 'awaiting_payment';
+
+        await runTransaction(db, async (transaction: any) => {
+          const currentDoc = await transaction.get(eventRef);
+          const currentRegistrations = currentDoc.data()?.currentRegistrations || 0;
+          const capacity = currentDoc.data()?.capacity || 0;
+
+          if (currentRegistrations >= capacity) throw new Error("Kapacita události je plná!");
+
+          const newRegRef = doc(db, "eventRegistrations", regId);
+          transaction.set(newRegRef, registration);
+          transaction.update(eventRef, { currentRegistrations: currentRegistrations + 1 });
+        });
+
+        // Vytvoříme platbu na GoPay
+        const amountHaler = price * 100;
+        const token = await getGoPayToken();
+
+        const paymentData = {
+          payer: {
+            allowed_payment_instruments: ["PAYMENT_CARD", "GPAY", "APPLE_PAY"],
+            default_payment_instrument: "PAYMENT_CARD",
+          },
+          amount: amountHaler,
+          currency: "CZK",
+          order_number: `${regId}-${Date.now()}`,
+          order_description: `Registrace: ${eventData.title}`,
+          items: [{ name: `Registrace na akci: ${eventData.title}`, amount: amountHaler, count: 1 }],
+          callback: {
+            return_url: `${APP_BASE_URL}/#/event/${registration.eventId}?status=success`,
+            notification_url: `${APP_BASE_URL}/api/gopay/notify`
+          },
+          target: {
+            type: "ACCOUNT",
+            goid: process.env.GOPAY_GOID
+          },
+          additional_params: [
+            { name: "registrationId", value: String(regId) },
+            { name: "eventId", value: String(registration.eventId) }
+          ]
+        };
+
+        const response = await fetch(`${GOPAY_URL}/payments/payment`, {
+          method: "POST",
+          headers: {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify(paymentData)
+        });
+
+        const data = await safeJson(response);
+
+        if (!response.ok) {
+          throw new Error("GoPay create payment failed: " + JSON.stringify(data));
+        }
+
+        // Zapíšeme paymentId a paymentUrl zpět do registrace
+        const regRef = doc(db, "eventRegistrations", regId);
+        await updateDoc(regRef, { 
+          paymentId: String(data.id),
+          paymentUrl: data.gw_url
+        });
+
+        // Odešleme klientovi bezprostředně "potvrzení o přihlášení s instrukcemi" o tom, že čekáme na platbu
+        if (emailConfigured() && registration.clientEmail) {
+          try {
+            await sendEmail({
+              to: [registration.clientEmail],
+              subject: `Potvrzení registrace: ${eventData.title} - Centrum Unity`,
+              html: generateEventRegistrationConfirmationEmail(registration, eventData, false)
+            });
+          } catch (e: any) {
+            console.error("Chyba při odesílání e-mailu s instrukcemi k platbě:", e.message);
+          }
+        }
+
+        return res.json({ 
+          success: true, 
+          paymentUrl: data.gw_url 
+        });
+      }
     } catch (error: any) {
+      console.error("Chyba registrace na událost:", error.message);
       res.status(500).json({ error: error.message });
     }
   });
@@ -976,6 +1087,120 @@ async function startServer() {
 
     // Najdeme rezervaci: primárně přes bookingId v additional_params, jinak podle paymentId
     const bookingIdParam = paymentStatus.additional_params?.find((x: any) => x.name === "bookingId")?.value;
+    const registrationIdParam = paymentStatus.additional_params?.find((x: any) => x.name === "registrationId")?.value;
+
+    let isRegistration = !!registrationIdParam;
+    if (!isRegistration) {
+      const snap = await getDocs(query(collection(db, "eventRegistrations"), where("paymentId", "==", String(id))));
+      if (!snap.empty) {
+        isRegistration = true;
+      }
+    }
+
+    if (isRegistration) {
+      let regRef: DocumentReference | null = null;
+      let regId = registrationIdParam;
+
+      if (regId) {
+        regRef = doc(db, "eventRegistrations", regId);
+      } else {
+        const snap = await getDocs(query(collection(db, "eventRegistrations"), where("paymentId", "==", String(id))));
+        if (!snap.empty) {
+          regRef = snap.docs[0].ref;
+          regId = snap.docs[0].id;
+        }
+      }
+
+      if (!regRef) {
+        console.log(`GoPay reconcile: pro platbu ${id} nenalezena registrace.`);
+        return { state };
+      }
+
+      const map: Record<string, string> = {
+        PAID: "paid",
+        CANCELED: "cancelled",
+        TIMEOUTED: "cancelled",
+        REFUNDED: "refunded",
+      };
+      const newStatus = map[state];
+      if (!newStatus) return { state };
+
+      let transitionedToPaid = false;
+      let transitionedToCancelled = false;
+
+      await runTransaction(db, async (tx: any) => {
+        const snap = await tx.get(regRef!);
+        if (!snap.exists()) return;
+        const current = snap.data() || {};
+
+        if (current.paymentStatus === "cancelled" || current.paymentStatus === "refunded" || current.paymentStatus === "paid") return;
+
+        const updateData: any = { paymentStatus: newStatus, paymentId: String(id) };
+        if (newStatus === "paid" && !current.paidAt) {
+          updateData.paidAt = new Date().toISOString();
+        }
+        if (newStatus === "cancelled") {
+          updateData.cancelledAt = new Date().toISOString();
+        }
+        tx.update(regRef!, updateData);
+        if (newStatus === "paid") transitionedToPaid = true;
+        if (newStatus === "cancelled") transitionedToCancelled = true;
+      });
+
+      if (transitionedToPaid && emailConfigured()) {
+        try {
+          const finalDoc = await getDoc(regRef!);
+          const regData = finalDoc.data() as any;
+          const eventDoc = await getDoc(doc(db, "groupEvents", regData.eventId));
+          if (eventDoc.exists()) {
+            const eventData = eventDoc.data() as any;
+            const recipients = [regData.clientEmail].filter(Boolean);
+            if (recipients.length) {
+              await sendEmail({
+                to: recipients,
+                subject: `Potvrzení platby: ${eventData.title} - Centrum Unity`,
+                html: generateEventRegistrationConfirmationEmail(regData, eventData, true)
+              });
+              console.log(`Event registration confirmation email sent to ${recipients.join(', ')}`);
+            }
+          }
+        } catch (e: any) {
+          console.error("Failed to send event registration confirmation email:", e.message);
+        }
+      }
+
+      if (transitionedToCancelled) {
+        try {
+          const finalDoc = await getDoc(regRef!);
+          const regData = finalDoc.data() as any;
+          await runTransaction(db, async (transaction: any) => {
+            const eventRef = doc(db, "groupEvents", regData.eventId);
+            const eventDoc = await transaction.get(eventRef);
+            if (eventDoc.exists()) {
+              const currentRegistrations = eventDoc.data()?.currentRegistrations || 0;
+              transaction.update(eventRef, { currentRegistrations: Math.max(0, currentRegistrations - 1) });
+            }
+          });
+          
+          if (emailConfigured() && regData.clientEmail) {
+            const eventDoc = await getDoc(doc(db, "groupEvents", regData.eventId));
+            if (eventDoc.exists()) {
+              const eventData = eventDoc.data();
+              await sendEmail({
+                to: [regData.clientEmail],
+                subject: `Registrace zrušena (vypršela platba): ${eventData?.title} - Centrum Unity`,
+                html: generateEventRegistrationCancellationEmail(regData, eventData, "Platba nebyla dokončena včas, proto byla vaše registrace automaticky zrušena a místo uvolněno.")
+              });
+            }
+          }
+        } catch (e: any) {
+          console.error("Failed to release capacity for cancelled event registration:", e.message);
+        }
+      }
+
+      return { state };
+    }
+
     let bookingRef: DocumentReference | null = null;
     let bookingId = bookingIdParam;
 
@@ -1736,6 +1961,49 @@ async function startServer() {
             }
           } catch (mailErr: any) {
             console.error(`Nepodařilo se odeslat e-mail o zrušení pro rezervaci ${booking.id}:`, mailErr.message);
+          }
+        }
+      }
+
+      // Úklid nezaplacených registrací na hromadné akce (15 minut na bráně)
+      const eventRegSnapshot = await getDocs(query(collection(db, "eventRegistrations"), where("paymentStatus", "==", "awaiting_payment")));
+      if (!eventRegSnapshot.empty) {
+        for (const regDoc of eventRegSnapshot.docs) {
+          const data = regDoc.data();
+          if (data.registeredAt && data.registeredAt < fifteenMinutesAgo) {
+            // Zrušíme registraci
+            await updateDoc(regDoc.ref, {
+              paymentStatus: 'cancelled',
+              cancelledAt: new Date().toISOString(),
+              cancellationReason: 'payment_expired'
+            });
+
+            // Uvolníme kapacitu
+            try {
+              await runTransaction(db, async (transaction: any) => {
+                const eventRef = doc(db, "groupEvents", data.eventId);
+                const eventDoc = await transaction.get(eventRef);
+                if (eventDoc.exists()) {
+                  const currentRegistrations = eventDoc.data()?.currentRegistrations || 0;
+                  transaction.update(eventRef, { currentRegistrations: Math.max(0, currentRegistrations - 1) });
+                }
+              });
+
+              // Odešleme storno e-mail
+              if (emailConfigured() && data.clientEmail) {
+                const eventDoc = await getDoc(doc(db, "groupEvents", data.eventId));
+                if (eventDoc.exists()) {
+                  const eventData = eventDoc.data();
+                  await sendEmail({
+                    to: [data.clientEmail],
+                    subject: `Registrace zrušena (vypršela platba): ${eventData?.title} - Centrum Unity`,
+                    html: generateEventRegistrationCancellationEmail(data, eventData, "Platba nebyla dokončena včas, proto byla vaše registrace automaticky zrušena a místo uvolněno.")
+                  });
+                }
+              }
+            } catch (capErr: any) {
+              console.error(`Chyba při uvolňování kapacity pro registraci ${regDoc.id}:`, capErr.message);
+            }
           }
         }
       }

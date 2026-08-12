@@ -300,7 +300,7 @@ export const deleteGroupEventFromFirestore = async (eventId: string, token?: str
     }
 };
 
-export const registerForGroupEvent = async (registration: any) => {
+export const registerForGroupEvent = async (registration: any): Promise<{ success: boolean; paymentUrl?: string }> => {
     // Try server-side public API first (extremely robust and bypasses CORS/client policy blocks)
     try {
         const response = await fetch('/api/eventRegistrations', {
@@ -312,7 +312,9 @@ export const registerForGroupEvent = async (registration: any) => {
         });
         if (response.ok) {
             const data = await response.json();
-            if (data.success) return true;
+            if (data.success) {
+                return { success: true, paymentUrl: data.paymentUrl };
+            }
         }
     } catch (e) {
         console.warn("Server-side registration failed, falling back to client-side transaction:", e);
@@ -320,7 +322,7 @@ export const registerForGroupEvent = async (registration: any) => {
 
     if (!isFirebaseReady) {
         console.log("Mocking Firestore Write (EventRegistration):", registration);
-        return true;
+        return { success: true };
     }
     try {
         await runTransaction(db, async (transaction) => {
@@ -354,10 +356,10 @@ export const registerForGroupEvent = async (registration: any) => {
                 currentRegistrations: currentRegistrations + 1
             });
         });
-        return true;
+        return { success: true };
     } catch (error) {
         console.error("Error registering for event:", error);
-        return false;
+        return { success: false };
     }
 };
 

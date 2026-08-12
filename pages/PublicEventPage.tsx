@@ -9,7 +9,7 @@ import { useToast } from '../contexts/ToastContext';
 interface PublicEventPageProps {
   events: GroupEvent[];
   registrations: EventRegistration[];
-  onRegister: (registration: Partial<EventRegistration>) => Promise<boolean>;
+  onRegister: (registration: Partial<EventRegistration>) => Promise<{ success: boolean; paymentUrl?: string }>;
 }
 
 const PublicEventPage: React.FC<PublicEventPageProps> = ({ events, registrations, onRegister }) => {
@@ -22,6 +22,14 @@ const PublicEventPage: React.FC<PublicEventPageProps> = ({ events, registrations
   const [phone, setPhone] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+
+  React.useEffect(() => {
+    const queryStr = window.location.search || (window.location.hash.includes('?') ? window.location.hash.substring(window.location.hash.indexOf('?')) : '');
+    const params = new URLSearchParams(queryStr);
+    if (params.get('status') === 'success' || params.get('id')) {
+      setIsSuccess(true);
+    }
+  }, []);
 
   const event = events.find(e => e.id === eventId);
   
@@ -47,7 +55,7 @@ const PublicEventPage: React.FC<PublicEventPageProps> = ({ events, registrations
 
     setIsSubmitting(true);
     
-    const success = await onRegister({
+    const result = await onRegister({
       eventId: event.id,
       clientName: name,
       clientEmail: email,
@@ -58,9 +66,19 @@ const PublicEventPage: React.FC<PublicEventPageProps> = ({ events, registrations
 
     setIsSubmitting(false);
 
-    if (success) {
-      setIsSuccess(true);
-      addToast('success', 'Přihlášení úspěšné', 'Těšíme se na vás!');
+    if (result.success) {
+      if (result.paymentUrl) {
+        addToast('success', 'Přihlášení úspěšné', 'Nyní budete přesměrováni na platební bránu GoPay k dokončení platby.');
+        setTimeout(() => {
+          const opened = window.open(result.paymentUrl, '_blank');
+          if (!opened) {
+            window.location.href = result.paymentUrl!;
+          }
+        }, 1000);
+      } else {
+        setIsSuccess(true);
+        addToast('success', 'Přihlášení úspěšné', 'Těšíme se na vás!');
+      }
     } else {
       addToast('error', 'Chyba', 'Nepodařilo se přihlásit. Zkuste to prosím znovu.');
     }
@@ -196,7 +214,7 @@ const PublicEventPage: React.FC<PublicEventPageProps> = ({ events, registrations
                     {isSubmitting ? 'Zpracovávám...' : 'Závazně se přihlásit'}
                   </Button>
                   <p className="text-xs text-stone-400 text-center mt-3">
-                    Kliknutím souhlasíte se storno podmínkami studia. Platba proběhne na místě.
+                    Kliknutím souhlasíte se storno podmínkami studia. U placených lekcí probíhá platba online přes GoPay.
                   </p>
                 </div>
               </form>

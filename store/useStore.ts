@@ -51,7 +51,7 @@ interface AppState {
   deleteGroupEvent: (eventId: string) => Promise<void>;
   
   // Registrations
-  registerForEvent: (registration: Partial<EventRegistration>) => Promise<boolean>;
+  registerForEvent: (registration: Partial<EventRegistration>) => Promise<{ success: boolean; paymentUrl?: string }>;
   resetData: () => Promise<void>;
 }
 
@@ -358,15 +358,24 @@ export const useStore = create<AppState>()(
           clientName: registration.clientName!,
           clientEmail: registration.clientEmail!,
           clientPhone: registration.clientPhone,
-          paymentStatus: registration.paymentStatus || 'unpaid',
+          paymentStatus: (registration.paymentStatus as any) || 'unpaid',
           registeredAt: registration.registeredAt!
         };
-        const success = await registerForGroupEvent(newRegistration);
-        if (success) {
-          set((state) => ({ eventRegistrations: [...state.eventRegistrations, newRegistration] }));
-          return true;
+        const result = await registerForGroupEvent(newRegistration);
+        if (result.success) {
+          set((state) => ({ 
+            eventRegistrations: [
+              ...state.eventRegistrations, 
+              { 
+                ...newRegistration, 
+                paymentStatus: result.paymentUrl ? 'awaiting_payment' : 'paid',
+                paymentUrl: result.paymentUrl 
+              }
+            ] 
+          }));
+          return result;
         }
-        return false;
+        return { success: false };
       },
       
       resetData: async () => {
