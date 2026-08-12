@@ -668,6 +668,108 @@ async function startServer() {
     }
   });
 
+  // Admin: Mark event registration as paid manually
+  app.put("/api/admin/eventRegistrations/:id/paid", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const { id } = req.params;
+      const regRef = doc(db, "eventRegistrations", String(id));
+      const regDoc = await getDoc(regRef);
+
+      if (!regDoc.exists) {
+        return res.status(404).json({ error: "Registrace nebyla nalezena." });
+      }
+
+      const regData = regDoc.data() as any;
+      if (regData.paymentStatus === "paid") {
+        return res.json({ success: true, message: "Již zaplaceno" });
+      }
+
+      await updateDoc(regRef, {
+        paymentStatus: "paid",
+        paidAt: new Date().toISOString(),
+        manualPayment: true
+      });
+
+      // Send confirmation email
+      if (emailConfigured() && regData.clientEmail) {
+        const eventDoc = await getDoc(doc(db, "groupEvents", regData.eventId));
+        if (eventDoc.exists()) {
+          const eventData = eventDoc.data() as any;
+          try {
+            await sendEmail({
+              to: [regData.clientEmail],
+              subject: `Potvrzení platby: ${eventData.title} - Centrum Unity`,
+              html: generateEventRegistrationConfirmationEmail({ ...regData, paymentStatus: 'paid' }, eventData, true)
+            });
+          } catch (e: any) {
+            console.error("Chyba při odesílání manuálního potvrzení:", e.message);
+          }
+        }
+      }
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error marking registration as paid:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Admin: Cancel event registration
+  app.delete("/api/admin/eventRegistrations/:id", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const { id } = req.params;
+      const regRef = doc(db, "eventRegistrations", String(id));
+      const regDoc = await getDoc(regRef);
+
+      if (!regDoc.exists) {
+        return res.status(404).json({ error: "Registrace nebyla nalezena." });
+      }
+
+      const regData = regDoc.data() as any;
+
+      await runTransaction(db, async (transaction: any) => {
+        // Stornujeme stav registrace
+        transaction.update(regRef, {
+          paymentStatus: "cancelled",
+          cancelledAt: new Date().toISOString(),
+          cancellationReason: "admin_cancelled"
+        });
+
+        // Snížíme kapacitu
+        const eventRef = doc(db, "groupEvents", regData.eventId);
+        const eventDoc = await transaction.get(eventRef);
+        if (eventDoc.exists()) {
+          const currentRegistrations = eventDoc.data()?.currentRegistrations || 0;
+          transaction.update(eventRef, {
+            currentRegistrations: Math.max(0, currentRegistrations - 1)
+          });
+        }
+      });
+
+      // Pošleme storno e-mail
+      if (emailConfigured() && regData.clientEmail) {
+        const eventDoc = await getDoc(doc(db, "groupEvents", regData.eventId));
+        if (eventDoc.exists()) {
+          const eventData = eventDoc.data() as any;
+          try {
+            await sendEmail({
+              to: [regData.clientEmail],
+              subject: `Registrace zrušena: ${eventData.title} - Centrum Unity`,
+              html: generateEventRegistrationCancellationEmail(regData, eventData, "Vaše registrace na tuto událost byla zrušena administrátorem Centra Unity.")
+            });
+          } catch (e: any) {
+            console.error("Chyba při odesílání storno e-mailu administrátorem:", e.message);
+          }
+        }
+      }
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Chyba při stornování registrace administrátorem:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Simple in-memory rate limiter for public payment endpoint
   const paymentRateLimits = new Map<string, { count: number, resetTime: number }>();
 

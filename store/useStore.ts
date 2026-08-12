@@ -52,6 +52,8 @@ interface AppState {
   
   // Registrations
   registerForEvent: (registration: Partial<EventRegistration>) => Promise<{ success: boolean; paymentUrl?: string }>;
+  adminMarkRegistrationAsPaid: (regId: string) => Promise<boolean>;
+  adminCancelRegistration: (regId: string) => Promise<boolean>;
   resetData: () => Promise<void>;
 }
 
@@ -376,6 +378,66 @@ export const useStore = create<AppState>()(
           return result;
         }
         return { success: false };
+      },
+
+      adminMarkRegistrationAsPaid: async (regId) => {
+        try {
+          const state = get();
+          const response = await fetch(`/api/admin/eventRegistrations/${regId}/paid`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bearer ${state.token}`
+            }
+          });
+          if (response.ok) {
+            set((state) => ({
+              eventRegistrations: state.eventRegistrations.map((r) => 
+                r.id === regId ? { ...r, paymentStatus: 'paid' } : r
+              )
+            }));
+            return true;
+          }
+          return false;
+        } catch (e) {
+          console.error("Error marking registration as paid:", e);
+          return false;
+        }
+      },
+
+      adminCancelRegistration: async (regId) => {
+        try {
+          const state = get();
+          const response = await fetch(`/api/admin/eventRegistrations/${regId}`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${state.token}`
+            }
+          });
+          if (response.ok) {
+            set((state) => {
+              const cancelledReg = state.eventRegistrations.find(r => r.id === regId);
+              let updatedEvents = state.groupEvents;
+              if (cancelledReg) {
+                updatedEvents = state.groupEvents.map(ev => 
+                  ev.id === cancelledReg.eventId 
+                    ? { ...ev, currentRegistrations: Math.max(0, (ev.currentRegistrations || 0) - 1) }
+                    : ev
+                );
+              }
+              return {
+                groupEvents: updatedEvents,
+                eventRegistrations: state.eventRegistrations.map((r) => 
+                  r.id === regId ? { ...r, paymentStatus: 'cancelled' } : r
+                )
+              };
+            });
+            return true;
+          }
+          return false;
+        } catch (e) {
+          console.error("Error cancelling registration:", e);
+          return false;
+        }
       },
       
       resetData: async () => {

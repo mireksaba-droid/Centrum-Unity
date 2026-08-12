@@ -121,6 +121,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     // Event Modal State
     const [isEventModalOpen, setIsEventModalOpen] = useState(false);
     const [editingEventId, setEditingEventId] = useState<string | null>(null);
+    const [selectedParticipantsEventId, setSelectedParticipantsEventId] = useState<string | null>(null);
+    const [isActionPending, setIsActionPending] = useState(false);
     const [eventForm, setEventForm] = useState<Partial<GroupEvent>>({
         title: '',
         description: '',
@@ -1399,6 +1401,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                             <Link className="w-4 h-4" /> Kopírovat odkaz
                                         </button>
                                         <div className="flex gap-2">
+                                            <Button 
+                                                variant="outline" 
+                                                size="sm" 
+                                                className="text-indigo-600 border-indigo-200 hover:bg-indigo-50" 
+                                                onClick={() => setSelectedParticipantsEventId(event.id)}
+                                                title="Zobrazit přihlášené účastníky"
+                                            >
+                                                <Users className="w-4 h-4" /> <span className="hidden sm:inline ml-1 text-xs">Účastníci</span>
+                                            </Button>
                                             <Button variant="outline" size="sm" onClick={() => handleOpenEventModal(event)}>
                                                 <Edit className="w-4 h-4" />
                                             </Button>
@@ -1600,6 +1611,155 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
                 </div>
             )}
+
+            {/* Event Participants Modal */}
+            {selectedParticipantsEventId && (() => {
+                const event = groupEvents.find(e => e.id === selectedParticipantsEventId);
+                const regs = eventRegistrations.filter(r => r.eventId === selectedParticipantsEventId);
+                
+                return (
+                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                        <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col animate-in zoom-in-95">
+                            <div className="flex justify-between items-center p-6 border-b border-stone-100 sticky top-0 bg-white z-10">
+                                <div>
+                                    <h2 className="text-xl font-bold font-heading text-stone-900">Seznam účastníků: {event?.title}</h2>
+                                    <p className="text-sm text-stone-500 mt-1">
+                                        Termín: {event ? formatLocalDate(event.date) : ''} v {event?.startTime} - {event?.endTime} • Kapacita: {regs.length} / {event?.capacity}
+                                    </p>
+                                </div>
+                                <button onClick={() => setSelectedParticipantsEventId(null)} className="text-stone-400 hover:text-stone-600 p-2">
+                                    <X className="w-6 h-6" />
+                                </button>
+                            </div>
+
+                            <div className="flex-grow overflow-y-auto p-6">
+                                {regs.length === 0 ? (
+                                    <div className="text-center py-16">
+                                        <Users className="w-12 h-12 text-stone-300 mx-auto mb-3" />
+                                        <p className="text-stone-500">Zatím se na tuto akci nikdo nepřihlásil.</p>
+                                    </div>
+                                ) : (
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left border-collapse">
+                                            <thead>
+                                                <tr className="border-b border-stone-100 text-stone-400 text-xs uppercase tracking-wider">
+                                                    <th className="pb-3 font-semibold">Jméno klienta</th>
+                                                    <th className="pb-3 font-semibold">E-mail</th>
+                                                    <th className="pb-3 font-semibold">Telefon</th>
+                                                    <th className="pb-3 font-semibold">Datum přihlášení</th>
+                                                    <th className="pb-3 font-semibold">Stav platby / GoPay ID</th>
+                                                    <th className="pb-3 font-semibold text-right">Akce</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-stone-100 text-stone-700 text-sm">
+                                                {regs.map(reg => {
+                                                    const date = new Date(reg.registeredAt);
+                                                    const formattedRegDate = !isNaN(date.getTime()) 
+                                                        ? `${date.getDate()}. ${date.getMonth() + 1}. ${date.getFullYear()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+                                                        : reg.registeredAt;
+
+                                                    return (
+                                                        <tr key={reg.id} className="hover:bg-stone-50/50">
+                                                            <td className="py-4 font-medium text-stone-900">{reg.clientName}</td>
+                                                            <td className="py-4">
+                                                                <a href={`mailto:${reg.clientEmail}`} className="text-indigo-600 hover:underline">{reg.clientEmail}</a>
+                                                            </td>
+                                                            <td className="py-4 text-stone-500">{reg.clientPhone || '—'}</td>
+                                                            <td className="py-4 text-stone-500">{formattedRegDate}</td>
+                                                            <td className="py-4">
+                                                                <div className="flex flex-col gap-1 items-start">
+                                                                    {reg.paymentStatus === 'paid' && (
+                                                                        <span className="inline-flex items-center gap-1 bg-green-50 text-green-700 px-2.5 py-1 rounded-full text-xs font-bold">
+                                                                            <CheckCircle className="w-3.5 h-3.5" /> Zaplaceno
+                                                                        </span>
+                                                                    )}
+                                                                    {reg.paymentStatus === 'awaiting_payment' && (
+                                                                        <span className="inline-flex items-center gap-1 bg-yellow-50 text-yellow-700 px-2.5 py-1 rounded-full text-xs font-bold">
+                                                                            <Clock className="w-3.5 h-3.5" /> Čeká na platbu
+                                                                        </span>
+                                                                    )}
+                                                                    {reg.paymentStatus === 'cancelled' && (
+                                                                        <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 px-2.5 py-1 rounded-full text-xs font-bold">
+                                                                            <XCircle className="w-3.5 h-3.5" /> Stornováno
+                                                                        </span>
+                                                                    )}
+                                                                    {reg.paymentStatus === 'unpaid' && (
+                                                                        <span className="inline-flex items-center gap-1 bg-stone-100 text-stone-700 px-2.5 py-1 rounded-full text-xs font-bold">
+                                                                            Nezaplaceno
+                                                                        </span>
+                                                                    )}
+                                                                    
+                                                                    {reg.paymentId && (
+                                                                        <span className="text-[10px] text-stone-400 font-mono">
+                                                                            GoPay ID: {reg.paymentId}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </td>
+                                                            <td className="py-4 text-right">
+                                                                <div className="flex gap-2 justify-end">
+                                                                    {reg.paymentStatus !== 'paid' && reg.paymentStatus !== 'cancelled' && (
+                                                                        <Button 
+                                                                            variant="outline" 
+                                                                            size="sm" 
+                                                                            className="text-green-600 hover:bg-green-50 hover:border-green-200 text-xs font-bold py-1 px-2"
+                                                                            disabled={isActionPending}
+                                                                            onClick={async () => {
+                                                                                if (!confirm(`Opravdu chcete označit registraci pro "${reg.clientName}" za zaplacenou?`)) return;
+                                                                                setIsActionPending(true);
+                                                                                const success = await useStore.getState().adminMarkRegistrationAsPaid(reg.id);
+                                                                                setIsActionPending(false);
+                                                                                if (success) {
+                                                                                    addToast('success', 'Zaplaceno', 'Registrace byla úspěšně označena jako zaplacená a potvrzovací e-mail byl odeslán.');
+                                                                                } else {
+                                                                                    addToast('error', 'Chyba', 'Nepodařilo se označit platbu.');
+                                                                                }
+                                                                            }}
+                                                                        >
+                                                                            Potvrdit platbu
+                                                                        </Button>
+                                                                    )}
+                                                                    {reg.paymentStatus !== 'cancelled' && (
+                                                                        <Button 
+                                                                            variant="outline" 
+                                                                            size="sm" 
+                                                                            className="text-red-600 hover:bg-red-50 hover:border-red-200 text-xs font-bold py-1 px-2"
+                                                                            disabled={isActionPending}
+                                                                            onClick={async () => {
+                                                                                if (!confirm(`Opravdu chcete stornovat registraci pro "${reg.clientName}"? Tímto uvolníte 1 místo v kapacitě.`)) return;
+                                                                                setIsActionPending(true);
+                                                                                const success = await useStore.getState().adminCancelRegistration(reg.id);
+                                                                                setIsActionPending(false);
+                                                                                if (success) {
+                                                                                    addToast('success', 'Stornováno', 'Registrace byla stornována, kapacita byla uvolněna a klientovi byl odeslán e-mail.');
+                                                                                } else {
+                                                                                    addToast('error', 'Chyba', 'Nepodařilo se stornovat registraci.');
+                                                                                }
+                                                                            }}
+                                                                        >
+                                                                            Storno
+                                                                        </Button>
+                                                                    )}
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="p-6 border-t border-stone-100 bg-stone-50 flex justify-end">
+                                <Button onClick={() => setSelectedParticipantsEventId(null)}>
+                                    Zavřít
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
 
             {/* Reschedule Modal */}
             {reschedulingBooking && (
