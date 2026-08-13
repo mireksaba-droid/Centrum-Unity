@@ -386,8 +386,24 @@ export const loadGroupEvents = async (): Promise<any[]> => {
     }
 };
 
-export const loadEventRegistrations = async (): Promise<any[]> => {
-    // Try server-side public API first (extremely resilient)
+export const loadEventRegistrations = async (token?: string | null): Promise<any[]> => {
+    // Try authenticated admin API first if token is available
+    if (token) {
+        try {
+            const res = await fetch('/api/admin/eventRegistrations', {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            if (res.ok) {
+                return await res.json();
+            }
+        } catch (e) {
+            console.warn("Admin API for event registrations failed:", e);
+        }
+    }
+
+    // Otherwise try server-side public API (returns anonymized data for capacity calculations)
     try {
         const res = await fetch('/api/public-event-registrations');
         if (res.ok) {

@@ -67,7 +67,16 @@ export const useStore = create<AppState>()(
       groupEvents: [],
       eventRegistrations: [],
 
-      setCurrentUser: (user, token = null) => set({ currentUser: user, token }),
+      setCurrentUser: (user, token = null) => {
+        set({ currentUser: user, token });
+        if (user && user.role === Role.ADMIN) {
+          loadEventRegistrations(token).then((regs) => {
+            set({ eventRegistrations: regs || [] });
+          }).catch(err => {
+            console.error("Failed to reload event registrations as admin:", err);
+          });
+        }
+      },
 
       initializeBookings: async () => {
         try {
@@ -116,7 +125,7 @@ export const useStore = create<AppState>()(
         }
 
         try {
-          const eventRegistrations = await loadEventRegistrations();
+          const eventRegistrations = await loadEventRegistrations(get().token);
           set({ eventRegistrations: eventRegistrations || [] });
         } catch (e) {
           console.error("Failed to initialize event registrations:", e);

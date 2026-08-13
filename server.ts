@@ -668,6 +668,18 @@ async function startServer() {
     }
   });
 
+  // Admin: Get all event registrations with full details (not anonymized)
+  app.get("/api/admin/eventRegistrations", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const snap = await getDocs(collection(db, "eventRegistrations"));
+      const registrations = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      res.json(registrations);
+    } catch (error: any) {
+      console.error("Error loading admin event registrations:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Admin: Mark event registration as paid manually
   app.put("/api/admin/eventRegistrations/:id/paid", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
