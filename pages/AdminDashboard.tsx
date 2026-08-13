@@ -130,14 +130,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         startTime: '',
         endTime: '',
         capacity: 10,
-        price: 500,
-        practitionerId: ''
+        price: 350,
+        practitionerId: '',
+        ticketTypes: []
     });
 
     const handleOpenEventModal = (eventToEdit?: GroupEvent) => {
         if (eventToEdit) {
             setEditingEventId(eventToEdit.id);
-            setEventForm({ ...eventToEdit });
+            setEventForm({ 
+                ...eventToEdit,
+                ticketTypes: eventToEdit.ticketTypes || []
+            });
         } else {
             setEditingEventId(null);
             setEventForm({
@@ -147,8 +151,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 startTime: '',
                 endTime: '',
                 capacity: 10,
-                price: 500,
-                practitionerId: practitioners[0]?.id || ''
+                price: 350,
+                practitionerId: practitioners[0]?.id || '',
+                ticketTypes: []
             });
         }
         setIsEventModalOpen(true);
@@ -223,6 +228,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 id: editingEventId,
                 capacity: Number(eventForm.capacity) || 10,
                 price: Number(eventForm.price) || 0,
+                ticketTypes: eventForm.ticketTypes || []
             };
             onUpdateGroupEvent(updatedEvent);
             addToast('success', 'Událost upravena', 'Skupinová událost byla úspěšně upravena.');
@@ -236,6 +242,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 endTime: eventForm.endTime!,
                 capacity: Number(eventForm.capacity) || 10,
                 price: Number(eventForm.price) || 0,
+                ticketTypes: eventForm.ticketTypes || [],
                 practitionerId: eventForm.practitionerId!,
                 room: 2,
                 createdAt: new Date().toISOString()
@@ -1357,7 +1364,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {groupEvents.map(event => {
-                            const registeredCount = eventRegistrations.filter(r => r.eventId === event.id && r.paymentStatus !== 'cancelled').length;
+                            const registeredCount = eventRegistrations.filter(r => r.eventId === event.id && r.paymentStatus !== 'cancelled').reduce((acc, curr) => acc + (curr.ticketTypeSpots || 1), 0);
                             const isFull = registeredCount >= event.capacity;
                             const practitioner = practitioners.find(p => p.id === event.practitionerId);
                             const isPreview = window.location.hostname.includes('usercontent.goog') || 
@@ -1599,6 +1606,106 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         ))}
                                     </select>
                                 </div>
+
+                                <div className="md:col-span-2 border-t border-stone-100 pt-6">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <div>
+                                            <h4 className="font-bold text-stone-900 text-sm">Varianty vstupenek (Volitelné)</h4>
+                                            <p className="text-xs text-stone-500">Můžete přidat více variant cen a spotřeby míst pro tuto akci (např. Základní: 350 Kč, Rodič + dítě: 500 Kč / 2 místa).</p>
+                                        </div>
+                                        <Button 
+                                            type="button" 
+                                            variant="outline" 
+                                            size="sm"
+                                            className="text-xs"
+                                            onClick={() => {
+                                                const currentTypes = eventForm.ticketTypes || [];
+                                                setEventForm({
+                                                    ...eventForm,
+                                                    ticketTypes: [
+                                                        ...currentTypes,
+                                                        { id: crypto.randomUUID(), name: '', price: 0, spots: 1 }
+                                                    ]
+                                                });
+                                            }}
+                                        >
+                                            + Přidat variantu
+                                        </Button>
+                                    </div>
+
+                                    {(eventForm.ticketTypes && eventForm.ticketTypes.length > 0) ? (
+                                        <div className="space-y-3">
+                                            {eventForm.ticketTypes.map((ticket, index) => (
+                                                <div key={ticket.id} className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3 p-3 bg-stone-50 rounded-xl border border-stone-200">
+                                                    <div className="flex-grow">
+                                                        <label className="block text-[10px] uppercase tracking-wider font-bold text-stone-500 mb-0.5">Název varianty *</label>
+                                                        <input 
+                                                            type="text"
+                                                            required
+                                                            placeholder="Např. Rodič + dítě"
+                                                            value={ticket.name}
+                                                            onChange={e => {
+                                                                const copy = [...(eventForm.ticketTypes || [])];
+                                                                copy[index].name = e.target.value;
+                                                                setEventForm({ ...eventForm, ticketTypes: copy });
+                                                            }}
+                                                            className="w-full p-2 bg-white border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                        />
+                                                    </div>
+                                                    <div className="w-full sm:w-28">
+                                                        <label className="block text-[10px] uppercase tracking-wider font-bold text-stone-500 mb-0.5">Cena (Kč) *</label>
+                                                        <input 
+                                                            type="number"
+                                                            required
+                                                            min="0"
+                                                            placeholder="500"
+                                                            value={ticket.price}
+                                                            onChange={e => {
+                                                                const copy = [...(eventForm.ticketTypes || [])];
+                                                                copy[index].price = parseInt(e.target.value) || 0;
+                                                                setEventForm({ ...eventForm, ticketTypes: copy });
+                                                            }}
+                                                            className="w-full p-2 bg-white border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                        />
+                                                    </div>
+                                                    <div className="w-full sm:w-28">
+                                                        <label className="block text-[10px] uppercase tracking-wider font-bold text-stone-500 mb-0.5">Zabere míst *</label>
+                                                        <input 
+                                                            type="number"
+                                                            required
+                                                            min="1"
+                                                            placeholder="1"
+                                                            value={ticket.spots}
+                                                            onChange={e => {
+                                                                const copy = [...(eventForm.ticketTypes || [])];
+                                                                copy[index].spots = parseInt(e.target.value) || 1;
+                                                                setEventForm({ ...eventForm, ticketTypes: copy });
+                                                            }}
+                                                            className="w-full p-2 bg-white border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                        />
+                                                    </div>
+                                                    <div className="flex justify-end">
+                                                        <button 
+                                                            type="button"
+                                                            onClick={() => {
+                                                                const copy = (eventForm.ticketTypes || []).filter(t => t.id !== ticket.id);
+                                                                setEventForm({ ...eventForm, ticketTypes: copy });
+                                                            }}
+                                                            className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                                                            title="Smazat variantu"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="text-center p-4 bg-stone-50 rounded-xl border border-dashed border-stone-200 text-stone-500 text-xs">
+                                            Nejsou definovány žádné specifické varianty. Použije se výchozí základní cena.
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                             
                             <div className="pt-6 border-t border-stone-100 flex justify-end gap-3">
@@ -1624,7 +1731,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 <div>
                                     <h2 className="text-xl font-bold font-heading text-stone-900">Seznam účastníků: {event?.title}</h2>
                                     <p className="text-sm text-stone-500 mt-1">
-                                        Termín: {event ? formatLocalDate(event.date) : ''} v {event?.startTime} - {event?.endTime} • Kapacita: {regs.length} / {event?.capacity}
+                                        Termín: {event ? formatLocalDate(event.date) : ''} v {event?.startTime} - {event?.endTime} • Obsazenost: {regs.filter(r => r.paymentStatus !== 'cancelled').reduce((acc, curr) => acc + (curr.ticketTypeSpots || 1), 0)} / {event?.capacity} míst
                                     </p>
                                 </div>
                                 <button onClick={() => setSelectedParticipantsEventId(null)} className="text-stone-400 hover:text-stone-600 p-2">
@@ -1644,6 +1751,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                             <thead>
                                                 <tr className="border-b border-stone-100 text-stone-400 text-xs uppercase tracking-wider">
                                                     <th className="pb-3 font-semibold">Jméno klienta</th>
+                                                    <th className="pb-3 font-semibold">Varianta / Vstupné</th>
                                                     <th className="pb-3 font-semibold">E-mail</th>
                                                     <th className="pb-3 font-semibold">Telefon</th>
                                                     <th className="pb-3 font-semibold">Datum přihlášení</th>
@@ -1661,6 +1769,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                     return (
                                                         <tr key={reg.id} className="hover:bg-stone-50/50">
                                                             <td className="py-4 font-medium text-stone-900">{reg.clientName}</td>
+                                                            <td className="py-4">
+                                                                <div className="font-semibold text-stone-800">{reg.ticketTypeName || 'Základní'}</div>
+                                                                <div className="text-xs text-stone-500">
+                                                                    {reg.ticketTypePrice ?? event?.price} Kč ({reg.ticketTypeSpots || 1} {reg.ticketTypeSpots === 1 ? 'místo' : 'místa'})
+                                                                </div>
+                                                            </td>
                                                             <td className="py-4">
                                                                 <a href={`mailto:${reg.clientEmail}`} className="text-indigo-600 hover:underline">{reg.clientEmail}</a>
                                                             </td>
@@ -1726,7 +1840,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                                             className="text-red-600 hover:bg-red-50 hover:border-red-200 text-xs font-bold py-1 px-2"
                                                                             disabled={isActionPending}
                                                                             onClick={async () => {
-                                                                                if (!confirm(`Opravdu chcete stornovat registraci pro "${reg.clientName}"? Tímto uvolníte 1 místo v kapacitě.`)) return;
+                                                                                if (!confirm(`Opravdu chcete stornovat registraci pro "${reg.clientName}"? Tímto uvolníte ${reg.ticketTypeSpots || 1} místa v kapacitě.`)) return;
                                                                                 setIsActionPending(true);
                                                                                 const success = await useStore.getState().adminCancelRegistration(reg.id);
                                                                                 setIsActionPending(false);

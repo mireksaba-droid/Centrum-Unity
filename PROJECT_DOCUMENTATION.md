@@ -65,6 +65,7 @@ Uživatel vybere profil a zadá PIN. Po ověření (dnes na klientovi) zavolá `
 
 ### C. Skupinové události (veřejné)
 Admin vytvoří `GroupEvent` pro Velkou místnost s kapacitou a cenou. Vygeneruje se veřejná URL `/event/:eventId`. Klient se registruje; Firestore **transakce** hlídá, že se nepřekročí kapacita.
+*   **Pravidlo počítání kapacity:** Do celkové obsazenosti akce se započítávají pouze aktivní registrace (ve stavu `paid`, `awaiting_payment` atd.). Registrace, které byly stornovány (`cancelled`), se do celkového počtu obsazených míst nezapočítávají, takže automaticky uvolňují kapacitu sálu zpět pro ostatní zájemce (opraveno a sjednoceno jak na veřejné stránce, tak v administrátorském přehledu).
 
 ### D. Administrátorský tok
 Dashboard s metrikami (příjmy, vytíženost), master kalendář se jmény lektorů, správa profilů, rezervací a událostí. Při kolizi skupinové události s rezervací lektora se otevře modál pro přesun (Reschedule).

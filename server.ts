@@ -544,7 +544,24 @@ async function startServer() {
       }
 
       const eventData = eventDoc.data() as any;
-      const price = Number(eventData.price) || 0;
+      
+      // Určíme cenu a zabraná místa na základě typu vstupenky
+      let spots = 1;
+      let price = Number(eventData.price) || 0;
+
+      if (registration.ticketTypeId && eventData.ticketTypes) {
+        const ticketType = eventData.ticketTypes.find((t: any) => t.id === registration.ticketTypeId);
+        if (ticketType) {
+          spots = Number(ticketType.spots) || 1;
+          price = Number(ticketType.price);
+          registration.ticketTypeName = ticketType.name;
+          registration.ticketTypePrice = ticketType.price;
+          registration.ticketTypeSpots = spots;
+        }
+      } else {
+        registration.ticketTypeSpots = 1;
+        registration.ticketTypePrice = price;
+      }
 
       if (price <= 0) {
         // --- EVENT JE ZDARMA ---
@@ -556,11 +573,11 @@ async function startServer() {
           const currentRegistrations = currentDoc.data()?.currentRegistrations || 0;
           const capacity = currentDoc.data()?.capacity || 0;
 
-          if (currentRegistrations >= capacity) throw new Error("Kapacita události je plná!");
+          if (currentRegistrations + spots > capacity) throw new Error("Kapacita události je plná!");
 
           const newRegRef = doc(db, "eventRegistrations", regId);
           transaction.set(newRegRef, registration);
-          transaction.update(eventRef, { currentRegistrations: currentRegistrations + 1 });
+          transaction.update(eventRef, { currentRegistrations: currentRegistrations + spots });
         });
 
         // Odeslat ihned potvrzení e-mailem
@@ -586,11 +603,11 @@ async function startServer() {
           const currentRegistrations = currentDoc.data()?.currentRegistrations || 0;
           const capacity = currentDoc.data()?.capacity || 0;
 
-          if (currentRegistrations >= capacity) throw new Error("Kapacita události je plná!");
+          if (currentRegistrations + spots > capacity) throw new Error("Kapacita události je plná!");
 
           const newRegRef = doc(db, "eventRegistrations", regId);
           transaction.set(newRegRef, registration);
-          transaction.update(eventRef, { currentRegistrations: currentRegistrations + 1 });
+          transaction.update(eventRef, { currentRegistrations: currentRegistrations + spots });
         });
 
         // Vytvoříme platbu na GoPay
@@ -752,8 +769,9 @@ async function startServer() {
         const eventDoc = await transaction.get(eventRef);
         if (eventDoc.exists()) {
           const currentRegistrations = eventDoc.data()?.currentRegistrations || 0;
+          const spots = Number(regData.ticketTypeSpots) || 1;
           transaction.update(eventRef, {
-            currentRegistrations: Math.max(0, currentRegistrations - 1)
+            currentRegistrations: Math.max(0, currentRegistrations - spots)
           });
         }
       });
@@ -808,6 +826,18 @@ async function startServer() {
     } catch (error: any) {
       console.error("Public booking load error:", error.message);
       res.status(500).json({ error: "Rezervaci se nepodařilo načíst." });
+    }
+  });
+
+  // Veřejné načtení všech rezervací.
+  app.get("/api/public-bookings", async (req: Request, res: Response) => {
+    try {
+      const snap = await getDocs(collection(db, "bookings"));
+      const bookings = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      res.json(bookings);
+    } catch (error: any) {
+      console.error("Error loading public bookings:", error);
+      res.status(500).json({ error: error.message });
     }
   });
 
@@ -2099,7 +2129,8 @@ async function startServer() {
                 const eventDoc = await transaction.get(eventRef);
                 if (eventDoc.exists()) {
                   const currentRegistrations = eventDoc.data()?.currentRegistrations || 0;
-                  transaction.update(eventRef, { currentRegistrations: Math.max(0, currentRegistrations - 1) });
+                  const spots = Number(data.ticketTypeSpots) || 1;
+                  transaction.update(eventRef, { currentRegistrations: Math.max(0, currentRegistrations - spots) });
                 }
               });
 

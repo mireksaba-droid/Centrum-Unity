@@ -46,12 +46,33 @@ const PublicEventPage: React.FC<PublicEventPageProps> = ({ events, registrations
     );
   }
 
-  const currentRegistrations = registrations.filter(r => r.eventId === event.id && r.paymentStatus !== 'cancelled').length;
+  const [selectedTicketTypeId, setSelectedTicketTypeId] = useState<string>(() => {
+    return event.ticketTypes && event.ticketTypes.length > 0 ? event.ticketTypes[0].id : '';
+  });
+
+  React.useEffect(() => {
+    if (event.ticketTypes && event.ticketTypes.length > 0) {
+      setSelectedTicketTypeId(event.ticketTypes[0].id);
+    } else {
+      setSelectedTicketTypeId('');
+    }
+  }, [event]);
+
+  const currentRegistrations = registrations.filter(r => r.eventId === event.id && r.paymentStatus !== 'cancelled').reduce((acc, curr) => acc + (curr.ticketTypeSpots || 1), 0);
+  
+  const selectedTicketType = event.ticketTypes?.find(t => t.id === selectedTicketTypeId);
+  const selectedSpots = selectedTicketType ? (selectedTicketType.spots || 1) : 1;
+  const priceToDisplay = selectedTicketType ? selectedTicketType.price : event.price;
+  
   const isFull = currentRegistrations >= event.capacity;
+  const isTicketFull = (currentRegistrations + selectedSpots) > event.capacity;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isFull) return;
+    if (isTicketFull) {
+      addToast('error', 'Kapacita naplněna', 'Pro tuto variantu vstupenky již není v sále dostatek míst.');
+      return;
+    }
 
     setIsSubmitting(true);
     
@@ -61,7 +82,8 @@ const PublicEventPage: React.FC<PublicEventPageProps> = ({ events, registrations
       clientEmail: email,
       clientPhone: phone,
       paymentStatus: 'unpaid',
-      registeredAt: new Date().toISOString()
+      registeredAt: new Date().toISOString(),
+      ticketTypeId: selectedTicketTypeId || undefined
     });
 
     setIsSubmitting(false);
@@ -153,8 +175,13 @@ const PublicEventPage: React.FC<PublicEventPageProps> = ({ events, registrations
             </div>
 
             <div className="mt-12 pt-6 border-t border-indigo-800">
-              <div className="text-indigo-200 text-sm mb-1">Cena za osobu</div>
-              <div className="text-3xl font-bold">{event.price} Kč</div>
+              <div className="text-indigo-200 text-sm mb-1">
+                {event.ticketTypes && event.ticketTypes.length > 0 ? 'Vybrané vstupné' : 'Cena za osobu'}
+              </div>
+              <div className="text-3xl font-bold">{priceToDisplay} Kč</div>
+              {selectedTicketType && (
+                <div className="text-indigo-300 text-sm mt-1">({selectedTicketType.name})</div>
+              )}
             </div>
           </div>
 
@@ -170,6 +197,48 @@ const PublicEventPage: React.FC<PublicEventPageProps> = ({ events, registrations
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-4">
+                {event.ticketTypes && event.ticketTypes.length > 0 && (
+                  <div className="bg-stone-50 p-4 rounded-xl border border-stone-200 mb-4">
+                    <label className="block text-sm font-bold text-stone-700 mb-2">Vyberte variantu vstupenky *</label>
+                    <div className="space-y-2">
+                      {event.ticketTypes.map(ticket => {
+                        const tSpots = ticket.spots || 1;
+                        const isUnavailable = (currentRegistrations + tSpots) > event.capacity;
+                        return (
+                          <label 
+                            key={ticket.id} 
+                            className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-all ${
+                              selectedTicketTypeId === ticket.id 
+                                ? 'border-indigo-600 bg-indigo-50/50' 
+                                : isUnavailable 
+                                  ? 'border-stone-200 bg-stone-100 opacity-60 cursor-not-allowed' 
+                                  : 'border-stone-200 hover:bg-stone-50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <input 
+                                type="radio" 
+                                name="ticketType"
+                                disabled={isUnavailable}
+                                checked={selectedTicketTypeId === ticket.id}
+                                onChange={() => setSelectedTicketTypeId(ticket.id)}
+                                className="text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <div className="text-left">
+                                <div className="font-semibold text-sm text-stone-900">{ticket.name}</div>
+                                <div className="text-xs text-stone-500">
+                                  {tSpots === 1 ? 'Obsadí 1 místo' : `Obsadí ${tSpots} místa`}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="font-bold text-indigo-700">{ticket.price} Kč</div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-bold text-stone-700 mb-1">Jméno a Příjmení *</label>
                   <input 

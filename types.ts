@@ -87,6 +87,13 @@ export interface WaitlistEntry {
 }
 
 // Nové modely pro Skupinové akce (Workshopy/Lekce)
+export interface TicketType {
+  id: string;
+  name: string;
+  price: number;
+  spots: number; // Kolik míst v kapacitě tato vstupenka zabírá
+}
+
 export interface GroupEvent {
   id: string;
   title: string;
@@ -96,7 +103,8 @@ export interface GroupEvent {
   startTime: string; // HH:MM
   endTime: string; // HH:MM
   capacity: number; // Maximální počet účastníků
-  price: number; // Cena za osobu
+  price: number; // Cena za osobu (výchozí základní cena)
+  ticketTypes?: TicketType[]; // Novinka: Více variant vstupenek
   room: 2; // Zatím natvrdo uzamčeno na Velkou místnost (2)
   createdAt: string;
   currentRegistrations?: number;
@@ -112,6 +120,10 @@ export interface EventRegistration {
   registeredAt: string;
   paymentId?: string;
   paymentUrl?: string;
+  ticketTypeId?: string; // ID vybrané varianty vstupenky
+  ticketTypeName?: string; // Název vybrané varianty vstupenky
+  ticketTypePrice?: number; // Cena v době nákupu
+  ticketTypeSpots?: number; // Kolik míst tato varianta zabrala
 }
 
 export interface ChatMessage {

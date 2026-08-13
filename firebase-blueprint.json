@@ -21,6 +21,39 @@
         "date": { "type": "string" }
       },
       "required": ["id", "bookedByUserId", "date"]
+    },
+    "GroupEvent": {
+      "title": "GroupEvent",
+      "description": "Group event or workshop",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "capacity": { "type": "number" },
+        "price": { "type": "number" },
+        "ticketTypes": { "type": "array" }
+      },
+      "required": ["id", "title", "date", "startTime", "endTime"]
+    },
+    "EventRegistration": {
+      "title": "EventRegistration",
+      "description": "Registration for a group event",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "clientEmail": { "type": "string" },
+        "paymentStatus": { "type": "string" },
+        "ticketTypeId": { "type": "string" },
+        "ticketTypeName": { "type": "string" },
+        "ticketTypePrice": { "type": "number" },
+        "ticketTypeSpots": { "type": "number" }
+      },
+      "required": ["id", "eventId", "clientName", "clientEmail", "paymentStatus"]
     }
   },
   "firestore": {
@@ -31,6 +64,14 @@
     "/bookings/{bookingId}": {
       "schema": "Booking",
       "description": "Room bookings"
+    },
+    "/groupEvents/{eventId}": {
+      "schema": "GroupEvent",
+      "description": "Group events and workshops"
+    },
+    "/eventRegistrations/{registrationId}": {
+      "schema": "EventRegistration",
+      "description": "Event registration documents"
     }
   }
 }

@@ -74,6 +74,32 @@ export const sendTransactionalEmail = async (payload: { to: string, subject: str
 };
 
 export const saveBookingToFirestore = async (booking: Booking) => {
+    // Try server-side API first if we have an admin JWT token
+    try {
+        const { useStore } = await import('../store/useStore');
+        const token = useStore.getState().token;
+        if (token) {
+            const response = await fetch('/api/bookings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(booking)
+            });
+            if (response.ok) {
+                const resData = await response.json();
+                if (resData.success) return true;
+                if (resData.error) throw new Error(resData.error);
+            }
+        }
+    } catch (error: any) {
+        console.warn("Server-side saveBooking failed, falling back to direct Firestore:", error);
+        if (error.message && error.message.includes("již rezervován")) {
+            throw error; // Re-throw slot taken message
+        }
+    }
+
     if (!isFirebaseReady) {
         console.log("Mocking Firestore Write:", booking);
         return true;
@@ -100,6 +126,16 @@ export const saveBookingToFirestore = async (booking: Booking) => {
 };
 
 export const loadBookings = async () => {
+    // Try server-side public API first (extremely robust and bypasses CORS/client policy blocks)
+    try {
+        const res = await fetch('/api/public-bookings');
+        if (res.ok) {
+            return await res.json();
+        }
+    } catch (e) {
+        console.warn("Public API for bookings failed, falling back to direct Firestore:", e);
+    }
+
     if (!isFirebaseReady) return [];
     await waitForAuth();
     try {
@@ -122,6 +158,28 @@ export const loadBookings = async () => {
 };
 
 export const updateBookingInFirestore = async (bookingId: string, data: Partial<Booking>) => {
+    // Try server-side API first if we have an admin JWT token
+    try {
+        const { useStore } = await import('../store/useStore');
+        const token = useStore.getState().token;
+        if (token) {
+            const response = await fetch(`/api/bookings/${bookingId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(data)
+            });
+            if (response.ok) {
+                const resData = await response.json();
+                if (resData.success) return true;
+            }
+        }
+    } catch (error) {
+        console.warn("Server-side updateBooking failed, falling back to direct Firestore:", error);
+    }
+
     if (!isFirebaseReady) {
         console.log("Mocking Firestore Update (Booking):", bookingId, data);
         return true;
@@ -137,6 +195,26 @@ export const updateBookingInFirestore = async (bookingId: string, data: Partial<
 };
 
 export const deleteBookingFromFirestore = async (bookingId: string) => {
+    // Try server-side API first if we have an admin JWT token
+    try {
+        const { useStore } = await import('../store/useStore');
+        const token = useStore.getState().token;
+        if (token) {
+            const response = await fetch(`/api/bookings/${bookingId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            if (response.ok) {
+                const resData = await response.json();
+                if (resData.success) return true;
+            }
+        }
+    } catch (error) {
+        console.warn("Server-side deleteBooking failed, falling back to direct Firestore:", error);
+    }
+
     if (!isFirebaseReady) {
         console.log("Mocking Firestore Delete (Booking):", bookingId);
         return true;
@@ -155,6 +233,16 @@ export const deleteBookingFromFirestore = async (bookingId: string) => {
 // --- PRACTITIONER SERVICES ---
 
 export const loadPractitioners = async (): Promise<Practitioner[]> => {
+    // Try server-side public API first (extremely robust and bypasses CORS/client policy blocks)
+    try {
+        const res = await fetch('/api/practitioners');
+        if (res.ok) {
+            return await res.json();
+        }
+    } catch (e) {
+        console.warn("Public API for practitioners failed, falling back to direct Firestore:", e);
+    }
+
     if (!isFirebaseReady) return [];
     await waitForAuth();
     try {
@@ -168,6 +256,28 @@ export const loadPractitioners = async (): Promise<Practitioner[]> => {
 };
 
 export const savePractitionerToFirestore = async (practitioner: Practitioner) => {
+    // Try server-side API first if we have an admin JWT token
+    try {
+        const { useStore } = await import('../store/useStore');
+        const token = useStore.getState().token;
+        if (token) {
+            const response = await fetch('/api/practitioners', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(practitioner)
+            });
+            if (response.ok) {
+                const resData = await response.json();
+                if (resData.success) return true;
+            }
+        }
+    } catch (error) {
+        console.warn("Server-side savePractitioner failed, falling back to direct Firestore:", error);
+    }
+
     if (!isFirebaseReady) {
         console.log("Mocking Firestore Write (Practitioner):", practitioner);
         return true;
@@ -183,6 +293,28 @@ export const savePractitionerToFirestore = async (practitioner: Practitioner) =>
 };
 
 export const updatePractitionerInFirestore = async (practitioner: Practitioner) => {
+    // Try server-side API first if we have an admin JWT token
+    try {
+        const { useStore } = await import('../store/useStore');
+        const token = useStore.getState().token;
+        if (token) {
+            const response = await fetch('/api/practitioners', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(practitioner)
+            });
+            if (response.ok) {
+                const resData = await response.json();
+                if (resData.success) return true;
+            }
+        }
+    } catch (error) {
+        console.warn("Server-side updatePractitioner failed, falling back to direct Firestore:", error);
+    }
+
     if (!isFirebaseReady) {
         console.log("Mocking Firestore Update (Practitioner):", practitioner);
         return true;
