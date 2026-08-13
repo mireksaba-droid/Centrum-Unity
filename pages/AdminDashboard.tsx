@@ -1357,7 +1357,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {groupEvents.map(event => {
-                            const registeredCount = eventRegistrations.filter(r => r.eventId === event.id).length;
+                            const registeredCount = eventRegistrations.filter(r => r.eventId === event.id && r.paymentStatus !== 'cancelled').length;
                             const isFull = registeredCount >= event.capacity;
                             const practitioner = practitioners.find(p => p.id === event.practitionerId);
                             const isPreview = window.location.hostname.includes('usercontent.goog') || 

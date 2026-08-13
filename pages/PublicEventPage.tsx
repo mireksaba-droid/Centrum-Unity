@@ -46,7 +46,7 @@ const PublicEventPage: React.FC<PublicEventPageProps> = ({ events, registrations
     );
   }
 
-  const currentRegistrations = registrations.filter(r => r.eventId === event.id).length;
+  const currentRegistrations = registrations.filter(r => r.eventId === event.id && r.paymentStatus !== 'cancelled').length;
   const isFull = currentRegistrations >= event.capacity;
 
   const handleSubmit = async (e: React.FormEvent) => {
