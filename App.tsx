@@ -57,7 +57,19 @@ const AppContent = () => {
       const cleanPath = hash.substring(1); // removes the '#' (results in e.g. /event/id)
       navigate(cleanPath, { replace: true });
     }
-  }, [initializeBookings, navigate]);
+
+    // Handle session expiration or unauthorized access:
+    const handleUnauthorized = () => {
+      console.warn("Session expired or unauthorized - redirecting to login.");
+      setCurrentUser(null);
+      navigate('/login');
+    };
+
+    window.addEventListener('auth-unauthorized', handleUnauthorized);
+    return () => {
+      window.removeEventListener('auth-unauthorized', handleUnauthorized);
+    };
+  }, [initializeBookings, navigate, setCurrentUser]);
 
   const handleLogin = (user: Practitioner, token?: string) => { 
       setCurrentUser(user, token); 

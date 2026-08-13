@@ -530,9 +530,17 @@ export const loadEventRegistrations = async (token?: string | null): Promise<any
             if (res.ok) {
                 return await res.json();
             }
+            if (res.status === 401) {
+                console.warn("Admin API for event registrations unauthorized - token may be expired.");
+                if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('auth-unauthorized'));
+                }
+                return [];
+            }
         } catch (e) {
             console.warn("Admin API for event registrations failed:", e);
         }
+        return []; // Do not fall back to public anonymized endpoint if we are supposed to be an authenticated admin
     }
 
     // Otherwise try server-side public API (returns anonymized data for capacity calculations)

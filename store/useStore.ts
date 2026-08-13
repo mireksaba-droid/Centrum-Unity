@@ -398,6 +398,12 @@ export const useStore = create<AppState>()(
               'Authorization': `Bearer ${state.token}`
             }
           });
+          if (response.status === 401) {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('auth-unauthorized'));
+            }
+            return false;
+          }
           if (response.ok) {
             set((state) => ({
               eventRegistrations: state.eventRegistrations.map((r) => 
@@ -422,6 +428,12 @@ export const useStore = create<AppState>()(
               'Authorization': `Bearer ${state.token}`
             }
           });
+          if (response.status === 401) {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('auth-unauthorized'));
+            }
+            return false;
+          }
           if (response.ok) {
             set((state) => {
               const cancelledReg = state.eventRegistrations.find(r => r.id === regId);
