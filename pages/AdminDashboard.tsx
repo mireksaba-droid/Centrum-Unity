@@ -416,6 +416,28 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         });
         const currentOccupancy = occupancyTrend[occupancyTrend.length - 1] || { M1: 0, M2: 0, name: '' };
 
+        // --- ZREALIZOVANÉ / PROBĚHLÉ REZERVACE ---
+        const now = new Date();
+        const pastPaidBookings = paidBookings.filter(b => {
+            try {
+                const bookingDateTime = parseLocalDate(b.date, b.time);
+                return bookingDateTime <= now;
+            } catch (e) {
+                return parseLocalDate(b.date) <= now;
+            }
+        });
+
+        const realizedBookingsCount = pastPaidBookings.length;
+        const realizedBookingsValue = pastPaidBookings.reduce((sum, b) => {
+            const isEva = b.bookedByName?.trim().toLowerCase() === 'eva';
+            return sum + (isEva ? 0 : b.price);
+        }, 0);
+
+        const evaSavedValue = pastPaidBookings.reduce((sum, b) => {
+            const isEva = b.bookedByName?.trim().toLowerCase() === 'eva';
+            return sum + (isEva ? b.price : 0);
+        }, 0);
+
         // 9. KDO DĚLÁ NEJVÍC STOREN – počet i míra (storna ÷ jeho zaplacené rezervace).
         const perPract: Record<string, { paid: number; storno: number }> = {};
         paidBookings.forEach(b => { const n = b.bookedByName || 'Neznámý'; (perPract[n] ||= { paid: 0, storno: 0 }).paid++; });
@@ -443,7 +465,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             paidEverCount,
             occupancyTrend,
             currentOccupancy,
-            cancellationsByPractitioner
+            cancellationsByPractitioner,
+            realizedBookingsCount,
+            realizedBookingsValue,
+            evaSavedValue
         };
     }, [allBookings]);
 
@@ -930,6 +955,39 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     </div>
                                     <div className="text-2xl font-bold text-stone-900">{stats.refundedRevenue.toLocaleString()} Kč</div>
                                     <div className="text-xs text-stone-400 mt-1">Storna s refundací přes GoPay.</div>
+                                </div>
+                            </div>
+
+                            {/* SECTION 0.6: ZREALIZOVANÉ A PROBĚHLÉ REZERVACE */}
+                            <div className="bg-stone-50 p-6 rounded-xl border border-stone-200 shadow-sm space-y-4">
+                                <h3 className="text-lg font-bold text-stone-900 flex items-center gap-2">
+                                    <Layers className="w-5 h-5 text-indigo-600" /> Zrealizované & Proběhlé Rezervace
+                                </h3>
+                                <p className="text-xs text-stone-500">
+                                    Statistiky zkonzumovaných (proběhlých) a zaplacených rezervací v minulosti. Nezahrnuje budoucí neproběhlé rezervace ani stornované termíny.
+                                </p>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                    <div className="bg-white p-5 rounded-xl border border-stone-200 shadow-sm">
+                                        <div className="flex items-center gap-2 text-stone-700 text-sm font-semibold mb-1">
+                                            <Calendar className="w-4 h-4 text-indigo-600" /> Počet zrealizovaných lekcí
+                                        </div>
+                                        <div className="text-2xl font-bold text-stone-900">{stats.realizedBookingsCount}</div>
+                                        <div className="text-xs text-stone-400 mt-1">Uskutečněné zaplacené nebo dokončené rezervace v minulosti.</div>
+                                    </div>
+                                    <div className="bg-white p-5 rounded-xl border border-stone-200 shadow-sm">
+                                        <div className="flex items-center gap-2 text-stone-700 text-sm font-semibold mb-1">
+                                            <DollarSign className="w-4 h-4 text-emerald-600" /> Hodnota zrealizovaných lekcí
+                                        </div>
+                                        <div className="text-2xl font-bold text-emerald-700">{stats.realizedBookingsValue.toLocaleString()} Kč</div>
+                                        <div className="text-xs text-stone-400 mt-1">Celková hodnota proběhlých rezervací (lekce lektorky Eva započteny za 0 Kč).</div>
+                                    </div>
+                                    <div className="bg-white p-5 rounded-xl border border-indigo-100 shadow-sm">
+                                        <div className="flex items-center gap-2 text-indigo-700 text-sm font-semibold mb-1">
+                                            <Trophy className="w-4 h-4 text-amber-500" /> Úspora lektorky (Eva zdarma)
+                                        </div>
+                                        <div className="text-2xl font-bold text-indigo-700">{stats.evaSavedValue.toLocaleString()} Kč</div>
+                                        <div className="text-xs text-stone-400 mt-1">Hodnota pronajatých místností pro Evu, které měla zdarma.</div>
+                                    </div>
                                 </div>
                             </div>
 

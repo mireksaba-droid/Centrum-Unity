@@ -400,15 +400,32 @@ async function startServer() {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  // Get practitioners (public info only, no PIN)
+  // Get practitioners (public info only, unless authenticated as ADMIN)
   app.get("/api/practitioners", async (req, res) => {
     try {
+      let showPins = false;
+      const authHeader = req.headers["authorization"];
+      const token = authHeader && authHeader.split(" ")[1];
+      if (token) {
+        try {
+          const decoded = jwt.verify(token, getJwtSecret()) as any;
+          if (decoded && decoded.role === "ADMIN") {
+            showPins = true;
+          }
+        } catch (e) {
+          // Ignore invalid tokens and return public data only
+        }
+      }
+
       const snap = await getDocs(collection(db, "practitioners"));
       const practitioners = snap.docs.map(doc => {
          const data = doc.data();
-         // Odstraníme PIN z veřejného výstupu
-         const { pin, ...publicData } = data;
-         return { id: doc.id, ...publicData };
+         if (showPins) {
+           return { id: doc.id, ...data };
+         } else {
+           const { pin, ...publicData } = data;
+           return { id: doc.id, ...publicData };
+         }
       });
       res.json(practitioners);
     } catch (error: any) {

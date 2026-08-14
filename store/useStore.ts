@@ -89,7 +89,7 @@ export const useStore = create<AppState>()(
         }
         
         try {
-          const practitioners = await loadPractitioners();
+          const practitioners = await loadPractitioners(get().token);
           if (practitioners.length > 0) {
               // URL obrázků z konstant použijeme JEN pokud lektor nemá v DB nahranou vlastní fotku (base64).
               // Tím se nepřepíše fotka, kterou admin nahrál v aplikaci (ukládá se jako data:image/...).

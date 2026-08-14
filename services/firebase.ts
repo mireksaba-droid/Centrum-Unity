@@ -232,10 +232,14 @@ export const deleteBookingFromFirestore = async (bookingId: string) => {
 
 // --- PRACTITIONER SERVICES ---
 
-export const loadPractitioners = async (): Promise<Practitioner[]> => {
+export const loadPractitioners = async (token?: string | null): Promise<Practitioner[]> => {
     // Try server-side public API first (extremely robust and bypasses CORS/client policy blocks)
     try {
-        const res = await fetch('/api/practitioners');
+        const headers: Record<string, string> = {};
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+        const res = await fetch('/api/practitioners', { headers });
         if (res.ok) {
             return await res.json();
         }

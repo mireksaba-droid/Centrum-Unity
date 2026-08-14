@@ -73,6 +73,7 @@ const AppContent = () => {
 
   const handleLogin = (user: Practitioner, token?: string) => { 
       setCurrentUser(user, token); 
+      initializeBookings();
       if (user.role === Role.ADMIN) {
           navigate('/admin');
       } else {
