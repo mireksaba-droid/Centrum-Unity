@@ -354,14 +354,46 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             { name: 'Velká (R2)', value: room2Count, color: '#7a573d' }, // Brown
         ];
 
-        // 5. Vývoj tržeb (posledních 6 měsíců) – DVĚ křivky:
+        // 5. Vývoj a výhled tržeb (od června 2026 po nejvzdálenější rezervaci v čase) – DVĚ křivky:
         //    'received'  = reálně přijaté peníze podle data platby (paidAt, fallback createdAt) MÍNUS vrácené (dle cancelledAt)
-        //    'scheduled' = zaplacené lekce podle data konání lekce (b.date)
+        //    'scheduled' = zaplacené/naplánované lekce podle data konání lekce (b.date)
         const today = new Date();
-        const last6Months = Array.from({ length: 6 }, (_, i) => new Date(today.getFullYear(), today.getMonth() - (5 - i), 1));
+        
+        // Dynamické určení časového horizontu:
+        // Start: červen 2026 (zahájení provozu) nebo nejstarší rezervace
+        // Konec: nejvzdálenější rezervace v systému, minimálně však 2 měsíce dopředu od dneška (srpen -> září, říjen...)
+        let minBookingDate = new Date(2026, 5, 1); // 1. červen 2026
+        let maxBookingDate = new Date(today.getFullYear(), today.getMonth() + 2, 1); // min. 2 měsíce dopředu (říjen 2026)
+
+        allBookings.forEach(b => {
+            if (b.date) {
+                const bDate = parseLocalDate(b.date);
+                if (bDate < minBookingDate && bDate.getFullYear() >= 2026) {
+                    minBookingDate = new Date(bDate.getFullYear(), bDate.getMonth(), 1);
+                }
+                if (bDate > maxBookingDate) {
+                    maxBookingDate = new Date(bDate.getFullYear(), bDate.getMonth(), 1);
+                }
+            }
+        });
+
+        const startMonth = new Date(minBookingDate.getFullYear(), minBookingDate.getMonth(), 1);
+        const endMonth = new Date(maxBookingDate.getFullYear(), maxBookingDate.getMonth(), 1);
+
+        const trendMonths: Date[] = [];
+        const iterMonth = new Date(startMonth);
+        while (iterMonth <= endMonth) {
+            trendMonths.push(new Date(iterMonth));
+            iterMonth.setMonth(iterMonth.getMonth() + 1);
+        }
+        while (trendMonths.length < 5) {
+            const last = trendMonths[trendMonths.length - 1];
+            trendMonths.push(new Date(last.getFullYear(), last.getMonth() + 1, 1));
+        }
+
         const inMonth = (d: Date | null, m: number, y: number) => !!d && d.getMonth() === m && d.getFullYear() === y;
 
-        const revenueTrendData = last6Months.map((monthDate) => {
+        const revenueTrendData = trendMonths.map((monthDate) => {
             const m = monthDate.getMonth();
             const y = monthDate.getFullYear();
 
@@ -431,7 +463,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             { name: '> 48h (Bezpečné)', value: leadTimes.safe, color: '#10b981' },
         ];
 
-        // 8. NAPLNĚNOST MÍSTNOSTÍ (% využití) po měsících.
+        // 8. NAPLNĚNOST MÍSTNOSTÍ (% využití) po měsících (od června po budoucí měsíce).
         // Jmenovatel = provozní doba (08:00–24:00 = 16 h) × počet dní v měsíci. Čitatel = odrezervované hodiny (aktivní rezervace).
         const OPERATING_HOURS_PER_DAY = 16;
         const daysInMonth = (yy: number, mm: number) => new Date(yy, mm + 1, 0).getDate();
@@ -440,18 +472,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 if (b.room !== room) return sum;
                 return inMonth(parseLocalDate(b.date), mm, yy) ? sum + (b.durationMinutes || 0) / 60 : sum;
             }, 0);
-        const occupancyTrend = last6Months.map((monthDate) => {
+        const occupancyTrend = trendMonths.map((monthDate) => {
             const mm = monthDate.getMonth();
             const yy = monthDate.getFullYear();
             const avail = OPERATING_HOURS_PER_DAY * daysInMonth(yy, mm);
             const nm = monthDate.toLocaleDateString('cs-CZ', { month: 'short' });
+            const isCurrent = monthDate.getMonth() === today.getMonth() && monthDate.getFullYear() === today.getFullYear();
             return {
                 name: nm.charAt(0).toUpperCase() + nm.slice(1),
                 M1: avail > 0 ? Math.round((roomHoursInMonth(1, mm, yy) / avail) * 100) : 0,
                 M2: avail > 0 ? Math.round((roomHoursInMonth(2, mm, yy) / avail) * 100) : 0,
+                isCurrent,
             };
         });
-        const currentOccupancy = occupancyTrend[occupancyTrend.length - 1] || { M1: 0, M2: 0, name: '' };
+        const currentOccupancy = occupancyTrend.find(o => o.isCurrent) || occupancyTrend[occupancyTrend.length - 1] || { M1: 0, M2: 0, name: '' };
 
         // --- ZREALIZOVANÉ / PROBĚHLÉ REZERVACE ---
         const now = new Date();
@@ -1033,9 +1067,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 {/* Revenue Trend */}
                                 <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm">
                                     <h3 className="text-lg font-bold text-stone-900 mb-1 flex items-center gap-2">
-                                        <TrendingUp className="w-5 h-5 text-indigo-600" /> Vývoj tržeb (Posledních 6 měsíců)
+                                        <TrendingUp className="w-5 h-5 text-indigo-600" /> Vývoj a výhled tržeb
                                     </h3>
-                                    <p className="text-xs text-stone-500 mb-6">Přijaté peníze (dle data platby, mínus vrácené) vs. naplánované zaplacené lekce (dle data konání).</p>
+                                    <p className="text-xs text-stone-500 mb-6">Přijaté peníze (dle data platby, po odečtu storen) vs. naplánované lekce (dle data konání, i budoucí rezervace).</p>
                                     <div className="h-64">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <LineChart data={stats.revenueTrendData}>
