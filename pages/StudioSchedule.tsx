@@ -3,7 +3,7 @@ import { Booking, BookingStatus, Practitioner, GroupEvent, Role } from '../types
 import { GENERATED_TIMES, BUFFER_SAME_USER, BUFFER_DIFF_USER, RENTAL_PRICING } from '../constants';
 import Button from '../components/Button';
 import { MiniCalendar } from '../components/MiniCalendar';
-import { Calendar, ChevronLeft, ChevronRight, Clock, User, Check, AlertCircle, Info, Lock, Zap, LogOut, Loader2, Bed, Layers, Sparkles, History, Monitor, Smartphone, Mail, Phone, X, LayoutDashboard } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, Clock, User, Check, AlertCircle, AlertTriangle, Info, Lock, Zap, LogOut, Loader2, Bed, Layers, Sparkles, History, Monitor, Smartphone, Mail, Phone, X, LayoutDashboard } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
 import { useStore } from '../store/useStore';
@@ -134,6 +134,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
     const [paymentIntentIdState, setPaymentIntentIdState] = useState<string | null>(null);
 
     const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+    const [confirmParallel, setConfirmParallel] = useState(false);
 
     // GUEST SPECIFIC STATE
     const [guestName, setGuestName] = useState('');
@@ -163,6 +164,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
             setIsTestPayment(false);
             setPaymentMethod('online');
             setAdminForPractitioner('');
+            setConfirmParallel(false);
         }
     }, [selectedSlot, isGuest]);
 
@@ -414,8 +416,9 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
             addToast('error', 'Nelze rezervovat', reason);
             return;
         }
-        // Měkké varování (paralelní rezervace v druhé místnosti) – povolíme po potvrzení
-        if (warning && !window.confirm(warning)) {
+        // Měkké varování (paralelní rezervace v druhé místnosti) – povoleno po potvrzení checkboxem v modal
+        if (warning && !confirmParallel) {
+            addToast('error', 'Potvrďte souběžnou rezervaci', 'Pro pokračování zaškrtněte políčko beroucí na vědomí souběžnou rezervaci.');
             return;
         }
 
@@ -599,7 +602,8 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
             addToast('error', 'Nelze rezervovat', reason);
             return;
         }
-        if (warning && !window.confirm(`${warning}\n(Rezervace za lektora ${practitioner.name}.)`)) {
+        if (warning && !confirmParallel) {
+            addToast('error', 'Potvrďte souběžnou rezervaci', 'Pro pokračování zaškrtněte políčko beroucí na vědomí souběžnou rezervaci.');
             return;
         }
 
@@ -1085,6 +1089,53 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                 </p>
                             </div>
 
+                            {/* LIVE COLLISION & WARNING */}
+                            {(() => {
+                                const collisionInfo = checkBookingCollision({
+                                    newDate: selectedSlot.date,
+                                    newTime: selectedSlot.time,
+                                    durationMinutes: duration,
+                                    room: selectedSlot.room,
+                                    userId: adminForPractitioner || currentUser.id,
+                                    allBookings: combinedBookings
+                                });
+
+                                if (collisionInfo.hasCollision) {
+                                    return (
+                                        <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 space-y-1">
+                                            <div className="font-bold flex items-center gap-1">
+                                                <AlertTriangle className="w-4 h-4 text-red-500" />
+                                                Nelze rezervovat — Kolize v kalendáři
+                                            </div>
+                                            <p>{collisionInfo.reason}</p>
+                                        </div>
+                                    );
+                                }
+
+                                if (collisionInfo.warning) {
+                                    return (
+                                        <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 space-y-2">
+                                            <div className="font-bold flex items-center gap-1 text-amber-900">
+                                                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                                                Výjimečná situace — Souběžná rezervace
+                                            </div>
+                                            <p className="leading-normal">{collisionInfo.warning}</p>
+                                            <label className="flex items-start gap-2 pt-1 font-semibold cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={confirmParallel}
+                                                    onChange={e => setConfirmParallel(e.target.checked)}
+                                                    className="mt-0.5 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                                                />
+                                                <span>Beru na vědomí a chci přesto pokračovat</span>
+                                            </label>
+                                        </div>
+                                    );
+                                }
+
+                                return null;
+                            })()}
+
                             {/* Summary & Action */}
                             <div className="bg-stone-50 p-4 rounded-xl flex flex-col md:flex-row gap-4 md:justify-between md:items-center border border-stone-100 mt-auto">
                                 <div>
@@ -1102,15 +1153,27 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                     >
                                         Pokračovat na platební bránu
                                     </a>
-                                ) : (
-                                    <Button
-                                        onClick={adminForPractitioner ? handleAdminPaymentBooking : handleConfirmBooking}
-                                        disabled={isProcessing}
-                                        className="text-white px-6 w-full md:w-auto bg-indigo-600 hover:bg-indigo-700"
-                                    >
-                                        {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : (adminForPractitioner ? 'Odeslat výzvu k platbě' : 'Zaplatit online')}
-                                    </Button>
-                                )}
+                                ) : (() => {
+                                    const colInfo = checkBookingCollision({
+                                        newDate: selectedSlot.date,
+                                        newTime: selectedSlot.time,
+                                        durationMinutes: duration,
+                                        room: selectedSlot.room,
+                                        userId: adminForPractitioner || currentUser.id,
+                                        allBookings: combinedBookings
+                                    });
+                                    const isBtnDisabled = isProcessing || colInfo.hasCollision || (!!colInfo.warning && !confirmParallel);
+
+                                    return (
+                                        <Button
+                                            onClick={adminForPractitioner ? handleAdminPaymentBooking : handleConfirmBooking}
+                                            disabled={isBtnDisabled}
+                                            className={`text-white px-6 w-full md:w-auto ${isBtnDisabled ? 'bg-stone-300 text-stone-500 cursor-not-allowed hover:bg-stone-300' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                                        >
+                                            {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : (adminForPractitioner ? 'Odeslat výzvu k platbě' : 'Zaplatit online')}
+                                        </Button>
+                                    );
+                                })()}
                             </div>
                         </div>
 

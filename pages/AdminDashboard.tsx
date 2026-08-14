@@ -123,6 +123,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const [editingEventId, setEditingEventId] = useState<string | null>(null);
     const [selectedParticipantsEventId, setSelectedParticipantsEventId] = useState<string | null>(null);
     const [isActionPending, setIsActionPending] = useState(false);
+    const [confirmEventParallel, setConfirmEventParallel] = useState(false);
     const [eventForm, setEventForm] = useState<Partial<GroupEvent>>({
         title: '',
         description: '',
@@ -135,7 +136,42 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         ticketTypes: []
     });
 
+    const eventCollisionInfo = useMemo(() => {
+        if (!eventForm.date || !eventForm.startTime || !eventForm.endTime || !eventForm.practitionerId) return null;
+        const duration = timeToMinutes(eventForm.endTime) - timeToMinutes(eventForm.startTime);
+        if (isNaN(duration) || duration <= 0) return null;
+
+        const combined = [
+            ...allBookings,
+            ...groupEvents
+                .filter(ev => ev.id !== editingEventId)
+                .map(ev => ({
+                    id: `event-${ev.id}`,
+                    bookedByUserId: ev.practitionerId,
+                    bookedByName: 'Skupinová Událost',
+                    date: ev.date,
+                    time: ev.startTime,
+                    durationMinutes: timeToMinutes(ev.endTime) - timeToMinutes(ev.startTime),
+                    room: 2 as const,
+                    price: 0,
+                    status: 'paid' as const,
+                    paymentMethod: 'invoice' as const,
+                    createdAt: ev.createdAt || new Date().toISOString()
+                }))
+        ];
+
+        return checkBookingCollision({
+            newDate: eventForm.date,
+            newTime: eventForm.startTime,
+            durationMinutes: duration,
+            room: 2,
+            userId: eventForm.practitionerId,
+            allBookings: combined
+        });
+    }, [eventForm.date, eventForm.startTime, eventForm.endTime, eventForm.practitionerId, allBookings, groupEvents, editingEventId]);
+
     const handleOpenEventModal = (eventToEdit?: GroupEvent) => {
+        setConfirmEventParallel(false);
         if (eventToEdit) {
             setEditingEventId(eventToEdit.id);
             setEventForm({ 
@@ -218,7 +254,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             return;
         }
         // Měkké varování: lektor má ve stejný čas rezervaci v Malé místnosti
-        if (warning && !window.confirm(warning)) {
+        if (warning && !confirmEventParallel) {
+            addToast('error', 'Potvrďte souběžnou rezervaci', 'Pro pokračování zaškrtněte políčko beroucí na vědomí souběžnou rezervaci lektora.');
             return;
         }
 
@@ -1766,9 +1803,51 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 </div>
                             </div>
                             
+                            {/* LIVE COLLISION & WARNING */}
+                            {eventCollisionInfo && (() => {
+                                if (eventCollisionInfo.hasCollision) {
+                                    return (
+                                        <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 space-y-1">
+                                            <div className="font-bold flex items-center gap-1">
+                                                <AlertTriangle className="w-4 h-4 text-red-500" />
+                                                Nelze uložit — Kolize ve Velké místnosti
+                                            </div>
+                                            <p>{eventCollisionInfo.reason}</p>
+                                        </div>
+                                    );
+                                }
+
+                                if (eventCollisionInfo.warning) {
+                                    return (
+                                        <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 space-y-2">
+                                            <div className="font-bold flex items-center gap-1 text-amber-900">
+                                                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                                                Upozornění: Souběžná rezervace lektora
+                                            </div>
+                                            <p className="leading-normal">{eventCollisionInfo.warning}</p>
+                                            <label className="flex items-start gap-2 pt-1 font-semibold cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={confirmEventParallel}
+                                                    onChange={e => setConfirmEventParallel(e.target.checked)}
+                                                    className="mt-0.5 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                                                />
+                                                <span>Beru na vědomí a chci přesto pokračovat</span>
+                                            </label>
+                                        </div>
+                                    );
+                                }
+
+                                return null;
+                            })()}
+
                             <div className="pt-6 border-t border-stone-100 flex justify-end gap-3">
                                 <Button type="button" variant="outline" onClick={() => setIsEventModalOpen(false)}>Zrušit</Button>
-                                <Button type="submit" className="flex items-center gap-2">
+                                <Button 
+                                    type="submit" 
+                                    disabled={!!eventCollisionInfo?.hasCollision || (!!eventCollisionInfo?.warning && !confirmEventParallel)}
+                                    className="flex items-center gap-2"
+                                >
                                     <Save className="w-4 h-4" /> {editingEventId ? 'Uložit změny' : 'Vytvořit Událost'}
                                 </Button>
                             </div>

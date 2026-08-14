@@ -58,6 +58,8 @@ Uživatel vybere profil a zadá PIN. Po ověření (dnes na klientovi) zavolá `
 1. Lektor/admin vybere volný slot v kalendáři (`StudioSchedule`).
 2. Vyplní údaje (klient, vybavení, doba trvání).
 3. Kontrola kolizí (`utils/scheduler.ts` → `checkBookingCollision`) včetně bufferů na úklid.
+   - **Měkké varování (Paralelní rezervace):** Lektor může ve výjimečných situacích zarezervovat obě místnosti (M1 i M2) na stejný čas. V takovém případě kontrola kolizí nevyhodnotí stav jako nekompatibilní kolizi (`hasCollision = false`), nýbrž vrátí textové varování (`warning`).
+   - **State-driven potvrzení v UI:** Místo systémového dialogu prohlížeče (`window.confirm`), který bývá v sandboxovaných iframech blokován, se přímo v modálním okně rezervace (v `StudioSchedule` i v `AdminDashboard` pro skupinové akce) zobrazí designový varovný box s checkboxem *„Beru na vědomí a chci přesto pokračovat“*. Dokud není políčko zaškrtnuto, je potvrzovací tlačítko deaktivováno.
 4. Cena se počítá funkcí `calculateRentalPrice` (admin má **0 Kč zdarma**).
 5. Uložení: lokální store + Firestore (`saveBookingToFirestore`, transakce proti dvojité rezervaci).
 6. Platba podle scénáře (viz sekce 6).
@@ -69,6 +71,12 @@ Admin vytvoří `GroupEvent` pro Velkou místnost s kapacitou a cenou. Vygeneruj
 
 ### D. Administrátorský tok
 Dashboard s metrikami (příjmy, vytíženost), master kalendář se jmény lektorů, správa profilů, rezervací a událostí. Při kolizi skupinové události s rezervací lektora se otevře modál pro přesun (Reschedule).
+
+### E. Business Intelligence & Analytika (BI)
+Administrátorský dashboard obsahuje dedikovanou záložku „Analytika“, která slouží jako hlavní business-intelligence modul centra.
+- **Zrealizované & Proběhlé Rezervace:** Speciální podsekce počítá a vizualizuje počet a celkovou finanční hodnotu všech úspěšně proběhlých rezervací (stavy `paid` nebo `completed` s datem v minulosti).
+- **Zohlednění administrátora (Eva):** Jelikož má Eva (ID `admin`) pronájem místností zcela zdarma (0 Kč), systém v BI statistikách počítá její rezervace s nulovým obratem, což zajišťuje naprosto přesný přehled o reálných příjmech od externích lektorů.
+- **Vizualizace ušetřené částky pro Evu:** Pro zachování přehledu o tom, jakou hodnotu v pronájmech Eva pro své vlastní klienty využila, BI modul počítá a zobrazuje metriku „Ušetřeno za vlastní rezervace Evy“ (vypočítáno ze standardních hodinových sazeb za M1 a M2). Užitečný ukazatel pro interní účely a přehled o vytížení prostor.
 
 ## 5. Klíčové datové modely (`types.ts`)
 
