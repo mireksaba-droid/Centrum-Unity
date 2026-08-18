@@ -1597,7 +1597,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     <strong>iPhone:</strong> klepni na „Přidat do Apple kalendáře" níže → potvrď odběr.<br/>
                                     <strong>Google:</strong> „+" → Přidat kalendář → Z adresy URL → vlož odkaz.<br/>
                                     <strong>Apple (Mac):</strong> Kalendář → Soubor → Nový odběr kalendáře → vlož odkaz.<br/>
-                                    Rezervace se aktualizují samy (kalendáře je obnovují po několika hodinách).
+                                    Všechny rezervace (M1 i M2) včetně skupinových akcí a workshopů se v kalendáři automaticky synchronizují.
                                 </p>
                                 <div className="flex items-center gap-2 flex-wrap">
                                     <input

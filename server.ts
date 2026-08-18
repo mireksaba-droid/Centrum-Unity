@@ -1854,6 +1854,18 @@ async function startServer() {
       const practitionerName = (snap.data() as any).name || "Lektor";
 
       const bsnap = await getDocs(query(collection(db, "bookings"), where("bookedByUserId", "==", id)));
+      const groupEventsSnap = await getDocs(collection(db, "groupEvents"));
+      const eventRegsSnap = await getDocs(collection(db, "eventRegistrations"));
+
+      const regCountMap: Record<string, number> = {};
+      eventRegsSnap.docs.forEach((rd) => {
+        const rdata: any = rd.data();
+        if (rdata.paymentStatus && rdata.paymentStatus !== "cancelled") {
+          const spots = rdata.ticketTypeSpots || 1;
+          regCountMap[rdata.eventId] = (regCountMap[rdata.eventId] || 0) + spots;
+        }
+      });
+
       const active = ["awaiting_payment", "deferred_payment", "paid", "completed", "payment_review"];
       const pad = (n: number) => String(n).padStart(2, "0");
       const floatFmt = (dt: Date) => `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}T${pad(dt.getHours())}${pad(dt.getMinutes())}00`;
@@ -1885,6 +1897,7 @@ async function startServer() {
       const now = new Date();
       const stampFmt = (dt: Date) => `${dt.getUTCFullYear()}${pad(dt.getUTCMonth() + 1)}${pad(dt.getUTCDate())}T${pad(dt.getUTCHours())}${pad(dt.getUTCMinutes())}${pad(dt.getUTCSeconds())}Z`;
 
+      // 1. Individuální rezervace lektora
       bsnap.docs.forEach((d) => {
         const b: any = d.data();
         if (!active.includes(b.status)) return;
@@ -1902,6 +1915,58 @@ async function startServer() {
 
         ics += "BEGIN:VEVENT\r\n";
         ics += `UID:${d.id}@centrumunity.cz\r\n`;
+        ics += `DTSTAMP:${stampFmt(now)}\r\n`;
+        ics += `DTSTART;TZID=Europe/Prague:${floatFmt(start)}\r\n`;
+        ics += `DTEND;TZID=Europe/Prague:${floatFmt(end)}\r\n`;
+        ics += `SUMMARY:${esc(summary)}\r\n`;
+        ics += `LOCATION:${esc("Šmilovského 1268/9, Vinohrady, Praha 2")}\r\n`;
+        if (descParts.length) ics += `DESCRIPTION:${esc(descParts.join("\n"))}\r\n`;
+        ics += "END:VEVENT\r\n";
+      });
+
+      // 2. Skupinové akce, které lektor vede
+      groupEventsSnap.docs.forEach((gedoc) => {
+        const ge: any = gedoc.data();
+        const isLeader = ge.practitionerId === id || (id === "admin" && (ge.practitionerId === "admin" || !ge.practitionerId));
+        if (!isLeader) return;
+
+        const [y, mo, da] = String(ge.date).split("-").map(Number);
+        const [shh, smm] = String(ge.startTime || "09:00").split(":").map(Number);
+        if (!y || !mo || !da) return;
+
+        const start = new Date(y, mo - 1, da, shh || 0, smm || 0);
+        let end: Date;
+        if (ge.endTime) {
+          const [ehh, emm] = String(ge.endTime).split(":").map(Number);
+          end = new Date(y, mo - 1, da, ehh || 0, emm || 0);
+          if (end.getTime() <= start.getTime()) {
+            end = new Date(start.getTime() + 120 * 60000);
+          }
+        } else {
+          end = new Date(start.getTime() + 120 * 60000);
+        }
+
+        const roomName = ge.room === 1 ? "M1" : "M2";
+        const registeredCount = regCountMap[gedoc.id] ?? (ge.currentRegistrations || 0);
+        const capacity = ge.capacity || 0;
+
+        const summary = `${roomName} · 👥 [Skupinová akce] ${ge.title}`;
+        const descParts: string[] = [];
+        descParts.push("Typ: Skupinová akce / Workshop");
+        descParts.push(`Místnost: ${roomName} (Velká místnost)`);
+        descParts.push(`Čas: ${ge.startTime || ""} – ${ge.endTime || ""}`);
+        if (capacity > 0) {
+          descParts.push(`Obsazenost: ${registeredCount} / ${capacity} účastníků`);
+        }
+        if (ge.price) {
+          descParts.push(`Základní cena: ${ge.price} Kč`);
+        }
+        if (ge.description) {
+          descParts.push("Popis: " + ge.description);
+        }
+
+        ics += "BEGIN:VEVENT\r\n";
+        ics += `UID:group-${gedoc.id}@centrumunity.cz\r\n`;
         ics += `DTSTAMP:${stampFmt(now)}\r\n`;
         ics += `DTSTART;TZID=Europe/Prague:${floatFmt(start)}\r\n`;
         ics += `DTEND;TZID=Europe/Prague:${floatFmt(end)}\r\n`;
@@ -1942,7 +2007,7 @@ async function startServer() {
     }
   });
 
-  // Veřejný ICS feed VŠECH rezervací (master kalendář pro admina), zabezpečený tajným tokenem.
+  // Veřejný ICS feed VŠECH rezervací a skupinových akcí (master kalendář pro admina), zabezpečený tajným tokenem.
   app.get("/api/master-calendar/:token", async (req: Request, res: Response) => {
     try {
       const { token } = req.params;
@@ -1950,6 +2015,28 @@ async function startServer() {
       if (holder.empty) return res.status(404).send("Not found");
 
       const bsnap = await getDocs(collection(db, "bookings"));
+      const groupEventsSnap = await getDocs(collection(db, "groupEvents"));
+      const practitionersSnap = await getDocs(collection(db, "practitioners"));
+      const eventRegsSnap = await getDocs(collection(db, "eventRegistrations"));
+
+      const practMap: Record<string, string> = {};
+      practitionersSnap.docs.forEach((pd) => {
+        const pdata: any = pd.data();
+        practMap[pd.id] = pdata.name || pd.id;
+        if (pdata.role === "ADMIN" || pd.id === "admin") {
+          practMap["admin"] = pdata.name || "Eva";
+        }
+      });
+
+      const regCountMap: Record<string, number> = {};
+      eventRegsSnap.docs.forEach((rd) => {
+        const rdata: any = rd.data();
+        if (rdata.paymentStatus && rdata.paymentStatus !== "cancelled") {
+          const spots = rdata.ticketTypeSpots || 1;
+          regCountMap[rdata.eventId] = (regCountMap[rdata.eventId] || 0) + spots;
+        }
+      });
+
       const active = ["awaiting_payment", "deferred_payment", "paid", "completed", "payment_review"];
       const pad = (n: number) => String(n).padStart(2, "0");
       const floatFmt = (dt: Date) => `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}T${pad(dt.getHours())}${pad(dt.getMinutes())}00`;
@@ -1966,6 +2053,7 @@ async function startServer() {
       const now = new Date();
       const stampFmt = (dt: Date) => `${dt.getUTCFullYear()}${pad(dt.getUTCMonth() + 1)}${pad(dt.getUTCDate())}T${pad(dt.getUTCHours())}${pad(dt.getUTCMinutes())}${pad(dt.getUTCSeconds())}Z`;
 
+      // 1. Všechny individuální rezervace (M1 i M2)
       bsnap.docs.forEach((d) => {
         const b: any = d.data();
         if (!active.includes(b.status)) return;
@@ -1987,6 +2075,61 @@ async function startServer() {
 
         ics += "BEGIN:VEVENT\r\n";
         ics += `UID:master-${d.id}@centrumunity.cz\r\n`;
+        ics += `DTSTAMP:${stampFmt(now)}\r\n`;
+        ics += `DTSTART;TZID=Europe/Prague:${floatFmt(start)}\r\n`;
+        ics += `DTEND;TZID=Europe/Prague:${floatFmt(end)}\r\n`;
+        ics += `SUMMARY:${esc(summary)}\r\n`;
+        ics += `LOCATION:${esc("Šmilovského 1268/9, Vinohrady, Praha 2")}\r\n`;
+        if (descParts.length) ics += `DESCRIPTION:${esc(descParts.join("\n"))}\r\n`;
+        ics += "END:VEVENT\r\n";
+      });
+
+      // 2. Všechny skupinové události (Workshopy a skupinové lekce)
+      groupEventsSnap.docs.forEach((gedoc) => {
+        const ge: any = gedoc.data();
+        const [y, mo, da] = String(ge.date).split("-").map(Number);
+        const [shh, smm] = String(ge.startTime || "09:00").split(":").map(Number);
+        if (!y || !mo || !da) return;
+
+        const start = new Date(y, mo - 1, da, shh || 0, smm || 0);
+        let end: Date;
+        if (ge.endTime) {
+          const [ehh, emm] = String(ge.endTime).split(":").map(Number);
+          end = new Date(y, mo - 1, da, ehh || 0, emm || 0);
+          if (end.getTime() <= start.getTime()) {
+            end = new Date(start.getTime() + 120 * 60000);
+          }
+        } else {
+          end = new Date(start.getTime() + 120 * 60000);
+        }
+
+        const leaderName = practMap[ge.practitionerId] || ge.practitionerId || "Lektor";
+        const roomName = ge.room === 1 ? "M1" : "M2";
+        const registeredCount = regCountMap[gedoc.id] ?? (ge.currentRegistrations || 0);
+        const capacity = ge.capacity || 0;
+
+        const summary = `${roomName} · 👥 [Akce] ${ge.title}${leaderName ? " (" + leaderName + ")" : ""}`;
+        const descParts: string[] = [];
+        descParts.push("Typ: Skupinová akce / Workshop");
+        descParts.push(`Místnost: ${roomName} (Velká místnost)`);
+        descParts.push("Lektor: " + leaderName);
+        descParts.push(`Čas: ${ge.startTime || ""} – ${ge.endTime || ""}`);
+        if (capacity > 0) {
+          descParts.push(`Obsazenost: ${registeredCount} / ${capacity} účastníků`);
+        }
+        if (ge.price) {
+          descParts.push(`Základní cena: ${ge.price} Kč`);
+        }
+        if (ge.ticketTypes && ge.ticketTypes.length > 0) {
+          const ttSummary = ge.ticketTypes.map((t: any) => `${t.name}: ${t.price} Kč (${t.spots} ${t.spots === 1 ? "místo" : "místa"})`).join(", ");
+          descParts.push("Vstupenky: " + ttSummary);
+        }
+        if (ge.description) {
+          descParts.push("Popis:\n" + ge.description);
+        }
+
+        ics += "BEGIN:VEVENT\r\n";
+        ics += `UID:group-${gedoc.id}@centrumunity.cz\r\n`;
         ics += `DTSTAMP:${stampFmt(now)}\r\n`;
         ics += `DTSTART;TZID=Europe/Prague:${floatFmt(start)}\r\n`;
         ics += `DTEND;TZID=Europe/Prague:${floatFmt(end)}\r\n`;
