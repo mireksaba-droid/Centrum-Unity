@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { GroupEvent, EventRegistration } from '../types';
-import { Calendar, Clock, MapPin, Users, CheckCircle, AlertCircle } from 'lucide-react';
+import { Calendar, Clock, MapPin, Users, CheckCircle, AlertCircle, User } from 'lucide-react';
 import { formatLocalDate } from '../utils/dateUtils';
 import Button from '../components/Button';
 import { useToast } from '../contexts/ToastContext';
@@ -155,6 +155,16 @@ const PublicEventPage: React.FC<PublicEventPageProps> = ({ events, registrations
                     <div className="text-indigo-200 text-sm">Čas konání</div>
                   </div>
                 </div>
+
+                {(event.practitionerName || event.practitionerId) && (
+                  <div className="flex items-start gap-4">
+                    <User className="w-6 h-6 text-indigo-300 shrink-0" />
+                    <div>
+                      <div className="font-bold">{event.practitionerName || (event.practitionerId === 'guest' ? 'Externí lektor' : event.practitionerId)}</div>
+                      <div className="text-indigo-200 text-sm">Lektor / Průvodce</div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex items-start gap-4">
                   <MapPin className="w-6 h-6 text-indigo-300 shrink-0" />

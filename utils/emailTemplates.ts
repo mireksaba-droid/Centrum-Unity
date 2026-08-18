@@ -1,5 +1,6 @@
 import { Booking } from '../types';
 import { toVocative } from './vocative';
+import { PRACTITIONERS } from '../constants';
 
 // Veřejná URL loga (v produkci se servíruje z public/logo.png)
 export const LOGO_URL = 'https://rezervace.centrumunity.cz/logo.png';
@@ -281,12 +282,34 @@ export const generateAdminDailySummaryEmail = (
 
 // --- GROUP EVENT EMAIL TEMPLATES ---
 
+const resolveLecturerName = (event: any): string => {
+    if (event.practitionerName && typeof event.practitionerName === 'string' && event.practitionerName.trim()) {
+        return event.practitionerName.trim();
+    }
+    if (event.practitionerId) {
+        if (event.practitionerId === 'guest' || event.practitionerId === 'external') return 'Externí lektor';
+        const found = PRACTITIONERS.find(p => p.id === event.practitionerId);
+        if (found && found.name) {
+            return found.id === 'guest' ? 'Externí lektor' : found.name;
+        }
+        if (event.practitionerId === 'admin') return 'Eva';
+        if (typeof event.practitionerId === 'string' && event.practitionerId.length > 0) {
+            return event.practitionerId.charAt(0).toUpperCase() + event.practitionerId.slice(1);
+        }
+    }
+    return 'Centrum Unity';
+};
+
 export const generateEventRegistrationConfirmationEmail = (registration: any, event: any, isPaid: boolean = false) => {
     const dateParts = event.date?.split('-') || [];
     const formattedDate = dateParts.length === 3 ? `${dateParts[2]}. ${dateParts[1]}. ${dateParts[0]}` : event.date;
     const greetName = toVocative(registration.clientName) || 'Vážený účastníku';
     const badgeText = isPaid ? '✓ Zaplaceno' : 'Čeká na platbu';
-    const price = typeof event.price === 'number' ? event.price.toFixed(2).replace('.', ',') : event.price;
+    const finalPrice = typeof registration.ticketTypePrice === 'number'
+        ? registration.ticketTypePrice
+        : (typeof event.price === 'number' ? event.price : (Number(event.price) || 0));
+    const priceStr = finalPrice.toLocaleString('cs-CZ');
+    const lecturerName = resolveLecturerName(event);
 
     return `
     <div style="background-color:#f1e9dc;padding:32px 16px;font-family:Helvetica,Arial,sans-serif;">
@@ -313,20 +336,30 @@ export const generateEventRegistrationConfirmationEmail = (registration: any, ev
                 <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #ece3d6;">${formattedDate} v ${event.startTime} - ${event.endTime}</td>
               </tr>
               <tr>
-                <td style="padding:8px 0;color:#78716c;font-size:14px;">Lektor</td>
-                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;">${event.practitionerName || 'Nezadáno'}</td>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">Lektor</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #ece3d6;">${lecturerName}</td>
+              </tr>
+              ${registration.ticketTypeName ? `
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">Vstupenka</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #ece3d6;">${registration.ticketTypeName}${registration.ticketTypeSpots && registration.ticketTypeSpots > 1 ? ` (${registration.ticketTypeSpots} místa)` : ''}</td>
+              </tr>
+              ` : ''}
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;">Místo konání</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;">Centrum Unity (Šmilovského 1268/9, Praha 2)</td>
               </tr>
             </table>
           </div>
 
           <div style="background:#f5f3f0;border-radius:12px;padding:16px 20px;margin-bottom:24px;text-align:center;">
-            <div style="color:#78716c;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Cena k úhradě</div>
-            <div style="color:#1c1917;font-size:24px;font-weight:800;">${price} Kč</div>
+            <div style="color:#78716c;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Cena ${isPaid ? 'uhrazena' : 'k úhradě'}</div>
+            <div style="color:#1c1917;font-size:24px;font-weight:800;">${priceStr} Kč</div>
           </div>
 
-          ${!isPaid && event.price > 0 ? `
+          ${!isPaid && finalPrice > 0 ? `
           <p style="margin:0 0 20px;color:#57534e;font-size:15px;line-height:1.6;">
-            Pokud platba dosud neproběhla, uhradíš ji prosím přes odkaz zaslaný v platební bráně. Po úspěšném zaplacení obdržíš potvrzení o platbě.
+            Pokud platba dosud neproběhla, uhradíš ji prosím přes odkaz v platební bráně. Po úspěšném zaplacení obdržíš potvrzení o platbě.
           </p>
           ` : ''}
 
@@ -345,6 +378,7 @@ export const generateEventRegistrationCancellationEmail = (registration: any, ev
     const dateParts = event.date?.split('-') || [];
     const formattedDate = dateParts.length === 3 ? `${dateParts[2]}. ${dateParts[1]}. ${dateParts[0]}` : event.date;
     const greetName = toVocative(registration.clientName) || 'Vážený účastníku';
+    const lecturerName = resolveLecturerName(event);
 
     return `
     <div style="background-color:#f1e9dc;padding:32px 16px;font-family:Helvetica,Arial,sans-serif;">
@@ -374,8 +408,12 @@ export const generateEventRegistrationCancellationEmail = (registration: any, ev
                 <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #ece3d6;">${event.title}</td>
               </tr>
               <tr>
-                <td style="padding:8px 0;color:#78716c;font-size:14px;">Termín</td>
-                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;">${formattedDate} v ${event.startTime} - ${event.endTime}</td>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">Termín</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #ece3d6;">${formattedDate} v ${event.startTime} - ${event.endTime}</td>
+              </tr>
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;">Lektor</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;">${lecturerName}</td>
               </tr>
             </table>
           </div>

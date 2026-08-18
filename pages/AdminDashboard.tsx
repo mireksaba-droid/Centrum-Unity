@@ -176,6 +176,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             setEditingEventId(eventToEdit.id);
             setEventForm({ 
                 ...eventToEdit,
+                practitionerName: eventToEdit.practitionerName || '',
                 ticketTypes: eventToEdit.ticketTypes || []
             });
         } else {
@@ -188,7 +189,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 endTime: '',
                 capacity: 10,
                 price: 350,
-                practitionerId: practitioners[0]?.id || '',
+                practitionerId: 'guest',
+                practitionerName: '',
                 ticketTypes: []
             });
         }
@@ -259,13 +261,28 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             return;
         }
 
+        const selectedPractitioner = practitioners.find(p => p.id === eventForm.practitionerId);
+        let practitionerName = eventForm.practitionerName?.trim();
+        if (!practitionerName) {
+            if (eventForm.practitionerId === 'guest') {
+                practitionerName = 'Externí lektor';
+            } else if (selectedPractitioner) {
+                practitionerName = selectedPractitioner.name;
+            } else if (eventForm.practitionerId === 'admin') {
+                practitionerName = 'Eva';
+            } else {
+                practitionerName = 'Externí lektor';
+            }
+        }
+
         if (editingEventId) {
             const updatedEvent: GroupEvent = {
                 ...(eventForm as GroupEvent),
                 id: editingEventId,
                 capacity: Number(eventForm.capacity) || 10,
                 price: Number(eventForm.price) || 0,
-                ticketTypes: eventForm.ticketTypes || []
+                ticketTypes: eventForm.ticketTypes || [],
+                practitionerName: practitionerName
             };
             onUpdateGroupEvent(updatedEvent);
             addToast('success', 'Událost upravena', 'Skupinová událost byla úspěšně upravena.');
@@ -281,6 +298,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 price: Number(eventForm.price) || 0,
                 ticketTypes: eventForm.ticketTypes || [],
                 practitionerId: eventForm.practitionerId!,
+                practitionerName: practitionerName,
                 room: 2,
                 createdAt: new Date().toISOString()
             };
@@ -1496,6 +1514,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             const registeredCount = eventRegistrations.filter(r => r.eventId === event.id && r.paymentStatus !== 'cancelled').reduce((acc, curr) => acc + (curr.ticketTypeSpots || 1), 0);
                             const isFull = registeredCount >= event.capacity;
                             const practitioner = practitioners.find(p => p.id === event.practitionerId);
+                            const practitionerDisplayName = event.practitionerName || (event.practitionerId === 'guest' ? 'Externí lektor' : (practitioner?.name || 'Nezadáno'));
                             const isPreview = window.location.hostname.includes('usercontent.goog') || 
                                               window.location.hostname.includes('webcontainer.io') ||
                                               window.location.hostname.includes('idx.google.com');
@@ -1508,7 +1527,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     <div className="bg-indigo-50 p-4 border-b border-indigo-100 flex justify-between items-start">
                                         <div>
                                             <h3 className="font-bold text-lg text-indigo-900">{event.title}</h3>
-                                            <p className="text-sm text-indigo-700">{practitioner?.name}</p>
+                                            <p className="text-sm text-indigo-700 font-medium">{practitionerDisplayName}</p>
                                         </div>
                                         <div className={`px-2 py-1 rounded text-xs font-bold ${isFull ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
                                             {registeredCount} / {event.capacity}
@@ -1726,14 +1745,41 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     <select 
                                         required
                                         value={eventForm.practitionerId}
-                                        onChange={e => setEventForm({...eventForm, practitionerId: e.target.value})}
+                                        onChange={e => {
+                                            const val = e.target.value;
+                                            const p = practitioners.find(item => item.id === val);
+                                            setEventForm({
+                                                ...eventForm,
+                                                practitionerId: val,
+                                                practitionerName: val === 'guest' ? (eventForm.practitionerName || 'Externí lektor') : (p?.name || '')
+                                            });
+                                        }}
                                         className="w-full p-3 border border-stone-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                                     >
                                         <option value="">Vyberte lektora</option>
-                                        {practitioners.filter(p => p.isActive).map(p => (
+                                        <option value="guest">✨ Externí lektor</option>
+                                        {practitioners.filter(p => p.isActive && p.id !== 'guest').map(p => (
                                             <option key={p.id} value={p.id}>{p.name}</option>
                                         ))}
                                     </select>
+
+                                    {eventForm.practitionerId === 'guest' && (
+                                        <div className="mt-3 bg-indigo-50/60 p-3.5 rounded-xl border border-indigo-100 animate-in fade-in slide-in-from-top-1">
+                                            <label className="block text-xs font-bold text-indigo-950 mb-1">
+                                                Jméno externího lektora (volitelné)
+                                            </label>
+                                            <input 
+                                                type="text" 
+                                                placeholder="např. Katka, Jan Novák (pokud necháte prázdné, zobrazí se 'Externí lektor')"
+                                                value={eventForm.practitionerName === 'Externí lektor' ? '' : (eventForm.practitionerName || '')}
+                                                onChange={e => setEventForm({ ...eventForm, practitionerName: e.target.value })}
+                                                className="w-full p-2.5 bg-white border border-indigo-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-stone-800"
+                                            />
+                                            <p className="text-[11px] text-indigo-700/80 mt-1">
+                                                Zadané jméno se zobrazí v přehledu události na webu i v potvrzovacích e-mailech účastníkům.
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="md:col-span-2 border-t border-stone-100 pt-6">

@@ -99,6 +99,7 @@ export interface GroupEvent {
   title: string;
   description?: string;
   practitionerId: string; // Kdo akci vede
+  practitionerName?: string; // Jméno lektora
   date: string; // YYYY-MM-DD
   startTime: string; // HH:MM
   endTime: string; // HH:MM

@@ -25,6 +25,30 @@ async function safeJson(res: any) {
   }
 }
 
+async function enrichEventData(eventData: any) {
+  if (!eventData) return eventData;
+  if (!eventData.practitionerName && eventData.practitionerId) {
+    if (eventData.practitionerId === 'guest' || eventData.practitionerId === 'external') {
+      eventData.practitionerName = 'Externí lektor';
+      return eventData;
+    }
+    try {
+      const pDoc = await getDoc(doc(db, "practitioners", String(eventData.practitionerId)));
+      if (pDoc.exists()) {
+        const pName = (pDoc.data() as any).name;
+        eventData.practitionerName = (pName === 'Host / Externista') ? 'Externí lektor' : pName;
+      } else {
+        const found = PRACTITIONERS.find(p => p.id === eventData.practitionerId);
+        eventData.practitionerName = found ? (found.id === 'guest' ? 'Externí lektor' : found.name) : (eventData.practitionerId === 'admin' ? 'Eva' : eventData.practitionerId);
+      }
+    } catch {
+      const found = PRACTITIONERS.find(p => p.id === eventData.practitionerId);
+      eventData.practitionerName = found ? (found.id === 'guest' ? 'Externí lektor' : found.name) : (eventData.practitionerId === 'admin' ? 'Eva' : eventData.practitionerId);
+    }
+  }
+  return eventData;
+}
+
 // Initialize Firebase Admin if not already initialized
 
 
@@ -560,7 +584,7 @@ async function startServer() {
         return res.status(404).json({ error: "Událost neexistuje!" });
       }
 
-      const eventData = eventDoc.data() as any;
+      const eventData = await enrichEventData(eventDoc.data() as any);
       
       // Určíme cenu a zabraná místa na základě typu vstupenky
       let spots = 1;
@@ -740,7 +764,7 @@ async function startServer() {
       if (emailConfigured() && regData.clientEmail) {
         const eventDoc = await getDoc(doc(db, "groupEvents", regData.eventId));
         if (eventDoc.exists()) {
-          const eventData = eventDoc.data() as any;
+          const eventData = await enrichEventData(eventDoc.data() as any);
           try {
             await sendEmail({
               to: [regData.clientEmail],
@@ -797,7 +821,7 @@ async function startServer() {
       if (emailConfigured() && regData.clientEmail) {
         const eventDoc = await getDoc(doc(db, "groupEvents", regData.eventId));
         if (eventDoc.exists()) {
-          const eventData = eventDoc.data() as any;
+          const eventData = await enrichEventData(eventDoc.data() as any);
           try {
             await sendEmail({
               to: [regData.clientEmail],
@@ -1314,7 +1338,7 @@ async function startServer() {
           const regData = finalDoc.data() as any;
           const eventDoc = await getDoc(doc(db, "groupEvents", regData.eventId));
           if (eventDoc.exists()) {
-            const eventData = eventDoc.data() as any;
+            const eventData = await enrichEventData(eventDoc.data() as any);
             const recipients = [regData.clientEmail].filter(Boolean);
             if (recipients.length) {
               await sendEmail({
@@ -1346,7 +1370,7 @@ async function startServer() {
           if (emailConfigured() && regData.clientEmail) {
             const eventDoc = await getDoc(doc(db, "groupEvents", regData.eventId));
             if (eventDoc.exists()) {
-              const eventData = eventDoc.data();
+              const eventData = await enrichEventData(eventDoc.data());
               await sendEmail({
                 to: [regData.clientEmail],
                 subject: `Registrace zrušena (vypršela platba): ${eventData?.title} - Centrum Unity`,
@@ -2298,7 +2322,7 @@ async function startServer() {
               if (emailConfigured() && data.clientEmail) {
                 const eventDoc = await getDoc(doc(db, "groupEvents", data.eventId));
                 if (eventDoc.exists()) {
-                  const eventData = eventDoc.data();
+                  const eventData = await enrichEventData(eventDoc.data());
                   await sendEmail({
                     to: [data.clientEmail],
                     subject: `Registrace zrušena (vypršela platba): ${eventData?.title} - Centrum Unity`,
