@@ -68,6 +68,7 @@ Uživatel vybere profil a zadá PIN. Po ověření (dnes na klientovi) zavolá `
 ### C. Skupinové události (veřejné)
 Admin vytvoří `GroupEvent` pro Velkou místnost s kapacitou a cenou. Vygeneruje se veřejná URL `/event/:eventId`. Klient se registruje; Firestore **transakce** hlídá, že se nepřekročí kapacita.
 *   **Pravidlo počítání kapacity:** Do celkové obsazenosti akce se započítávají pouze aktivní registrace (ve stavu `paid`, `awaiting_payment` atd.). Registrace, které byly stornovány (`cancelled`), se do celkového počtu obsazených míst nezapočítávají, takže automaticky uvolňují kapacitu sálu zpět pro ostatní zájemce (opraveno a sjednoceno jak na veřejné stránce, tak v administrátorském přehledu).
+*   **Notifikace pro správce (Eva):** Při každé nové registraci či změně stavu registrace na skupinovou akci je automaticky odesílán e-mail na adresu správkyně `kadlecova-eva@seznam.cz` (nebo dle env `ADMIN_NOTIFICATION_EMAIL` / profilu `admin`), viz sekce 6.
 
 ### D. Administrátorský tok
 Dashboard s metrikami (příjmy, vytíženost), master kalendář se jmény lektorů, správa profilů, rezervací a událostí. Při kolizi skupinové události s rezervací lektora se otevře modál pro přesun (Reschedule).
@@ -104,13 +105,26 @@ Administrátorský dashboard obsahuje dedikovanou záložku „Analytika“, kte
 
 ## 6. E-maily a platební logika
 
-### Odesílání e-mailů (SMTP)
-E-maily posílá backend přes `nodemailer` (`getMailer()` v `server.ts`). Endpoint `/api/send-email` (chráněný JWT) a interní volání v cronu/cleanupu. Když SMTP proměnné chybí, odeslání se jen zaloguje (mock). Šablony jsou v `utils/emailTemplates.ts`:
-- `generateConfirmationEmail(booking, isPaid)` — potvrzení rezervace (řádek s vybavením, stav Zaplaceno/Faktura, oslovení ve 5. pádu).
+### Odesílání e-mailů (SMTP / Resend)
+E-maily posílá backend přes `nodemailer` / `Resend` (`sendEmail()` v `server.ts`). Endpoint `/api/send-email` (chráněný JWT) a interní volání v cronu/cleanupu a při registraci na události. Když e-mailové proměnné chybí, odeslání se jen zaloguje (mock). Šablony jsou v `utils/emailTemplates.ts`:
+- `generateConfirmationEmail(booking, isPaid)` — potvrzení individuální rezervace místnosti (řádek s vybavením, stav Zaplaceno/Faktura, oslovení ve 5. pádu).
 - `generatePaymentRequestEmail(booking, baseUrl)` — výzva k platbě s odkazem na `/#/pay/:id`.
+- `generatePaymentReminderEmail(booking, hoursLeft, baseUrl)` — připomínka platby před vypršením 24h lhůty.
 - `generateCancellationEmail(booking, reason)` — storno rezervace.
+- `generateEventRegistrationConfirmationEmail(registration, event, isPaid)` — potvrzení registrace na skupinovou akci pro klienta (včetně instrukcí, platebního stavu a storno podmínek).
+- `generateEventRegistrationCancellationEmail(registration, event, reason)` — storno registrace na akci pro klienta (např. při vypršení platebního limitu).
+- `generateAdminEventRegistrationNotificationEmail(registration, event, paymentState, baseUrl)` — okamžitá notifikace pro administrátorku Evu o nové registraci či platbě na skupinovou akci.
+- `generateAdminEventCancellationNotificationEmail(registration, event, reason, baseUrl)` — notifikace pro správce o stornu registrace na skupinovou akci a uvolnění kapacity.
+- `generateAdminDailySummaryEmail(newBookings, cancelledBookings, periodLabel)` — denní souhrn vytvořených a zrušených rezervací.
 
-Všechny mají značkovou hlavičku s logem (`LOGO_URL = https://rezervace.centrumunity.cz/logo.png`) a patičku s popisem centra.
+Všechny e-maily mají jednotnou značkovou hlavičku s logem (`LOGO_URL = https://rezervace.centrumunity.cz/logo.png`), přehledný tabulkový detail a patičku s kontaktem.
+
+### Notifikace pro administrátorku Evu (`kadlecova-eva@seznam.cz`)
+Notifikace o skupinových akcích jsou odesílány na e-mail administrátorky (určeno prioritou: `ADMIN_NOTIFICATION_EMAIL` z `.env` → e-mail v profilu `admin` z Firestore → výchozí `kadlecova-eva@seznam.cz`):
+1. **Nová bezplatná registrace:** Odesílá se ihned při vytvoření registrace na bezplatnou akci (stav `free`).
+2. **Nová objednávka místa (placená akce):** Odesílá se ihned při vytvoření objednávky, když klient vstoupí na platební bránu (stav `awaiting_payment`).
+3. **Potvrzení o zaplacení:** Odesílá se při úspěšném uhrazení přes GoPay webhook (stav `paid`).
+4. **Storno registrace:** Odesílá se, pokud platba na bráně vyprší (po 15 minutách) nebo je registrace zrušena, včetně informace o uvolnění kapacity v sále.
 
 ### Testovací endpoint
 `POST /api/test-email` (jen admin) odešle ukázkový potvrzovací e-mail pro ověření SMTP. Tělo: `{ "to": "adresa" }` (nepovinné, jinak na `FROM_EMAIL`).

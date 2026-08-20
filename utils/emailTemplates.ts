@@ -432,3 +432,202 @@ export const generateEventRegistrationCancellationEmail = (registration: any, ev
     `;
 };
 
+export const generateAdminEventRegistrationNotificationEmail = (
+    registration: any,
+    event: any,
+    paymentState: 'free' | 'paid' | 'awaiting_payment' = 'paid',
+    baseUrl: string = 'https://rezervace.centrumunity.cz'
+) => {
+    const dateParts = event.date?.split('-') || [];
+    const formattedDate = dateParts.length === 3 ? `${dateParts[2]}. ${dateParts[1]}. ${dateParts[0]}` : event.date;
+    const lecturerName = resolveLecturerName(event);
+    const spots = Number(registration.ticketTypeSpots) || 1;
+    const spotsText = spots === 1 ? '1 místo' : spots >= 2 && spots <= 4 ? `${spots} místa` : `${spots} míst`;
+
+    const finalPrice = typeof registration.ticketTypePrice === 'number'
+        ? registration.ticketTypePrice
+        : (typeof event.price === 'number' ? event.price : (Number(event.price) || 0));
+    const priceStr = finalPrice.toLocaleString('cs-CZ');
+
+    const badgeConfig = {
+        free: { bg: '#dcfce7', color: '#15803d', text: '✓ Bezplatná registrace (0 Kč)' },
+        paid: { bg: '#dcfce7', color: '#15803d', text: '✓ Zaplaceno online (GoPay)' },
+        awaiting_payment: { bg: '#fef3c7', color: '#b45309', text: '⏳ Nová objednávka – čeká na platbu' }
+    }[paymentState];
+
+    const titleText = {
+        free: 'Nová bezplatná registrace na akci',
+        paid: 'Platba přijata: Registrace na akci',
+        awaiting_payment: 'Nová objednávka místa na akci'
+    }[paymentState];
+
+    const introText = {
+        free: 'byla právě vytvořena bezplatná registrace na skupinovou akci.',
+        paid: 'byla právě úspěšně zaplacena registrace na skupinovou akci.',
+        awaiting_payment: 'byla právě vytvořena nová objednávka místa na skupinovou akci (čeká na úhradu přes platební bránu).'
+    }[paymentState];
+
+    const hasHash = baseUrl.includes('/#');
+    const cleanBase = baseUrl.replace(/\/+$/, '').replace('/#', '');
+    const adminLink = hasHash ? `${cleanBase}/#/admin` : `${cleanBase}/admin`;
+
+    return `
+    <div style="background-color:#f1e9dc;padding:32px 16px;font-family:Helvetica,Arial,sans-serif;">
+      <div style="max-width:580px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06);">
+        ${emailHeader()}
+        <div style="padding:32px;">
+          <div style="display:inline-block;background:${badgeConfig.bg};color:${badgeConfig.color};font-size:13px;font-weight:700;padding:6px 14px;border-radius:999px;margin-bottom:16px;">
+            ${badgeConfig.text}
+          </div>
+          <h1 style="margin:0 0 8px;font-size:21px;color:#1c1917;">${titleText}</h1>
+          <p style="margin:0 0 20px;color:#57534e;font-size:15px;line-height:1.6;">
+            Ahoj Evo,<br/>
+            v rezervačním systému ${introText}
+          </p>
+
+          <div style="background:#faf7f2;border:1px solid #ece3d6;border-radius:12px;padding:20px 24px;margin-bottom:24px;">
+            <table style="width:100%;border-collapse:collapse;">
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">Název akce</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:700;text-align:right;border-bottom:1px solid #ece3d6;">${event.title}</td>
+              </tr>
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">Termín</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #ece3d6;">${formattedDate} v ${event.startTime} - ${event.endTime}</td>
+              </tr>
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">Lektor / Průvodce</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #ece3d6;">${lecturerName}</td>
+              </tr>
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">Účastník (Jméno)</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:700;text-align:right;border-bottom:1px solid #ece3d6;">${registration.clientName || 'Neuvedeno'}</td>
+              </tr>
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">E-mail účastníka</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #ece3d6;">
+                  <a href="mailto:${registration.clientEmail}" style="color:#6b8f71;text-decoration:none;">${registration.clientEmail || 'Neuveden'}</a>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">Telefon</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #ece3d6;">${registration.clientPhone || 'Neuveden'}</td>
+              </tr>
+              ${registration.ticketTypeName ? `
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">Vstupenka</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #ece3d6;">${registration.ticketTypeName} (${spotsText})</td>
+              </tr>
+              ` : `
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">Počet míst</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #ece3d6;">${spotsText}</td>
+              </tr>
+              `}
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">Částka</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:700;text-align:right;border-bottom:1px solid #ece3d6;">${priceStr} Kč</td>
+              </tr>
+              ${event.capacity ? `
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">Obsazenost akce</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #ece3d6;">${event.currentRegistrations || 0} / ${event.capacity} míst</td>
+              </tr>
+              ` : ''}
+              ${(registration.note || registration.clientNote) ? `
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;">Poznámka</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:500;text-align:right;">${registration.note || registration.clientNote}</td>
+              </tr>
+              ` : ''}
+            </table>
+          </div>
+
+          <div style="text-align:center;margin:28px 0 16px;">
+            <a href="${adminLink}" style="display:inline-block;background-color:#6b8f71;color:#ffffff;padding:14px 28px;text-decoration:none;border-radius:8px;font-weight:700;font-size:15px;">
+              Otevřít přehled v administraci
+            </a>
+          </div>
+
+          <p style="margin:24px 0 0;color:#a8a29e;font-size:13px;line-height:1.6;text-align:center;">
+            Tato notifikace byla automaticky vygenerována systémem Centrum Unity pro administrátorku Evu.
+          </p>
+        </div>
+        ${emailFooter()}
+      </div>
+    </div>
+    `;
+};
+
+export const generateAdminEventCancellationNotificationEmail = (
+    registration: any,
+    event: any,
+    reason: string = '',
+    baseUrl: string = 'https://rezervace.centrumunity.cz'
+) => {
+    const dateParts = event.date?.split('-') || [];
+    const formattedDate = dateParts.length === 3 ? `${dateParts[2]}. ${dateParts[1]}. ${dateParts[0]}` : event.date;
+    const lecturerName = resolveLecturerName(event);
+
+    const hasHash = baseUrl.includes('/#');
+    const cleanBase = baseUrl.replace(/\/+$/, '').replace('/#', '');
+    const adminLink = hasHash ? `${cleanBase}/#/admin` : `${cleanBase}/admin`;
+
+    return `
+    <div style="background-color:#f1e9dc;padding:32px 16px;font-family:Helvetica,Arial,sans-serif;">
+      <div style="max-width:580px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06);">
+        ${emailHeader()}
+        <div style="padding:32px;">
+          <div style="display:inline-block;background:#fef2f2;color:#991b1b;font-size:13px;font-weight:700;padding:6px 14px;border-radius:999px;margin-bottom:16px;">
+            ✕ Registrace stornována
+          </div>
+          <h1 style="margin:0 0 8px;font-size:21px;color:#1c1917;">Storno registrace na akci</h1>
+          <p style="margin:0 0 20px;color:#57534e;font-size:15px;line-height:1.6;">
+            Ahoj Evo,<br/>
+            v rezervačním systému byla zrušena registrace na níže uvedenou skupinovou akci a kapacita sálu byla uvolněna.
+          </p>
+
+          ${reason ? `
+          <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:14px 18px;margin-bottom:24px;">
+            <div style="color:#991b1b;font-size:13px;font-weight:700;margin-bottom:4px;">Důvod zrušení</div>
+            <div style="color:#7f1d1d;font-size:14px;line-height:1.6;">${reason}</div>
+          </div>
+          ` : ''}
+
+          <div style="background:#faf7f2;border:1px solid #ece3d6;border-radius:12px;padding:20px 24px;margin-bottom:24px;">
+            <table style="width:100%;border-collapse:collapse;">
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">Název akce</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:700;text-align:right;border-bottom:1px solid #ece3d6;">${event.title}</td>
+              </tr>
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">Termín</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #ece3d6;">${formattedDate} v ${event.startTime} - ${event.endTime}</td>
+              </tr>
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">Lektor</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #ece3d6;">${lecturerName}</td>
+              </tr>
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">Účastník</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:700;text-align:right;border-bottom:1px solid #ece3d6;">${registration.clientName || 'Neuvedeno'}</td>
+              </tr>
+              <tr>
+                <td style="padding:8px 0;color:#78716c;font-size:14px;">E-mail</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;">${registration.clientEmail || 'Neuveden'}</td>
+              </tr>
+            </table>
+          </div>
+
+          <div style="text-align:center;margin:28px 0 16px;">
+            <a href="${adminLink}" style="display:inline-block;background-color:#6b8f71;color:#ffffff;padding:14px 28px;text-decoration:none;border-radius:8px;font-weight:700;font-size:15px;">
+              Otevřít administraci
+            </a>
+          </div>
+        </div>
+        ${emailFooter()}
+      </div>
+    </div>
+    `;
+};
+

@@ -13,7 +13,7 @@ import firebaseConfig from "./firebase-applet-config.json";
 
 import { PRACTITIONERS } from "./constants";
 import { calculateRentalPrice } from "./utils/scheduler";
-import { generatePaymentRequestEmail, generateConfirmationEmail, generateCancellationEmail, generateAdminDailySummaryEmail, generatePaymentReminderEmail, generateEventRegistrationConfirmationEmail, generateEventRegistrationCancellationEmail } from "./utils/emailTemplates";
+import { generatePaymentRequestEmail, generateConfirmationEmail, generateCancellationEmail, generateAdminDailySummaryEmail, generatePaymentReminderEmail, generateEventRegistrationConfirmationEmail, generateEventRegistrationCancellationEmail, generateAdminEventRegistrationNotificationEmail, generateAdminEventCancellationNotificationEmail } from "./utils/emailTemplates";
 
 async function safeJson(res: any) {
   const text = await res.text();
@@ -249,6 +249,18 @@ async function startServer() {
     // Fallback na seed konstanty (kdyby v DB e-mail chyběl)
     const seed = (PRACTITIONERS as any[]).find((p) => p.id === userId);
     return seed && typeof seed.email === "string" ? seed.email.trim() : "";
+  }
+
+  // E-mail administrátora pro notifikace (priorita: ADMIN_NOTIFICATION_EMAIL -> profil 'admin' -> kadlecova-eva@seznam.cz)
+  async function getAdminNotificationEmail(): Promise<string> {
+    if (process.env.ADMIN_NOTIFICATION_EMAIL && process.env.ADMIN_NOTIFICATION_EMAIL.trim()) {
+      return process.env.ADMIN_NOTIFICATION_EMAIL.trim();
+    }
+    const adminEmail = await getPractitionerEmail("admin");
+    if (adminEmail && adminEmail.trim()) {
+      return adminEmail.trim();
+    }
+    return "kadlecova-eva@seznam.cz";
   }
 
   // Příjemci e-mailů k rezervaci: klient (pokud vyplněn) + lektor, který ji vytvořil. Bez duplicit.
@@ -621,7 +633,7 @@ async function startServer() {
           transaction.update(eventRef, { currentRegistrations: currentRegistrations + spots });
         });
 
-        // Odeslat ihned potvrzení e-mailem
+        // Odeslat ihned potvrzení e-mailem klientovi
         if (emailConfigured() && registration.clientEmail) {
           try {
             await sendEmail({
@@ -631,6 +643,23 @@ async function startServer() {
             });
           } catch (e: any) {
             console.error("Chyba při odesílání e-mailu zdarma registrace:", e.message);
+          }
+        }
+
+        // Odeslat notifikaci administrátorce (Eva) o nové bezplatné registraci
+        if (emailConfigured()) {
+          try {
+            const adminEmail = await getAdminNotificationEmail();
+            if (adminEmail) {
+              await sendEmail({
+                to: [adminEmail],
+                subject: `Nová bezplatná registrace na akci: ${eventData.title} (${registration.clientName || 'Účastník'})`,
+                html: generateAdminEventRegistrationNotificationEmail(registration, eventData, 'free', APP_BASE_URL)
+              });
+              console.log(`Admin notification (free event registration) sent to ${adminEmail}`);
+            }
+          } catch (adminMailErr: any) {
+            console.error("Chyba při odesílání admin notifikace (zdarma registrace):", adminMailErr.message);
           }
         }
 
@@ -712,6 +741,23 @@ async function startServer() {
             });
           } catch (e: any) {
             console.error("Chyba při odesílání e-mailu s instrukcemi k platbě:", e.message);
+          }
+        }
+
+        // Odešleme notifikaci administrátorce (Eva) o vytvoření objednávky místa na akci
+        if (emailConfigured()) {
+          try {
+            const adminEmail = await getAdminNotificationEmail();
+            if (adminEmail) {
+              await sendEmail({
+                to: [adminEmail],
+                subject: `Nová objednávka na akci (čeká na platbu): ${eventData.title} (${registration.clientName || 'Účastník'})`,
+                html: generateAdminEventRegistrationNotificationEmail(registration, eventData, 'awaiting_payment', APP_BASE_URL)
+              });
+              console.log(`Admin notification (new order awaiting payment) sent to ${adminEmail}`);
+            }
+          } catch (adminMailErr: any) {
+            console.error("Chyba při odesílání admin notifikace (objednávka):", adminMailErr.message);
           }
         }
 
@@ -1348,9 +1394,20 @@ async function startServer() {
               });
               console.log(`Event registration confirmation email sent to ${recipients.join(', ')}`);
             }
+
+            // Odeslání notifikace o zaplacení administrátorce (Eva)
+            const adminEmail = await getAdminNotificationEmail();
+            if (adminEmail) {
+              await sendEmail({
+                to: [adminEmail],
+                subject: `Platba přijata: ${eventData.title} (${regData.clientName || 'Účastník'})`,
+                html: generateAdminEventRegistrationNotificationEmail(regData, eventData, 'paid', APP_BASE_URL)
+              });
+              console.log(`Admin payment notification sent to ${adminEmail}`);
+            }
           }
         } catch (e: any) {
-          console.error("Failed to send event registration confirmation email:", e.message);
+          console.error("Failed to send event registration confirmation/admin email:", e.message);
         }
       }
 
@@ -1358,28 +1415,41 @@ async function startServer() {
         try {
           const finalDoc = await getDoc(regRef!);
           const regData = finalDoc.data() as any;
+          const spots = Number(regData.ticketTypeSpots) || 1;
           await runTransaction(db, async (transaction: any) => {
             const eventRef = doc(db, "groupEvents", regData.eventId);
             const eventDoc = await transaction.get(eventRef);
             if (eventDoc.exists()) {
               const currentRegistrations = eventDoc.data()?.currentRegistrations || 0;
-              transaction.update(eventRef, { currentRegistrations: Math.max(0, currentRegistrations - 1) });
+              transaction.update(eventRef, { currentRegistrations: Math.max(0, currentRegistrations - spots) });
             }
           });
           
-          if (emailConfigured() && regData.clientEmail) {
+          if (emailConfigured()) {
             const eventDoc = await getDoc(doc(db, "groupEvents", regData.eventId));
             if (eventDoc.exists()) {
               const eventData = await enrichEventData(eventDoc.data());
-              await sendEmail({
-                to: [regData.clientEmail],
-                subject: `Registrace zrušena (vypršela platba): ${eventData?.title} - Centrum Unity`,
-                html: generateEventRegistrationCancellationEmail(regData, eventData, "Platba nebyla dokončena včas, proto byla vaše registrace automaticky zrušena a místo uvolněno.")
-              });
+              if (regData.clientEmail) {
+                await sendEmail({
+                  to: [regData.clientEmail],
+                  subject: `Registrace zrušena (vypršela platba): ${eventData?.title} - Centrum Unity`,
+                  html: generateEventRegistrationCancellationEmail(regData, eventData, "Platba nebyla dokončena včas, proto byla vaše registrace automaticky zrušena a místo uvolněno.")
+                });
+              }
+
+              // Notifikace pro administrátorku (Eva)
+              const adminEmail = await getAdminNotificationEmail();
+              if (adminEmail) {
+                await sendEmail({
+                  to: [adminEmail],
+                  subject: `Storno registrace (vypršela platba): ${eventData?.title} (${regData.clientName || 'Účastník'})`,
+                  html: generateAdminEventCancellationNotificationEmail(regData, eventData, "Platba nebyla dokončena včas (vypršel limit na platební bráně).", APP_BASE_URL)
+                });
+              }
             }
           }
         } catch (e: any) {
-          console.error("Failed to release capacity for cancelled event registration:", e.message);
+          console.error("Failed to handle cancelled event registration:", e.message);
         }
       }
 
@@ -2318,16 +2388,27 @@ async function startServer() {
                 }
               });
 
-              // Odešleme storno e-mail
-              if (emailConfigured() && data.clientEmail) {
+              // Odešleme storno e-mail klientovi a administrátorce
+              if (emailConfigured()) {
                 const eventDoc = await getDoc(doc(db, "groupEvents", data.eventId));
                 if (eventDoc.exists()) {
                   const eventData = await enrichEventData(eventDoc.data());
-                  await sendEmail({
-                    to: [data.clientEmail],
-                    subject: `Registrace zrušena (vypršela platba): ${eventData?.title} - Centrum Unity`,
-                    html: generateEventRegistrationCancellationEmail(data, eventData, "Platba nebyla dokončena včas, proto byla vaše registrace automaticky zrušena a místo uvolněno.")
-                  });
+                  if (data.clientEmail) {
+                    await sendEmail({
+                      to: [data.clientEmail],
+                      subject: `Registrace zrušena (vypršela platba): ${eventData?.title} - Centrum Unity`,
+                      html: generateEventRegistrationCancellationEmail(data, eventData, "Platba nebyla dokončena včas, proto byla vaše registrace automaticky zrušena a místo uvolněno.")
+                    });
+                  }
+
+                  const adminEmail = await getAdminNotificationEmail();
+                  if (adminEmail) {
+                    await sendEmail({
+                      to: [adminEmail],
+                      subject: `Storno registrace (vypršela platba): ${eventData?.title} (${data.clientName || 'Účastník'})`,
+                      html: generateAdminEventCancellationNotificationEmail(data, eventData, "Platba nebyla dokončena včas (vypršel 15minutový časový limit na platební bráně).", APP_BASE_URL)
+                    });
+                  }
                 }
               }
             } catch (capErr: any) {
