@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Booking, Practitioner, Service, Role, GroupEvent, EventRegistration } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronRight, Loader2, Smartphone } from 'lucide-react';
+import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronRight, Loader2, Smartphone, BarChart3 } from 'lucide-react';
 import Button from '../components/Button';
 import StudioSchedule from './StudioSchedule';
 import RescheduleModal from '../components/RescheduleModal';
@@ -536,6 +536,62 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             .filter(x => x.storno > 0)
             .sort((a, b) => (b.storno - a.storno) || (b.rate - a.rate));
 
+        // 10. MĚSÍČNÍ PŘEHLED: REZERVACE V HODNOTĚ XYZ VS. ZREALIZOVÁNO XYZ
+        // Pro každý měsíc spočítáme:
+        // - totalValue: celková hodnota rezervací v daném měsíci (potvrzené/zaplacené rezervace)
+        // - realizedValue: hodnota zrealizovaných (již proběhlých a zaplacených/dokončených) lekcí v daném měsíci
+        // - pendingValue: zbývající hodnota lekcí k realizaci (budoucí lekce v daném měsíci)
+        const monthlyRealizationData = trendMonths.map((monthDate) => {
+            const mm = monthDate.getMonth();
+            const yy = monthDate.getFullYear();
+
+            const bookingsInMonth = confirmedBookings.filter(b => inMonth(parseLocalDate(b.date), mm, yy));
+            const totalValue = bookingsInMonth.reduce((sum, b) => sum + (b.price || 0), 0);
+            const totalCount = bookingsInMonth.length;
+
+            const realizedInMonth = bookingsInMonth.filter(b => {
+                if (!['paid', 'completed'].includes(b.status)) return false;
+                try {
+                    const bDateTime = parseLocalDate(b.date, b.time);
+                    return bDateTime <= now;
+                } catch {
+                    return parseLocalDate(b.date) <= now;
+                }
+            });
+
+            const realizedValue = realizedInMonth.reduce((sum, b) => sum + (b.price || 0), 0);
+            const realizedCount = realizedInMonth.length;
+            const pendingValue = Math.max(0, totalValue - realizedValue);
+            const pendingCount = Math.max(0, totalCount - realizedCount);
+
+            const monthName = monthDate.toLocaleDateString('cs-CZ', { month: 'long' });
+            const capitalizedName = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+            const isCurrent = mm === today.getMonth() && yy === today.getFullYear();
+
+            return {
+                name: capitalizedName,
+                monthKey: `${yy}-${String(mm + 1).padStart(2, '0')}`,
+                isCurrent,
+                totalValue,              // Rezervace v hodnotě (Kč)
+                realizedValue,           // Zrealizováno (Kč)
+                pendingValue,            // Zbývá zrealizovat (Kč)
+                totalCount,              // Počet rezervací celkem
+                realizedCount,           // Počet zrealizovaných
+                pendingCount,            // Počet zbývajících
+                realizationRate: totalValue > 0 ? Math.round((realizedValue / totalValue) * 100) : 0
+            };
+        });
+
+        const currentMonthRealization = monthlyRealizationData.find(m => m.isCurrent) || monthlyRealizationData[0] || {
+            name: 'Aktuální měsíc',
+            totalValue: 0,
+            realizedValue: 0,
+            pendingValue: 0,
+            totalCount: 0,
+            realizedCount: 0,
+            realizationRate: 0
+        };
+
         return {
             totalRevenue,
             realRevenue,
@@ -557,7 +613,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             cancellationsByPractitioner,
             realizedBookingsCount,
             realizedBookingsValue,
-            evaSavedValue
+            evaSavedValue,
+            monthlyRealizationData,
+            currentMonthRealization
         };
     }, [allBookings]);
 
@@ -1077,6 +1135,143 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         <div className="text-2xl font-bold text-indigo-700">{stats.evaSavedValue.toLocaleString()} Kč</div>
                                         <div className="text-xs text-stone-400 mt-1">Hodnota pronajatých místností pro Evu, které měla zdarma.</div>
                                     </div>
+                                </div>
+                            </div>
+
+                            {/* SECTION 0.7: MĚSÍČNÍ OBJEM REZERVACÍ VS. ZREALIZOVÁNO */}
+                            <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm space-y-6">
+                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                    <div>
+                                        <h3 className="text-lg font-bold text-stone-900 flex items-center gap-2">
+                                            <BarChart3 className="w-5 h-5 text-indigo-600" /> Rezervace vs. Zrealizováno dle měsíců
+                                        </h3>
+                                        <p className="text-xs text-stone-500 mt-0.5">
+                                            Porovnání celkové hodnoty rezervací na daný měsíc a hodnoty lekcí, které v daném měsíci již proběhly (zrealizováno).
+                                        </p>
+                                    </div>
+
+                                    {stats.currentMonthRealization && (
+                                        <div className="flex flex-wrap items-center gap-2 bg-indigo-50 border border-indigo-100 px-3.5 py-2 rounded-xl text-xs">
+                                            <span className="font-bold text-indigo-900 uppercase tracking-wide">
+                                                {stats.currentMonthRealization.name} {new Date().getFullYear()}:
+                                            </span>
+                                            <span className="text-stone-600">
+                                                Rezervace <strong className="text-indigo-950 font-bold">{stats.currentMonthRealization.totalValue.toLocaleString()} Kč</strong>
+                                            </span>
+                                            <span className="text-stone-300">•</span>
+                                            <span className="text-emerald-700">
+                                                Zrealizováno <strong className="font-bold">{stats.currentMonthRealization.realizedValue.toLocaleString()} Kč</strong> ({stats.currentMonthRealization.realizationRate}%)
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Měsíční přehledové kartičky */}
+                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                                    {stats.monthlyRealizationData.map((m) => (
+                                        <div 
+                                            key={m.monthKey} 
+                                            className={`p-3.5 rounded-xl border transition-all ${
+                                                m.isCurrent 
+                                                    ? 'bg-gradient-to-b from-indigo-50/70 to-white border-indigo-300 shadow-sm ring-2 ring-indigo-500/20' 
+                                                    : 'bg-stone-50/60 border-stone-200 hover:bg-white'
+                                            }`}
+                                        >
+                                            <div className="flex items-center justify-between mb-1.5">
+                                                <span className="text-xs font-bold text-stone-800">{m.name}</span>
+                                                {m.isCurrent && (
+                                                    <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-600 text-white px-1.5 py-0.5 rounded">
+                                                        Nyní
+                                                    </span>
+                                                )}
+                                            </div>
+                                            
+                                            <div className="space-y-1">
+                                                <div>
+                                                    <div className="text-[10px] text-stone-400 font-medium">Rezervace celkem</div>
+                                                    <div className="text-sm font-bold text-indigo-950">{m.totalValue.toLocaleString()} Kč</div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-[10px] text-stone-400 font-medium">Zrealizováno</div>
+                                                    <div className="text-sm font-bold text-emerald-600">{m.realizedValue.toLocaleString()} Kč</div>
+                                                </div>
+                                            </div>
+
+                                            {/* Progress bar míry realizace */}
+                                            <div className="mt-2.5 pt-2 border-t border-stone-200/60">
+                                                <div className="flex justify-between text-[10px] text-stone-500 mb-1">
+                                                    <span>Realizováno</span>
+                                                    <span className="font-bold text-stone-700">{m.realizationRate}%</span>
+                                                </div>
+                                                <div className="w-full h-1.5 bg-stone-200 rounded-full overflow-hidden">
+                                                    <div 
+                                                        className="h-full bg-emerald-500 rounded-full transition-all duration-500" 
+                                                        style={{ width: `${Math.min(100, m.realizationRate)}%` }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* Graf: Rezervace vs. Zrealizováno */}
+                                <div className="h-72 w-full pt-2">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart 
+                                            data={stats.monthlyRealizationData} 
+                                            margin={{ top: 10, right: 10, left: 10, bottom: 5 }}
+                                        >
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                            <XAxis 
+                                                dataKey="name" 
+                                                axisLine={false} 
+                                                tickLine={false} 
+                                                tick={{ fontSize: 12, fill: '#64748b', fontWeight: 600 }} 
+                                            />
+                                            <YAxis 
+                                                axisLine={false} 
+                                                tickLine={false} 
+                                                tick={{ fontSize: 12, fill: '#64748b' }}
+                                                tickFormatter={(val) => `${val.toLocaleString()} Kč`}
+                                            />
+                                            <Tooltip
+                                                contentStyle={{ 
+                                                    borderRadius: '12px', 
+                                                    border: '1px solid #e2e8f0', 
+                                                    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
+                                                    padding: '12px 16px',
+                                                    backgroundColor: '#ffffff'
+                                                }}
+                                                formatter={(value: any, name: any, item: any) => {
+                                                    const isTotal = name === 'totalValue';
+                                                    const count = isTotal ? item.payload.totalCount : item.payload.realizedCount;
+                                                    const label = isTotal ? 'Rezervace v hodnotě' : 'Zrealizováno';
+                                                    return [`${Number(value).toLocaleString()} Kč (${count} ${count === 1 ? 'lekce' : count >= 2 && count <= 4 ? 'lekce' : 'lekcí'})`, label];
+                                                }}
+                                                labelFormatter={(label: any) => `Měsíc: ${label}`}
+                                            />
+                                            <Legend 
+                                                verticalAlign="top" 
+                                                align="right" 
+                                                wrapperStyle={{ paddingBottom: '12px' }}
+                                                formatter={(value) => value === 'totalValue' ? 'Rezervace v hodnotě (Kč)' : 'Zrealizováno (Kč)'} 
+                                            />
+                                            <Bar 
+                                                dataKey="totalValue" 
+                                                name="totalValue" 
+                                                fill="#4f46e5" 
+                                                radius={[4, 4, 0, 0]} 
+                                                maxBarSize={44}
+                                            />
+                                            <Bar 
+                                                dataKey="realizedValue" 
+                                                name="realizedValue" 
+                                                fill="#10b981" 
+                                                radius={[4, 4, 0, 0]} 
+                                                maxBarSize={44}
+                                            />
+                                        </BarChart>
+                                    </ResponsiveContainer>
                                 </div>
                             </div>
 
