@@ -19,6 +19,23 @@ const normalizeName = (s?: string) =>
 const IGNORED_NAMES = ['Mirek Saba'].map(normalizeName);
 const isIgnoredName = (name?: string) => IGNORED_NAMES.includes(normalizeName(name));
 
+// Mapování jména lektora pro BI a přehledy (např. "mirek", "host", "externista" -> "Host / Externista")
+const resolvePractitionerDisplayName = (b: { bookedByName?: string; bookedByUserId?: string }, practitionersList?: Practitioner[]): string => {
+  const rawName = (b.bookedByName || '').trim();
+  const normalized = normalizeName(rawName);
+
+  if (normalized === 'mirek' || b.bookedByUserId === 'guest' || normalized === 'host' || normalized === 'externista' || normalized === 'host / externista') {
+    return 'Host / Externista';
+  }
+
+  if (b.bookedByUserId) {
+    const found = practitionersList?.find(p => p.id === b.bookedByUserId);
+    if (found) return found.name;
+  }
+
+  return rawName || 'Neznámý';
+};
+
 interface AdminDashboardProps {
   allBookings: Booking[];
   practitioners: Practitioner[];
@@ -443,7 +460,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         // 6. KDO GENERUJE TRŽBY – jen reálně zaplacené
         const revenueByPractitioner: Record<string, number> = {};
         paidBookings.forEach(b => {
-            const name = b.bookedByName || 'Neznámý';
+            const name = resolvePractitionerDisplayName(b, practitioners);
             revenueByPractitioner[name] = (revenueByPractitioner[name] || 0) + b.price;
         });
         const topPerformersData = Object.entries(revenueByPractitioner)
@@ -529,8 +546,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         // 9. KDO DĚLÁ NEJVÍC STOREN – počet i míra (storna ÷ jeho zaplacené rezervace).
         const perPract: Record<string, { paid: number; storno: number }> = {};
-        paidBookings.forEach(b => { const n = b.bookedByName || 'Neznámý'; (perPract[n] ||= { paid: 0, storno: 0 }).paid++; });
-        stornoBookings.forEach(b => { const n = b.bookedByName || 'Neznámý'; (perPract[n] ||= { paid: 0, storno: 0 }).storno++; });
+        paidBookings.forEach(b => { const n = resolvePractitionerDisplayName(b, practitioners); (perPract[n] ||= { paid: 0, storno: 0 }).paid++; });
+        stornoBookings.forEach(b => { const n = resolvePractitionerDisplayName(b, practitioners); (perPract[n] ||= { paid: 0, storno: 0 }).storno++; });
         const cancellationsByPractitioner = Object.entries(perPract)
             .map(([name, v]) => ({ name, storno: v.storno, total: v.paid + v.storno, rate: (v.paid + v.storno) > 0 ? Math.round((v.storno / (v.paid + v.storno)) * 100) : 0 }))
             .filter(x => x.storno > 0)
@@ -617,7 +634,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             monthlyRealizationData,
             currentMonthRealization
         };
-    }, [allBookings]);
+    }, [allBookings, practitioners]);
 
     // Feed poslední aktivity: nové rezervace (dle createdAt) a zrušení (dle cancelledAt)
     // Poslední aktivita seskupená podle lektora – jeden řádek na rezervaci (ne na akci),
@@ -633,8 +650,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         allBookings.forEach(b => {
             if (isIgnoredName(b.bookedByName)) return; // skryjeme testovací jména
             if (!b.createdAt && !b.cancelledAt) return;
-            const key = b.bookedByUserId || b.bookedByName || 'unknown';
-            if (!groups[key]) groups[key] = { name: b.bookedByName || 'Neznámý lektor', bookings: [], lastAt: 0 };
+            const displayName = resolvePractitionerDisplayName(b, practitioners);
+            const key = b.bookedByUserId === 'guest' || normalizeName(b.bookedByName) === 'mirek' ? 'guest' : (b.bookedByUserId || displayName || 'unknown');
+            if (!groups[key]) groups[key] = { name: displayName, bookings: [], lastAt: 0 };
             groups[key].bookings.push(b);
             const t = lastActivityAt(b);
             if (t > groups[key].lastAt) groups[key].lastAt = t;
@@ -651,7 +669,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 paid: g.bookings.filter(x => x.status === 'paid').length,
             },
         })).sort((a, b) => b.lastAt - a.lastAt);
-    }, [allBookings]);
+    }, [allBookings, practitioners]);
 
     const statusBadge = (status?: string): [string, string] => {
         const map: Record<string, [string, string]> = {
@@ -804,9 +822,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     // --- SCHEDULE FILTERING ---
     const filteredBookings = allBookings.filter(b => {
         if (isIgnoredName(b.bookedByName)) return false; // skryjeme testovací jména
-        const pName = b.bookedByName || '';
+        const pName = resolvePractitionerDisplayName(b, practitioners);
         const sName = b.serviceName || '';
         const matchesSearch = pName.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                              (b.bookedByName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
                               sName.toLowerCase().includes(searchQuery.toLowerCase());
         
         if (!matchesSearch) return false;
@@ -1599,7 +1618,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                 <div className="text-stone-500">{booking.time} ({booking.durationMinutes} min)</div>
                                             </td>
                                             <td className="px-6 py-4">
-                                                <div className="font-bold text-stone-900">{booking.bookedByName}</div>
+                                                <div className="font-bold text-stone-900">{resolvePractitionerDisplayName(booking, practitioners)}</div>
                                                 <div className="text-xs text-indigo-600 font-medium">{booking.serviceName}</div>
                                             </td>
                                             <td className="px-6 py-4">

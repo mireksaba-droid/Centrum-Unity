@@ -75,6 +75,7 @@ Dashboard s metrikami (příjmy, vytíženost), master kalendář se jmény lekt
 
 ### E. Business Intelligence & Analytika (BI)
 Administrátorský dashboard obsahuje dedikovanou záložku „Analytika“, která slouží jako hlavní business-intelligence modul centra.
+- **Sjednocení jmen lektorů a hostů:** Všechny rezervace vytvořené pod profilem `guest` nebo se jménem `mirek` / `host` / `externista` jsou v BI grafech (Tržby dle lektorů, Storna lektorů, Poslední aktivita, Seznam rezervací) automaticky sjednoceny a prezentovány pod jednotným označením **„Host / Externista“**.
 - **Zrealizované & Proběhlé Rezervace:** Speciální podsekce počítá a vizualizuje počet a celkovou finanční hodnotu všech úspěšně proběhlých rezervací (stavy `paid` nebo `completed` s datem v minulosti).
 - **Zohlednění administrátora (Eva):** Jelikož má Eva (ID `admin`) pronájem místností zcela zdarma (0 Kč), systém v BI statistikách počítá její rezervace s nulovým obratem, což zajišťuje naprosto přesný přehled o reálných příjmech od externích lektorů.
 - **Vizualizace ušetřené částky pro Evu:** Pro zachování přehledu o tom, jakou hodnotu v pronájmech Eva pro své vlastní klienty využila, BI modul počítá a zobrazuje metriku „Ušetřeno za vlastní rezervace Evy“ (vypočítáno ze standardních hodinových sazeb za M1 a M2). Užitečný ukazatel pro interní účely a přehled o vytížení prostor.
