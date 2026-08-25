@@ -295,6 +295,22 @@ export const useStore = create<AppState>()(
         const b = state.bookings.find(b => b.id === bookingId);
         if (!b) return;
 
+        // Validace kolizí: přednost má vždy existující rezervace
+        const { checkBookingCollision } = await import('../utils/scheduler');
+        const collision = checkBookingCollision({
+          newDate,
+          newTime,
+          durationMinutes: b.durationMinutes,
+          room: b.room,
+          userId: b.bookedByUserId,
+          allBookings: state.bookings,
+          excludeBookingId: bookingId
+        });
+
+        if (collision.hasCollision) {
+          throw new Error(collision.reason || "Dochází ke kolizi s jinou rezervací. První vytvořená rezervace má přednost.");
+        }
+
         const newNote = reason ? (b.note ? `${b.note}\nADMIN RESCHEDULE: ${reason}` : `ADMIN RESCHEDULE: ${reason}`) : b.note;
         
         await updateBookingInFirestore(bookingId, { date: newDate, time: newTime, note: newNote });

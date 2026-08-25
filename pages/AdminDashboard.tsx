@@ -2310,10 +2310,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             {reschedulingBooking && (
                 <RescheduleModal 
                     booking={reschedulingBooking} 
+                    allBookings={allBookings}
                     onClose={() => setReschedulingBooking(null)} 
-                    onConfirm={(date, time, reason) => {
-                        onAdminReschedule(reschedulingBooking.id, date, time, reason);
-                        setReschedulingBooking(null);
+                    onConfirm={async (date, time, reason) => {
+                        try {
+                            await onAdminReschedule(reschedulingBooking.id, date, time, reason);
+                            setReschedulingBooking(null);
+                            addToast('success', 'Rezervace přesunuta', `Rezervace byla úspěšně přesunuta na ${date} v ${time}.`);
+                        } catch (err: any) {
+                            addToast('error', 'Chyba přesunu', err.message || 'Nepodařilo se přesunout rezervaci.');
+                        }
                     }} 
                 />
             )}

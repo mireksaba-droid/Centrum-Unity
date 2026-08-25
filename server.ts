@@ -11,8 +11,9 @@ import firebaseConfig from "./firebase-applet-config.json";
 
 
 
+import { Booking } from "./types";
 import { PRACTITIONERS } from "./constants";
-import { calculateRentalPrice } from "./utils/scheduler";
+import { calculateRentalPrice, checkBookingCollision } from "./utils/scheduler";
 import { generatePaymentRequestEmail, generateConfirmationEmail, generateCancellationEmail, generateAdminDailySummaryEmail, generatePaymentReminderEmail, generateEventRegistrationConfirmationEmail, generateEventRegistrationCancellationEmail, generateAdminEventRegistrationNotificationEmail, generateAdminEventCancellationNotificationEmail } from "./utils/emailTemplates";
 
 async function safeJson(res: any) {
@@ -499,10 +500,39 @@ async function startServer() {
   app.post("/api/bookings", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       const booking = req.body;
-      if (!booking.id) return res.status(400).json({ error: "Missing ID" });
+      if (!booking.id || !booking.date || !booking.time || !booking.room) {
+        return res.status(400).json({ error: "Chybí povinné údaje rezervace (ID, datum, čas, místnost)." });
+      }
       
-      
-      const bookingRef = doc(db, "bookings", booking.id);
+      const bookingRef = doc(db, "bookings", String(booking.id));
+
+      // 1. Zkontrolujeme kolize s existujícími rezervacemi na daný den (překryv délky a povinné pauzy).
+      // Pravidlo přednosti: dříve vytvořená rezervace má vždy přednost.
+      const q = query(collection(db, "bookings"), where("date", "==", booking.date));
+      const snapshot = await getDocs(q);
+      const existingBookings = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Booking[];
+
+      const durationMinutes = Number(booking.durationMinutes) || 60;
+      const room = Number(booking.room) as 1 | 2;
+      const userId = booking.bookedByUserId || (req.user ? req.user.id : 'guest');
+
+      const collision = checkBookingCollision({
+        newDate: booking.date,
+        newTime: booking.time,
+        durationMinutes,
+        room,
+        userId,
+        allBookings: existingBookings,
+        excludeBookingId: booking.id
+      });
+
+      if (collision.hasCollision) {
+        const conflictName = collision.conflictingBooking?.bookedByName || 'jiným lektorem';
+        const conflictTime = collision.conflictingBooking ? `${collision.conflictingBooking.time} (${collision.conflictingBooking.durationMinutes} min)` : '';
+        return res.status(409).json({ 
+          error: `Termín nelze zarezervovat: dochází ke kolizi s dříve vytvořenou rezervací (${conflictName}${conflictTime ? ` v ${conflictTime}` : ''}). První vytvořená rezervace má přednostní právo.` 
+        });
+      }
       
       await runTransaction(db, async (transaction: any) => {
           const bookingDoc = await transaction.get(bookingRef);
@@ -510,10 +540,13 @@ async function startServer() {
               const existing = bookingDoc.data() || {};
               // Zrušené / refundované termíny lze znovu obsadit; blokujeme jen aktivní rezervace.
               if (!['cancelled', 'refunded'].includes(existing.status)) {
-                  throw new Error("Tento termín je již rezervován. Prosím, obnovte stránku a vyberte jiný čas.");
+                  throw new Error("Tento termín je již rezervován. První vytvořená rezervace má přednost.");
               }
           }
-          transaction.set(bookingRef, booking);
+          transaction.set(bookingRef, {
+            ...booking,
+            updatedAt: new Date().toISOString()
+          });
       });
       
       res.json({ success: true });
@@ -528,8 +561,46 @@ async function startServer() {
     try {
       const { id } = req.params;
       const data = req.body;
+
+      // Pokud se mění časové parametry (např. přesun termínu), ověříme kolize
+      if (data.date || data.time || data.room || data.durationMinutes) {
+        const bookingDoc = await getDoc(doc(db, "bookings", String(id)));
+        if (bookingDoc.exists()) {
+          const current = bookingDoc.data() as Booking;
+          const targetDate = data.date || current.date;
+          const targetTime = data.time || current.time;
+          const targetRoom = Number(data.room || current.room) as 1 | 2;
+          const targetDuration = Number(data.durationMinutes || current.durationMinutes) || 60;
+          const targetUserId = data.bookedByUserId || current.bookedByUserId || (req.user ? req.user.id : 'guest');
+
+          const q = query(collection(db, "bookings"), where("date", "==", targetDate));
+          const snapshot = await getDocs(q);
+          const existingBookings = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Booking[];
+
+          const collision = checkBookingCollision({
+            newDate: targetDate,
+            newTime: targetTime,
+            durationMinutes: targetDuration,
+            room: targetRoom,
+            userId: targetUserId,
+            allBookings: existingBookings,
+            excludeBookingId: String(id)
+          });
+
+          if (collision.hasCollision) {
+            const conflictName = collision.conflictingBooking?.bookedByName || 'jiným lektorem';
+            const conflictTime = collision.conflictingBooking ? `${collision.conflictingBooking.time} (${collision.conflictingBooking.durationMinutes} min)` : '';
+            return res.status(409).json({
+              error: `Termín nelze přesunout: dochází ke kolizi s existující rezervací (${conflictName}${conflictTime ? ` v ${conflictTime}` : ''}). První vytvořená rezervace má přednost.`
+            });
+          }
+        }
+      }
       
-      await updateDoc(doc(db, "bookings", String(id)), data);
+      await updateDoc(doc(db, "bookings", String(id)), {
+        ...data,
+        updatedAt: new Date().toISOString()
+      });
       res.json({ success: true });
     } catch (error: any) {
       console.error("Error updating booking:", error);

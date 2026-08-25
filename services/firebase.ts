@@ -91,12 +91,16 @@ export const saveBookingToFirestore = async (booking: Booking) => {
                 const resData = await response.json();
                 if (resData.success) return true;
                 if (resData.error) throw new Error(resData.error);
+            } else {
+                const errData = await response.json().catch(() => null);
+                throw new Error(errData?.error || `Chyba při ukládání rezervace (${response.status})`);
             }
         }
     } catch (error: any) {
-        console.warn("Server-side saveBooking failed, falling back to direct Firestore:", error);
-        if (error.message && error.message.includes("již rezervován")) {
-            throw error; // Re-throw slot taken message
+        console.warn("Server-side saveBooking error:", error);
+        // Pokud jde o kolizi nebo obsazený slot, okamžitě vyhodíme chybu – první rezervace má přednost!
+        if (error.message && (error.message.includes("koliz") || error.message.includes("rezervován") || error.message.includes("přednost") || error.message.includes("obsazen"))) {
+            throw error;
         }
     }
 
@@ -105,15 +109,37 @@ export const saveBookingToFirestore = async (booking: Booking) => {
         return true;
     }
     try {
+        const { checkBookingCollision } = await import('../utils/scheduler');
+        // Validace kolizí přímo proti Firestore
+        const q = query(collection(db, 'bookings'), where('date', '==', booking.date));
+        const snapshot = await getDocs(q);
+        const existingBookings = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Booking[];
+
+        const collision = checkBookingCollision({
+            newDate: booking.date,
+            newTime: booking.time,
+            durationMinutes: Number(booking.durationMinutes) || 60,
+            room: Number(booking.room) as 1 | 2,
+            userId: booking.bookedByUserId,
+            allBookings: existingBookings,
+            excludeBookingId: booking.id
+        });
+
+        if (collision.hasCollision) {
+            const conflictName = collision.conflictingBooking?.bookedByName || 'jiným lektorem';
+            const conflictTime = collision.conflictingBooking ? `${collision.conflictingBooking.time} (${collision.conflictingBooking.durationMinutes} min)` : '';
+            throw new Error(`Termín nelze zarezervovat: dochází ke kolizi s dříve vytvořenou rezervací (${conflictName}${conflictTime ? ` v ${conflictTime}` : ''}). První vytvořená rezervace má přednostní právo.`);
+        }
+
         const bookingRef = doc(db, 'bookings', booking.id);
         await runTransaction(db, async (transaction) => {
             const bookingDoc = await transaction.get(bookingRef);
             if (bookingDoc.exists()) {
                 const existing = bookingDoc.data() as any;
-                // Zrušené / refundované rezervace nblokují termín - povolíme je přepsat.
+                // Zrušené / refundované rezervace neblokují termín - povolíme je přepsat.
                 // Blokujeme jen aktivní rezervace.
                 if (!['cancelled', 'refunded'].includes(existing?.status)) {
-                    throw new Error("Tento termín je již rezervován. Prosím, obnovte stránku a vyberte jiný čas.");
+                    throw new Error("Tento termín je již rezervován dřívější rezervací. První vytvořená rezervace má přednost.");
                 }
             }
             transaction.set(bookingRef, booking as any);

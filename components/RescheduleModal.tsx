@@ -1,22 +1,37 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Booking } from '../types';
 import { GENERATED_TIMES } from '../constants';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
+import { checkBookingCollision } from '../utils/scheduler';
 import Button from './Button';
-import { AlertTriangle, Clock, Calendar as CalendarIcon, X, Check, Lock } from 'lucide-react';
+import { AlertTriangle, Clock, Calendar as CalendarIcon, X, Check, Lock, ShieldAlert } from 'lucide-react';
 
 interface RescheduleModalProps {
   booking: Booking;
+  allBookings?: Booking[];
   onClose: () => void;
   onConfirm: (newDate: string, newTime: string, reason?: string) => void;
 }
 
-const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, onClose, onConfirm }) => {
+const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, allBookings = [], onClose, onConfirm }) => {
   const [newDate, setNewDate] = useState(booking.date);
   const [newTime, setNewTime] = useState(booking.time);
   const [reason, setReason] = useState('');
   const [isOverrideConfirmed, setIsOverrideConfirmed] = useState(false);
   const [isLateReschedule, setIsLateReschedule] = useState(false);
+
+  // Check collision for target date and time
+  const collision = useMemo(() => {
+    return checkBookingCollision({
+      newDate,
+      newTime,
+      durationMinutes: booking.durationMinutes || 60,
+      room: booking.room,
+      userId: booking.bookedByUserId,
+      allBookings,
+      excludeBookingId: booking.id
+    });
+  }, [newDate, newTime, booking, allBookings]);
 
   // Calculate 25h Rule Status
   useEffect(() => {
@@ -36,6 +51,10 @@ const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, onClose, onC
   }, [booking]);
 
   const handleSubmit = () => {
+      if (collision.hasCollision) {
+          alert(`Tento termín nelze vybrat: dochází ke kolizi s dříve vytvořenou rezervací. První vytvořená rezervace má přednostní právo.`);
+          return;
+      }
       if (isLateReschedule && !reason.trim()) {
           alert("Při pozdní změně (méně než 25h) je nutné vyplnit důvod pro Audit log.");
           return;
@@ -66,7 +85,7 @@ const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, onClose, onC
                     <span className="block text-stone-500 text-xs uppercase font-bold mb-1">Původní termín</span>
                     <div className="font-bold text-stone-900 flex items-center gap-2">
                         <CalendarIcon className="w-4 h-4 text-stone-400" />
-                        {formatLocalDate(booking.date)} v {booking.time}
+                        {formatLocalDate(booking.date)} v {booking.time} (Místnost M{booking.room}, {booking.durationMinutes} min)
                     </div>
                 </div>
 
@@ -89,7 +108,7 @@ const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, onClose, onC
                         <select 
                             value={newTime} 
                             onChange={(e) => setNewTime(e.target.value)}
-                            className="w-full p-2 border border-stone-300 rounded-lg text-sm bg-white"
+                            className={`w-full p-2 border rounded-lg text-sm bg-white ${collision.hasCollision ? 'border-red-500 bg-red-50 text-red-900 font-bold' : 'border-stone-300'}`}
                         >
                             {GENERATED_TIMES.map(t => (
                                 <option key={t} value={t}>{t}</option>
@@ -98,15 +117,35 @@ const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, onClose, onC
                     </div>
                 </div>
 
+                {/* Collision Warning */}
+                {collision.hasCollision && (
+                    <div className="animate-in slide-in-from-top-2 fade-in">
+                        <div className="bg-red-50 border border-red-300 rounded-lg p-4">
+                            <div className="flex items-start gap-3">
+                                <ShieldAlert className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                                <div>
+                                    <h4 className="text-sm font-bold text-red-900">Kolize termínu – nelze přesunout</h4>
+                                    <p className="text-xs text-red-800 mt-1 leading-relaxed">
+                                        {collision.reason || "V tomto čase již existuje dříve vytvořená rezervace nebo povinná pauza na úklid."}
+                                    </p>
+                                    <p className="text-[11px] text-red-700 font-semibold mt-1">
+                                        Dříve vytvořená rezervace má přednostní právo. Zvolte prosím jiný čas nebo den.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* 25h Warning / Soft Block Logic */}
                 {isLateReschedule && (
                     <div className="animate-in slide-in-from-top-2 fade-in">
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
                             <div className="flex items-start gap-3">
-                                <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                                <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
                                 <div>
-                                    <h4 className="text-sm font-bold text-red-800">Méně než 25 hodin do začátku</h4>
-                                    <p className="text-xs text-red-700 mt-1 leading-relaxed">
+                                    <h4 className="text-sm font-bold text-amber-800">Méně než 25 hodin do začátku</h4>
+                                    <p className="text-xs text-amber-700 mt-1 leading-relaxed">
                                         Standardně nelze rezervaci takto blízko termínu měnit. 
                                         Jako administrátor můžete toto pravidlo obejít, ale akce bude zaznamenána v Audit logu.
                                     </p>
@@ -145,10 +184,10 @@ const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, onClose, onC
                 <Button variant="ghost" onClick={onClose} size="sm">Zrušit</Button>
                 <Button 
                     onClick={handleSubmit} 
-                    disabled={isLateReschedule && (!isOverrideConfirmed || !reason.trim())}
-                    className={isLateReschedule ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-sage-600 text-white'}
+                    disabled={collision.hasCollision || (isLateReschedule && (!isOverrideConfirmed || !reason.trim()))}
+                    className={collision.hasCollision ? 'bg-stone-300 text-stone-500 cursor-not-allowed' : isLateReschedule ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-sage-600 text-white'}
                 >
-                    {isLateReschedule ? 'Vynutit změnu' : 'Potvrdit přesun'}
+                    {collision.hasCollision ? 'Nelze (Kolize)' : isLateReschedule ? 'Vynutit změnu' : 'Potvrdit přesun'}
                 </Button>
             </div>
         </div>
