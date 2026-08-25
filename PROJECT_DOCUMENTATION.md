@@ -54,16 +54,19 @@
 ### A. Autentizace
 Uživatel vybere profil a zadá PIN. Po ověření (dnes na klientovi) zavolá `/api/login`, který vydá JWT. Podle role se přesměruje: `ADMIN` → `/admin`, ostatní → `/schedule`.
 
-### B. Rezervace a storno
+### B. Rezervace, kolize a storno
 1. Lektor/admin vybere volný slot v kalendáři (`StudioSchedule`).
 2. Vyplní údaje (klient, vybavení, doba trvání).
-3. Kontrola kolizí (`utils/scheduler.ts` → `checkBookingCollision`) včetně bufferů na úklid.
+3. **Kontrola kolizí & Pravidlo přednosti prvního (`utils/scheduler.ts` → `checkBookingCollision` + backend transakce `server.ts`):**
+   - **Přednostní právo:** Kdo první vytvoří rezervaci (nebo zahájí platbu), má absolutní přednostní právo. Jakýkoliv následující pokus o překryv je odmítnut s chybou HTTP 409 (Conflict).
+   - **Serverová validace celého časového intervalu:** Server i klient netestují pouze počáteční čas, ale celý časový úsek (od začátku do konce trvání) a vynucují povinné hygienické pauzy (30 min pro stejného lektora, 60 min při střídání různých lektorů).
+   - **Ochrana při přesunu (Reschedule):** Při změně termínu administrátorem (`RescheduleModal.tsx`) se živě vyhodnocují kolize s existujícími rezervacemi. Kolidující termín nelze potvrdit.
    - **Měkké varování (Paralelní rezervace):** Lektor může ve výjimečných situacích zarezervovat obě místnosti (M1 i M2) na stejný čas. V takovém případě kontrola kolizí nevyhodnotí stav jako nekompatibilní kolizi (`hasCollision = false`), nýbrž vrátí textové varování (`warning`).
    - **State-driven potvrzení v UI:** Místo systémového dialogu prohlížeče (`window.confirm`), který bývá v sandboxovaných iframech blokován, se přímo v modálním okně rezervace (v `StudioSchedule` i v `AdminDashboard` pro skupinové akce) zobrazí designový varovný box s checkboxem *„Beru na vědomí a chci přesto pokračovat“*. Dokud není políčko zaškrtnuto, je potvrzovací tlačítko deaktivováno.
 4. Cena se počítá funkcí `calculateRentalPrice` (admin má **0 Kč zdarma**).
-5. Uložení: lokální store + Firestore (`saveBookingToFirestore`, transakce proti dvojité rezervaci).
+5. Uložení: lokální store + Firestore (`saveBookingToFirestore`, transakce a kolizní zámek proti dvojité rezervaci).
 6. Platba podle scénáře (viz sekce 6).
-7. Storno/přesun přes `cancelBooking` a `adminRescheduleBooking` (zápis do Firestore).
+7. Storno/přesun přes `cancelBooking` a `adminRescheduleBooking` (zápis do Firestore s kontrolou kolizí).
 
 ### C. Skupinové události (veřejné)
 Admin vytvoří `GroupEvent` pro Velkou místnost s kapacitou a cenou. Vygeneruje se veřejná URL `/event/:eventId`. Klient se registruje; Firestore **transakce** hlídá, že se nepřekročí kapacita.
@@ -145,6 +148,11 @@ Notifikace o skupinových akcích jsou odesílány na e-mail administrátorky (u
 ### Firebase / Firestore
 Konfigurace je v `firebase-applet-config.json`. Klient i server používají webové Firebase SDK (`firebase/firestore`).
 **Známé omezení:** server nepoužívá `firebase-admin` (byť je v závislostech) a přistupuje k DB jako klient — proto jsou dnes Firestore pravidla otevřená. Viz sekce 9.
+
+### Kalendářové iCal / ICS feedy (Google Kalendář synchronizace)
+- Systém poskytuje personalizované ICS feedy pro lektory (`/api/calendar/:id/:token`) i celkový master kalendář pro studio (`/api/master-calendar/:token`).
+- **Synchronizace a zpoždění Google Kalendáře:** Náš server generuje data z Firestore okamžitě a bez mezipaměti (`no-cache`). Nicméně externí platformy jako **Google Kalendář provádí automatickou aktualizaci odebíraných kalendářů ve vlastních cyklech (obvykle jednou za 4 až 24 hodin)**. Toto zpoždění je dáno architekturou Google Kalendáře a nelze jej zvenčí zrychlit.
+- **Doporučení pro lektory:** Pro okamžité ověření volné kapacity a objednávání je vždy závazná webová aplikace Centrum Unity napojená na živou databázi.
 
 ### GoPay (platby)
 - Vytváření plateb: `/api/create-payment` (auth) a `/api/public-payment` (veřejné, rate-limit).

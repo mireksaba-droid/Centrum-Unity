@@ -42,5 +42,9 @@
    - **E-mailová výzva k platbě** (`paymentRequestedAt` nastaveno): okno **24 hodin**. Po vypršení se rezervace zruší a klientovi (má-li `clientEmail`) se odešle **storno e-mail** (`generateCancellationEmail`).
    - Okno se u výzvy počítá od `paymentRequestedAt`, ne od `createdAt` — jinak by se odložené rezervace zrušily hned po odeslání výzvy.
 
+9. **Ochrana proti kolizím a přednostní právo prvního:**
+   - **Pravidlo přednosti:** Kdo první vytvoří rezervaci (či zahájí platbu), má absolutní přednostní právo. Server (`server.ts`) i klient (`services/firebase.ts`) validují celý časový interval včetně pauz na úklid (30 min stejný lektor / 60 min střídání). Každý pokus o kolizní rezervaci či přesun je odmítnut.
+   - **Google Kalendář synchronizace (zpoždění 4–24 h):** Externí Google Kalendář aktualizuje odebíraný iCal feed ve vlastních cyklech a má zpoždění. Pro ověření dostupnosti termínů je vždy závazná webová aplikace napojená na živou databázi.
+
 ## Stavy rezervace (`BookingStatus` v `types.ts`)
 `created` · `awaiting_payment` · `deferred_payment` · `paid` · `cancelled` · `completed` · `refunded`
