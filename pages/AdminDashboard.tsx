@@ -6,7 +6,7 @@ import Button from '../components/Button';
 import StudioSchedule from './StudioSchedule';
 import RescheduleModal from '../components/RescheduleModal';
 import { useToast } from '../contexts/ToastContext';
-import { checkBookingCollision, timeToMinutes } from '../utils/scheduler';
+import { checkBookingCollision, timeToMinutes, calculateRentalPrice } from '../utils/scheduler';
 import { BUFFER_SAME_USER, BUFFER_DIFF_USER } from '../constants';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 import { useStore } from '../store/useStore';
@@ -585,15 +585,32 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             }
         });
 
+        // Pomocná funkce pro identifikaci rezervací Evy (admin)
+        const isEvaBooking = (b: Booking) => {
+            const uid = (b.bookedByUserId || '').toLowerCase();
+            const name = (b.bookedByName || '').trim().toLowerCase();
+            return uid === 'admin' || uid === 'eva' || name === 'eva' || name.startsWith('eva ') || name === 'eva guryčová';
+        };
+
         const realizedBookingsCount = pastPaidBookings.length;
         const realizedBookingsValue = pastPaidBookings.reduce((sum, b) => {
-            const isEva = b.bookedByName?.trim().toLowerCase() === 'eva';
-            return sum + (isEva ? 0 : b.price);
+            const isEva = isEvaBooking(b);
+            return sum + (isEva ? 0 : (b.price || 0));
         }, 0);
 
-        const evaSavedValue = pastPaidBookings.reduce((sum, b) => {
-            const isEva = b.bookedByName?.trim().toLowerCase() === 'eva';
-            return sum + (isEva ? b.price : 0);
+        // Hodnota pronajatých místností pro Evu vypočtená dle standardního ceníku
+        const evaPastBookings = pastPaidBookings.filter(isEvaBooking);
+        const evaSavedCount = evaPastBookings.length;
+        const evaSavedValue = evaPastBookings.reduce((sum, b) => {
+            const standardPrice = calculateRentalPrice('guest', b.durationMinutes || 60, (b.room || 1) as 1 | 2);
+            return sum + standardPrice;
+        }, 0);
+
+        // Celková hodnota všech potvrzených rezervací Evy (včetně budoucích)
+        const evaAllConfirmedBookings = confirmedBookings.filter(isEvaBooking);
+        const evaAllSavedValue = evaAllConfirmedBookings.reduce((sum, b) => {
+            const standardPrice = calculateRentalPrice('guest', b.durationMinutes || 60, (b.room || 1) as 1 | 2);
+            return sum + standardPrice;
         }, 0);
 
         // 9. KDO DĚLÁ NEJVÍC STOREN – počet i míra (storna ÷ jeho zaplacené rezervace).
@@ -683,6 +700,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             realizedBookingsCount,
             realizedBookingsValue,
             evaSavedValue,
+            evaSavedCount,
+            evaAllSavedValue,
+            evaAllConfirmedCount: evaAllConfirmedBookings.length,
             monthlyRealizationData,
             currentMonthRealization
         };
@@ -1204,7 +1224,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                             <Trophy className="w-4 h-4 text-amber-500" /> Úspora lektorky (Eva zdarma)
                                         </div>
                                         <div className="text-2xl font-bold text-indigo-700">{stats.evaSavedValue.toLocaleString()} Kč</div>
-                                        <div className="text-xs text-stone-400 mt-1">Hodnota pronajatých místností pro Evu, které měla zdarma.</div>
+                                        <div className="text-xs text-stone-500 mt-1">
+                                            Hodnota pronájmů pro Evu ({stats.evaSavedCount} proběhlých lekcí). Celkem vč. budoucích: <strong className="text-indigo-900 font-semibold">{stats.evaAllSavedValue.toLocaleString()} Kč</strong>.
+                                        </div>
                                     </div>
                                 </div>
                             </div>
