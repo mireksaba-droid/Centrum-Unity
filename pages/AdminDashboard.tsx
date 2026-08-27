@@ -7,6 +7,7 @@ import StudioSchedule from './StudioSchedule';
 import RescheduleModal from '../components/RescheduleModal';
 import { useToast } from '../contexts/ToastContext';
 import { checkBookingCollision, timeToMinutes } from '../utils/scheduler';
+import { BUFFER_SAME_USER, BUFFER_DIFF_USER } from '../constants';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 import { useStore } from '../store/useStore';
 import { isDemoMode } from '../services/firebase';
@@ -499,28 +500,79 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         ];
 
         // 8. NAPLNĚNOST MÍSTNOSTÍ (% využití) po měsících (od června po budoucí měsíce).
-        // Jmenovatel = provozní doba (08:00–24:00 = 16 h) × počet dní v měsíci. Čitatel = odrezervované hodiny (aktivní rezervace).
+        // Jmenovatel = provozní doba (08:00–24:00 = 16 h) × počet dní v měsíci.
+        // Celková obsazenost započítává čisté hodiny rezervací + povinné sanitární pauzy na úklid/střídání.
         const OPERATING_HOURS_PER_DAY = 16;
         const daysInMonth = (yy: number, mm: number) => new Date(yy, mm + 1, 0).getDate();
-        const roomHoursInMonth = (room: 1 | 2, mm: number, yy: number) =>
-            confirmedBookings.reduce((sum, b) => {
-                if (b.room !== room) return sum;
-                return inMonth(parseLocalDate(b.date), mm, yy) ? sum + (b.durationMinutes || 0) / 60 : sum;
-            }, 0);
+
+        const calculateRoomHoursInMonth = (room: 1 | 2, mm: number, yy: number) => {
+            const roomBookings = confirmedBookings.filter(b => {
+                if (b.room !== room) return false;
+                return inMonth(parseLocalDate(b.date), mm, yy);
+            });
+
+            let pureMinutes = 0;
+            let cleaningMinutes = 0;
+
+            const byDate: Record<string, Booking[]> = {};
+            roomBookings.forEach(b => {
+                (byDate[b.date] ||= []).push(b);
+            });
+
+            Object.values(byDate).forEach(dayBookings => {
+                dayBookings.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+                dayBookings.forEach((b, idx) => {
+                    pureMinutes += (b.durationMinutes || 60);
+
+                    const nextBooking = dayBookings[idx + 1];
+                    if (nextBooking) {
+                        const isSameUser = (nextBooking.bookedByUserId && b.bookedByUserId && nextBooking.bookedByUserId === b.bookedByUserId);
+                        cleaningMinutes += isSameUser ? BUFFER_SAME_USER : BUFFER_DIFF_USER;
+                    } else {
+                        cleaningMinutes += BUFFER_DIFF_USER;
+                    }
+                });
+            });
+
+            return {
+                pureHours: pureMinutes / 60,
+                cleaningHours: cleaningMinutes / 60,
+                totalHours: (pureMinutes + cleaningMinutes) / 60,
+            };
+        };
+
         const occupancyTrend = trendMonths.map((monthDate) => {
             const mm = monthDate.getMonth();
             const yy = monthDate.getFullYear();
             const avail = OPERATING_HOURS_PER_DAY * daysInMonth(yy, mm);
             const nm = monthDate.toLocaleDateString('cs-CZ', { month: 'short' });
             const isCurrent = monthDate.getMonth() === today.getMonth() && monthDate.getFullYear() === today.getFullYear();
+
+            const m1Data = calculateRoomHoursInMonth(1, mm, yy);
+            const m2Data = calculateRoomHoursInMonth(2, mm, yy);
+
+            const m1Total = avail > 0 ? Math.round((m1Data.totalHours / avail) * 100) : 0;
+            const m1Pure = avail > 0 ? Math.round((m1Data.pureHours / avail) * 100) : 0;
+            const m1Clean = Math.max(0, m1Total - m1Pure);
+
+            const m2Total = avail > 0 ? Math.round((m2Data.totalHours / avail) * 100) : 0;
+            const m2Pure = avail > 0 ? Math.round((m2Data.pureHours / avail) * 100) : 0;
+            const m2Clean = Math.max(0, m2Total - m2Pure);
+
             return {
                 name: nm.charAt(0).toUpperCase() + nm.slice(1),
-                M1: avail > 0 ? Math.round((roomHoursInMonth(1, mm, yy) / avail) * 100) : 0,
-                M2: avail > 0 ? Math.round((roomHoursInMonth(2, mm, yy) / avail) * 100) : 0,
+                M1: m1Total,
+                M2: m2Total,
+                M1_pure: m1Pure,
+                M1_clean: m1Clean,
+                M2_pure: m2Pure,
+                M2_clean: m2Clean,
                 isCurrent,
             };
         });
-        const currentOccupancy = occupancyTrend.find(o => o.isCurrent) || occupancyTrend[occupancyTrend.length - 1] || { M1: 0, M2: 0, name: '' };
+        const currentOccupancy = occupancyTrend.find(o => o.isCurrent) || occupancyTrend[occupancyTrend.length - 1] || { 
+            M1: 0, M2: 0, M1_pure: 0, M1_clean: 0, M2_pure: 0, M2_clean: 0, name: '' 
+        };
 
         // --- ZREALIZOVANÉ / PROBĚHLÉ REZERVACE ---
         const now = new Date();
@@ -1383,30 +1435,82 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 {/* Naplněnost místností */}
                                 <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm">
-                                    <h3 className="text-lg font-bold text-stone-900 mb-1 flex items-center gap-2">
-                                        <BoxSelect className="w-5 h-5 text-indigo-600" /> Naplněnost místností
-                                    </h3>
-                                    <p className="text-xs text-stone-500 mb-2">% využití z provozní doby (08–24, 16 h/den × dny v měsíci).</p>
-                                    <div className="flex gap-4 mb-4">
-                                        <div className="flex-1 bg-amber-50 border border-amber-100 rounded-lg p-3 text-center">
-                                            <div className="text-2xl font-bold text-stone-900">{stats.currentOccupancy.M1}%</div>
-                                            <div className="text-xs text-stone-500">M1 (Malá) — {stats.currentOccupancy.name}</div>
+                                    <div className="flex items-start justify-between mb-1">
+                                        <h3 className="text-lg font-bold text-stone-900 flex items-center gap-2">
+                                            <BoxSelect className="w-5 h-5 text-indigo-600" /> Naplněnost místností
+                                        </h3>
+                                        <span className="text-[11px] font-semibold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-100">
+                                            Včetně sanitárních pauz
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-stone-500 mb-3">% celkového blokovaného času z provozní doby (08–24 h = 16 h/den × dny v měsíci).</p>
+                                    
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
+                                        <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-xs font-bold text-amber-900 uppercase tracking-wide">M1 (Malá)</span>
+                                                <span className="text-[11px] text-stone-500">{stats.currentOccupancy.name}</span>
+                                            </div>
+                                            <div className="text-2xl font-black text-stone-900 mt-1">{stats.currentOccupancy.M1}%</div>
+                                            <div className="mt-2 pt-2 border-t border-amber-200/60 flex flex-col gap-0.5 text-xs">
+                                                <div className="flex justify-between text-stone-600">
+                                                    <span>Čisté rezervace:</span>
+                                                    <span className="font-bold text-stone-800">{stats.currentOccupancy.M1_pure}%</span>
+                                                </div>
+                                                <div className="flex justify-between text-amber-900">
+                                                    <span>Sanitární pauzy:</span>
+                                                    <span className="font-bold">{stats.currentOccupancy.M1_clean}%</span>
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div className="flex-1 bg-stone-100 border border-stone-200 rounded-lg p-3 text-center">
-                                            <div className="text-2xl font-bold text-stone-900">{stats.currentOccupancy.M2}%</div>
-                                            <div className="text-xs text-stone-500">M2 (Velká) — {stats.currentOccupancy.name}</div>
+
+                                        <div className="bg-stone-50 border border-stone-200 rounded-xl p-3.5">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-xs font-bold text-stone-800 uppercase tracking-wide">M2 (Velká)</span>
+                                                <span className="text-[11px] text-stone-500">{stats.currentOccupancy.name}</span>
+                                            </div>
+                                            <div className="text-2xl font-black text-stone-900 mt-1">{stats.currentOccupancy.M2}%</div>
+                                            <div className="mt-2 pt-2 border-t border-stone-200 flex flex-col gap-0.5 text-xs">
+                                                <div className="flex justify-between text-stone-600">
+                                                    <span>Čisté rezervace:</span>
+                                                    <span className="font-bold text-stone-800">{stats.currentOccupancy.M2_pure}%</span>
+                                                </div>
+                                                <div className="flex justify-between text-stone-800">
+                                                    <span>Sanitární pauzy:</span>
+                                                    <span className="font-bold">{stats.currentOccupancy.M2_clean}%</span>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div className="h-56">
+
+                                    <div className="bg-indigo-50/60 rounded-lg px-3 py-2 text-[11px] text-indigo-900 border border-indigo-100/80 mb-4 flex items-start gap-1.5">
+                                        <span className="font-bold shrink-0">Poznámka:</span>
+                                        <span>Sanitární pauzy (30 min stejný lektor / 60 min střídání) jsou započteny do celkové obsazenosti jako reálně blokovaný čas kapacity.</span>
+                                    </div>
+
+                                    <div className="h-52">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <BarChart data={stats.occupancyTrend}>
                                                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                                                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12}} />
                                                 <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12}} unit="%" domain={[0, 100]} />
-                                                <Tooltip cursor={{fill: '#f1f5f9'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} formatter={(v: any, n: any) => [`${v} %`, n]} />
+                                                <Tooltip 
+                                                    cursor={{fill: '#f1f5f9'}} 
+                                                    contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} 
+                                                    formatter={(v: any, n: any, item: any) => {
+                                                        const p = item?.payload;
+                                                        if (n === 'M1 (Malá)' && p) {
+                                                            return [`${v}% (čisté: ${p.M1_pure}%, úklid: ${p.M1_clean}%)`, n];
+                                                        }
+                                                        if (n === 'M2 (Velká)' && p) {
+                                                            return [`${v}% (čisté: ${p.M2_pure}%, úklid: ${p.M2_clean}%)`, n];
+                                                        }
+                                                        return [`${v} %`, n];
+                                                    }} 
+                                                />
                                                 <Legend />
-                                                <Bar dataKey="M1" fill="#ba8a5b" radius={[4, 4, 0, 0]} />
-                                                <Bar dataKey="M2" fill="#7a573d" radius={[4, 4, 0, 0]} />
+                                                <Bar name="M1 (Malá)" dataKey="M1" fill="#ba8a5b" radius={[4, 4, 0, 0]} />
+                                                <Bar name="M2 (Velká)" dataKey="M2" fill="#7a573d" radius={[4, 4, 0, 0]} />
                                             </BarChart>
                                         </ResponsiveContainer>
                                     </div>
