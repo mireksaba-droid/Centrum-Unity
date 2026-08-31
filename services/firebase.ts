@@ -13,8 +13,8 @@ let authInitPromise: Promise<void> | null = null;
 
 try {
   const app = initializeApp(firebaseConfig);
-  // @ts-ignore
-  db = initializeFirestore(app, { experimentalForceLongPolling: true }, (firebaseConfig as any).firestoreDatabaseId);
+  const dbId = (firebaseConfig as any).firestoreDatabaseId;
+  db = dbId ? getFirestore(app, dbId) : getFirestore(app);
   functions = getFunctions(app, 'europe-west1');
   
   // Firebase Auth is not used; we rely on JWT and public Firestore reads.
