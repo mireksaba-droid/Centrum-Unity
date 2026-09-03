@@ -747,6 +747,16 @@ export const sortPractitioners = (practitioners: Practitioner[]): Practitioner[]
   });
 };
 
+export const sortGroupEvents = <T extends { date: string; startTime?: string; title?: string }>(events: T[]): T[] => {
+  return [...events].sort((a, b) => {
+    const dateTimeA = `${a.date || ''} ${a.startTime || '00:00'}`;
+    const dateTimeB = `${b.date || ''} ${b.startTime || '00:00'}`;
+    const dateDiff = dateTimeA.localeCompare(dateTimeB);
+    if (dateDiff !== 0) return dateDiff;
+    return (a.title || '').localeCompare(b.title || '');
+  });
+};
+
 export const PRACTITIONERS = sortPractitioners(RAW_PRACTITIONERS);
 
 // --- SEED DATA GENERATOR ---

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Practitioner, Booking, GroupEvent, EventRegistration, Role } from '../types';
 import { generateConfirmationEmail, generateCancellationEmail } from "../utils/emailTemplates";
-import { PRACTITIONERS, sortPractitioners } from '../constants';
+import { PRACTITIONERS, sortPractitioners, sortGroupEvents } from '../constants';
 import { 
   saveBookingToFirestore, 
   saveGroupEventToFirestore, 
@@ -119,7 +119,7 @@ export const useStore = create<AppState>()(
 
         try {
           const groupEvents = await loadGroupEvents();
-          set({ groupEvents: groupEvents || [] });
+          set({ groupEvents: sortGroupEvents(groupEvents || []) });
         } catch (e) {
           console.error("Failed to initialize group events:", e);
         }
@@ -359,14 +359,14 @@ export const useStore = create<AppState>()(
       createGroupEvent: async (event) => {
         const token = get().token;
         await saveGroupEventToFirestore(event, token);
-        set((state) => ({ groupEvents: [...state.groupEvents, event] }));
+        set((state) => ({ groupEvents: sortGroupEvents([...state.groupEvents, event]) }));
       },
 
       updateGroupEvent: async (updatedEvent) => {
         const token = get().token;
         await updateGroupEventInFirestore(updatedEvent, token);
         set((state) => ({
-          groupEvents: state.groupEvents.map(e => e.id === updatedEvent.id ? updatedEvent : e)
+          groupEvents: sortGroupEvents(state.groupEvents.map(e => e.id === updatedEvent.id ? updatedEvent : e))
         }));
       },
 

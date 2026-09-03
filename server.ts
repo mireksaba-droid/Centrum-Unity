@@ -1003,7 +1003,12 @@ async function startServer() {
   app.get("/api/public-group-events", async (req: Request, res: Response) => {
     try {
       const snap = await getDocs(collection(db, "groupEvents"));
-      const events = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const events = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      events.sort((a, b) => {
+        const dateTimeA = `${a.date || ''} ${a.startTime || '00:00'}`;
+        const dateTimeB = `${b.date || ''} ${b.startTime || '00:00'}`;
+        return dateTimeA.localeCompare(dateTimeB);
+      });
       res.json(events);
     } catch (error: any) {
       console.error("Error loading public group events:", error);

@@ -7,7 +7,7 @@ import StudioSchedule from './StudioSchedule';
 import RescheduleModal from '../components/RescheduleModal';
 import { useToast } from '../contexts/ToastContext';
 import { checkBookingCollision, timeToMinutes, calculateRentalPrice } from '../utils/scheduler';
-import { BUFFER_SAME_USER, BUFFER_DIFF_USER } from '../constants';
+import { BUFFER_SAME_USER, BUFFER_DIFF_USER, sortGroupEvents } from '../constants';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 import { useStore } from '../store/useStore';
 import { isDemoMode } from '../services/firebase';
@@ -757,6 +757,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         return map[status as string] || [status || '', 'bg-stone-100 text-stone-500'];
     };
     const fmtDateTime = (iso?: string) => iso ? new Date(iso).toLocaleString('cs-CZ', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+    
+    // Chronologicky seřazené skupinové události od nejbližších (prvních) po nejzazší (poslední)
+    const sortedGroupEvents = useMemo(() => sortGroupEvents(groupEvents), [groupEvents]);
+
     // Čitelný důvod zrušení – aby admin poznal, PROČ termín padl (nezaplaceno vs. zrušeno člověkem vs. refundace)
     const cancelReasonInfo = (b: Booking): [string, string] | null => {
         if (b.status !== 'cancelled' && b.status !== 'refunded') return null;
@@ -1850,7 +1854,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {groupEvents.map(event => {
+                        {sortedGroupEvents.map(event => {
                             const registeredCount = eventRegistrations.filter(r => r.eventId === event.id && r.paymentStatus !== 'cancelled').reduce((acc, curr) => acc + (curr.ticketTypeSpots || 1), 0);
                             const isFull = registeredCount >= event.capacity;
                             const practitioner = practitioners.find(p => p.id === event.practitionerId);
@@ -1919,7 +1923,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 </div>
                             );
                         })}
-                        {groupEvents.length === 0 && (
+                        {sortedGroupEvents.length === 0 && (
                             <div className="col-span-full text-center py-12 bg-white rounded-xl border border-stone-200 border-dashed">
                                 <Megaphone className="w-12 h-12 text-stone-300 mx-auto mb-3" />
                                 <h3 className="text-lg font-medium text-stone-900">Zatím žádné události</h3>

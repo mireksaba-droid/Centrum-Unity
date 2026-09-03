@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, getDocs, query, where, doc, updateDoc, deleteDoc, runTransaction, initializeFirestore, setDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Booking, Practitioner } from '../types';
+import { sortGroupEvents } from '../constants';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase
@@ -530,7 +531,8 @@ export const loadGroupEvents = async (): Promise<any[]> => {
     try {
         const res = await fetch('/api/public-group-events');
         if (res.ok) {
-            return await res.json();
+            const data = await res.json();
+            return sortGroupEvents(data || []);
         }
     } catch (e) {
         console.warn("Public API for group events failed, falling back to direct Firestore:", e);
@@ -541,7 +543,8 @@ export const loadGroupEvents = async (): Promise<any[]> => {
     try {
         const q = query(collection(db, 'groupEvents'));
         const querySnapshot = await getDocs(q);
-        return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const events = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+        return sortGroupEvents(events);
     } catch (error) {
         console.error("Error loading group events via direct Firestore:", error);
         return [];
