@@ -44,7 +44,7 @@ interface AdminDashboardProps {
   eventRegistrations: EventRegistration[];
   updatePractitioner: (p: Practitioner) => void;
   onAddPractitioner: (p: Practitioner) => void;
-  onAdminReschedule: (bookingId: string, newDate: string, newTime: string, reason?: string) => Promise<void>;
+  onAdminReschedule: (bookingId: string, newDate: string, newTime: string, reason?: string, newRoom?: 1 | 2) => Promise<void>;
   onCreateGroupEvent: (event: GroupEvent) => void;
   onUpdateGroupEvent: (event: GroupEvent) => void;
   onDeleteGroupEvent: (eventId: string) => void;
@@ -1765,14 +1765,36 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                             </td>
                                             <td className="px-6 py-4 text-right">
                                                 {!isPast && !isCancelled && (
-                                                    <Button 
-                                                        size="sm" 
-                                                        variant="outline" 
-                                                        className="text-xs border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-                                                        onClick={() => setReschedulingBooking(booking)}
-                                                    >
-                                                        <Clock className="w-3 h-3 mr-1" /> Přeplánovat
-                                                    </Button>
+                                                    <div className="flex items-center justify-end gap-2">
+                                                        <Button 
+                                                            size="sm" 
+                                                            variant="outline" 
+                                                            className="text-xs border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                                            onClick={() => setReschedulingBooking(booking)}
+                                                        >
+                                                            <Clock className="w-3 h-3 mr-1" /> Přesunout
+                                                        </Button>
+                                                        <Button 
+                                                            size="sm" 
+                                                            variant="outline" 
+                                                            className="text-xs border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300"
+                                                            onClick={async () => {
+                                                                const isSelf = booking.bookedByUserId === 'admin';
+                                                                const confirmMsg = isSelf 
+                                                                    ? `Opravdu chcete zrušit Vaši rezervaci z ${formatLocalDate(booking.date)} v ${booking.time}?` 
+                                                                    : `Opravdu chcete zrušit rezervaci lektora (${resolvePractitionerDisplayName(booking, practitioners)}) z ${formatLocalDate(booking.date)} v ${booking.time}?`;
+                                                                if (!window.confirm(confirmMsg)) return;
+                                                                try {
+                                                                    await onCancel(booking.id);
+                                                                    addToast('success', 'Rezervace zrušena', 'Termín byl okamžitě uvolněn.');
+                                                                } catch (err: any) {
+                                                                    addToast('error', 'Chyba', err.message || 'Nepodařilo se zrušit rezervaci.');
+                                                                }
+                                                            }}
+                                                        >
+                                                            <X className="w-3 h-3 mr-1" /> Zrušit
+                                                        </Button>
+                                                    </div>
                                                 )}
                                             </td>
                                         </tr>
@@ -2442,11 +2464,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     booking={reschedulingBooking} 
                     allBookings={allBookings}
                     onClose={() => setReschedulingBooking(null)} 
-                    onConfirm={async (date, time, reason) => {
+                    onConfirm={async (date, time, reason, newRoom) => {
                         try {
-                            await onAdminReschedule(reschedulingBooking.id, date, time, reason);
+                            await onAdminReschedule(reschedulingBooking.id, date, time, reason, newRoom);
                             setReschedulingBooking(null);
-                            addToast('success', 'Rezervace přesunuta', `Rezervace byla úspěšně přesunuta na ${date} v ${time}.`);
+                            const roomName = (newRoom || reschedulingBooking.room) === 1 ? 'Místnost 1 (Malá)' : 'Místnost 2 (Velká)';
+                            addToast('success', 'Rezervace přesunuta', `Rezervace byla úspěšně přesunuta na ${formatLocalDate(date)} v ${time} do ${roomName}.`);
                         } catch (err: any) {
                             addToast('error', 'Chyba přesunu', err.message || 'Nepodařilo se přesunout rezervaci.');
                         }

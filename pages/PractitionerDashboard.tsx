@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Practitioner, Booking, Service } from '../types';
+import { Practitioner, Booking, Service, Role } from '../types';
 import { BUFFER_SAME_USER, BUFFER_DIFF_USER, GENERATED_TIMES } from '../constants';
 import { calculateRentalPrice } from '../utils/scheduler';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
@@ -882,7 +882,8 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
           const bookingStart = parseLocalDate(bookingToCancel.date, bookingToCancel.time);
           const now = new Date();
           const hoursDifference = (bookingStart.getTime() - now.getTime()) / (1000 * 60 * 60);
-          const isTooLate = hoursDifference < 24;
+          const isAdmin = currentUser?.role === Role.ADMIN || currentUser?.id === 'admin' || bookingToCancel.bookedByUserId === 'admin';
+          const isTooLate = !isAdmin && hoursDifference < 24;
 
           return (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">

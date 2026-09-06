@@ -11,6 +11,7 @@ import { checkBookingCollision, calculateRentalPrice, timeToMinutes } from '../u
 import { generateConfirmationEmail } from '../utils/emailTemplates';
 import { capitalizeName } from '../utils/vocative';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
+import RescheduleModal from '../components/RescheduleModal';
 
 declare global {
   interface Window {
@@ -39,7 +40,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
     onLogout
 }) => {
     // Hooks
-    const { token, practitionersList, updateBookingStatus, attachPaymentId, removeBooking } = useStore();
+    const { token, practitionersList, updateBookingStatus, attachPaymentId, removeBooking, adminRescheduleBooking } = useStore();
     const { addToast } = useToast();
 
     const sendConfirmationEmail = async (booking: Booking, isPaid: boolean = false) => {
@@ -124,6 +125,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
 
     const [selectedSlot, setSelectedSlot] = useState<{date: string, time: string, room: 1 | 2} | null>(null);
     const [bookingToCancel, setBookingToCancel] = useState<Booking | null>(null);
+    const [reschedulingBooking, setReschedulingBooking] = useState<Booking | null>(null);
     
     // Booking Form State
     const [duration, setDuration] = useState<number>(60);
@@ -1181,12 +1183,13 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                 </div>
             )}
 
-        {/* Cancellation Modal */}
+        {/* Cancellation / Management Modal */}
             {bookingToCancel && (() => {
                 const bookingStart = parseLocalDate(bookingToCancel.date, bookingToCancel.time);
                 const now = new Date();
                 const hoursDifference = (bookingStart.getTime() - now.getTime()) / (1000 * 60 * 60);
-                const isTooLate = hoursDifference < 24;
+                const isAdmin = currentUser.role === Role.ADMIN || bookingToCancel.bookedByUserId === 'admin' || currentUser.id === 'admin';
+                const isTooLate = !isAdmin && hoursDifference < 24;
 
                 return (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
@@ -1195,15 +1198,17 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                             <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-600">
                                 <X className="w-6 h-6" />
                             </div>
-                            <h3 className="text-xl font-bold font-heading mb-2">Zrušit rezervaci</h3>
+                            <h3 className="text-xl font-bold font-heading mb-2">
+                                {isAdmin ? 'Správa rezervace' : 'Zrušit rezervaci'}
+                            </h3>
                             <p className="text-stone-600 mb-6">
                                 {isTooLate && (
                                     <span className="text-red-600 font-bold block mb-2">Pozor: Zbývá méně než 24 hodin!</span>
                                 )}
-                                Opravdu chcete zrušit rezervaci z {formatLocalDate(bookingToCancel.date)} v {bookingToCancel.time}?
+                                Rezervace z {formatLocalDate(bookingToCancel.date)} v {bookingToCancel.time} (Místnost {bookingToCancel.room}).
                                 {!isTooLate && bookingToCancel.paymentId && (
                                     <span className="block mt-2 font-medium text-stone-800">
-                                        Částka bude refundována na Vaši kartu.
+                                        Částka bude refundována na platební kartu.
                                     </span>
                                 )}
                                 {isTooLate && (
@@ -1244,6 +1249,23 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                 </div>
                             )}
 
+                            {/* Admin Quick Reschedule Option */}
+                            {currentUser.role === Role.ADMIN && (
+                                <div className="mb-4">
+                                    <Button
+                                        variant="outline"
+                                        className="w-full border-indigo-200 text-indigo-700 hover:bg-indigo-50 flex items-center justify-center gap-2 py-2.5 font-bold"
+                                        onClick={() => {
+                                            const target = bookingToCancel;
+                                            setBookingToCancel(null);
+                                            setReschedulingBooking(target);
+                                        }}
+                                    >
+                                        <Clock className="w-4 h-4" /> Přesunout termín / místnost
+                                    </Button>
+                                </div>
+                            )}
+
                             <div className="flex gap-2">
                                 <Button 
                                     variant="outline" 
@@ -1267,7 +1289,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                     <button
                                         onClick={handleForceCancelNoRefund}
                                         disabled={isProcessing}
-                                        className="w-full text-sm text-stone-500 hover:text-red-600 font-medium underline disabled:opacity-50"
+                                        className="w-full text-xs text-stone-500 hover:text-red-600 font-medium underline disabled:opacity-50"
                                     >
                                         Uvolnit termín bez refundace (peníze už vráceny přímo v GoPay)
                                     </button>
@@ -1278,6 +1300,25 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                 </div>
                 );
             })()}
+
+            {/* Reschedule Modal (Admin can move time & room) */}
+            {reschedulingBooking && (
+                <RescheduleModal
+                    booking={reschedulingBooking}
+                    allBookings={allBookings}
+                    onClose={() => setReschedulingBooking(null)}
+                    onConfirm={async (date, time, reason, newRoom) => {
+                        try {
+                            await adminRescheduleBooking(reschedulingBooking.id, date, time, reason, newRoom);
+                            setReschedulingBooking(null);
+                            const roomName = (newRoom || reschedulingBooking.room) === 1 ? 'Místnost 1 (Malá)' : 'Místnost 2 (Velká)';
+                            addToast('success', 'Rezervace přesunuta', `Rezervace byla úspěšně přesunuta na ${formatLocalDate(date)} v ${time} do ${roomName}.`);
+                        } catch (err: any) {
+                            addToast('error', 'Chyba přesunu', err.message || 'Nepodařilo se přesunout rezervaci.');
+                        }
+                    }}
+                />
+            )}
             
         </div>
     );

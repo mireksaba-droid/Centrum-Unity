@@ -38,7 +38,7 @@ interface AppState {
   attachPaymentId: (bookingId: string, paymentId: string) => void;
   removeBooking: (bookingId: string) => Promise<void>;
   cancelBooking: (bookingId: string) => Promise<void>;
-  adminRescheduleBooking: (bookingId: string, newDate: string, newTime: string, reason?: string) => Promise<void>;
+  adminRescheduleBooking: (bookingId: string, newDate: string, newTime: string, reason?: string, newRoom?: 1 | 2) => Promise<void>;
   
   // Practitioners
   updatePractitioner: (updatedP: Practitioner) => void;
@@ -290,10 +290,12 @@ export const useStore = create<AppState>()(
         }));
       },
 
-      adminRescheduleBooking: async (bookingId, newDate, newTime, reason) => {
+      adminRescheduleBooking: async (bookingId, newDate, newTime, reason, newRoom) => {
         const state = get();
         const b = state.bookings.find(b => b.id === bookingId);
         if (!b) return;
+
+        const targetRoom = newRoom ?? b.room ?? 1;
 
         // Validace kolizí: přednost má vždy existující rezervace
         const { checkBookingCollision } = await import('../utils/scheduler');
@@ -301,7 +303,7 @@ export const useStore = create<AppState>()(
           newDate,
           newTime,
           durationMinutes: b.durationMinutes,
-          room: b.room,
+          room: targetRoom,
           userId: b.bookedByUserId,
           allBookings: state.bookings,
           excludeBookingId: bookingId
@@ -313,7 +315,12 @@ export const useStore = create<AppState>()(
 
         const newNote = reason ? (b.note ? `${b.note}\nADMIN RESCHEDULE: ${reason}` : `ADMIN RESCHEDULE: ${reason}`) : b.note;
         
-        await updateBookingInFirestore(bookingId, { date: newDate, time: newTime, note: newNote });
+        await updateBookingInFirestore(bookingId, { 
+          date: newDate, 
+          time: newTime, 
+          room: targetRoom, 
+          note: newNote 
+        });
 
         set((state) => ({
           bookings: state.bookings.map(b => {
@@ -322,6 +329,7 @@ export const useStore = create<AppState>()(
               ...b,
               date: newDate,
               time: newTime,
+              room: targetRoom,
               note: newNote
             };
           })
