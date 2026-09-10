@@ -6,7 +6,7 @@ import { Resend } from "resend";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 
-import { runTransaction, getDoc, DocumentReference, db, collection, doc, updateDoc, deleteDoc, getDocs, query, where, setDoc, writeBatch } from "./server-firebase";
+import { runTransaction, getDoc, DocumentReference, db, collection, doc, updateDoc, deleteDoc, getDocs, query, where, setDoc, writeBatch, deleteField } from "./server-firebase";
 import firebaseConfig from "./firebase-applet-config.json";
 
 
@@ -1440,11 +1440,14 @@ async function startServer() {
         if (!snap.exists()) return;
         const current = snap.data() || {};
 
-        if (current.paymentStatus === "cancelled" || current.paymentStatus === "refunded" || current.paymentStatus === "paid") return;
+        if ((current.paymentStatus === "cancelled" || current.paymentStatus === "refunded") && newStatus !== "paid") return;
+        if (current.paymentStatus === "paid" && (newStatus === "paid" || newStatus === "cancelled")) return;
 
         const updateData: any = { paymentStatus: newStatus, paymentId: String(id) };
-        if (newStatus === "paid" && !current.paidAt) {
-          updateData.paidAt = new Date().toISOString();
+        if (newStatus === "paid") {
+          if (!current.paidAt) updateData.paidAt = new Date().toISOString();
+          updateData.cancelledAt = deleteField();
+          updateData.cancellationReason = deleteField();
         }
         if (newStatus === "cancelled") {
           updateData.cancelledAt = new Date().toISOString();
@@ -1571,8 +1574,8 @@ async function startServer() {
       if (!snap.exists()) return;
       const current = snap.data() || {};
 
-      // Idempotence: už zrušenou/refundovanou rezervaci znovu neměníme (aby se e-mail neposlal 2x)
-      if (current.status === "cancelled" || current.status === "refunded") return;
+      // Idempotence: už zrušenou/refundovanou rezervaci znovu neměníme, pokud nepřišla platná úhrada PAID
+      if ((current.status === "cancelled" || current.status === "refunded") && newStatus !== "paid") return;
       // Ze stavu 'paid' už nepřecházíme na 'paid' ani zpět na 'cancelled'
       if (current.status === "paid" && (newStatus === "paid" || newStatus === "cancelled")) return;
 
@@ -1592,8 +1595,10 @@ async function startServer() {
       }
 
       const updateData: any = { status: newStatus, paymentId: String(id) };
-      if (newStatus === "paid" && !current.paidAt) {
-        updateData.paidAt = new Date().toISOString();
+      if (newStatus === "paid") {
+        if (!current.paidAt) updateData.paidAt = new Date().toISOString();
+        updateData.cancelledAt = deleteField();
+        updateData.cancellationReason = deleteField();
       }
       if (newStatus === "cancelled" || newStatus === "refunded") {
         updateData.cancelledAt = new Date().toISOString();
