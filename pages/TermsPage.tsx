@@ -25,7 +25,7 @@ const TermsPage: React.FC = () => {
                     <h3>1. Základní ustanovení</h3>
                     <p>
                         Tyto obchodní podmínky upravují vzájemná práva a povinnosti mezi prodávajícím/poskytovatelem 
-                        <strong>Eva Kadlecová - Centrum Unity</strong>, IČO: 73750565, se sídlem Šmilovského 1268/9, Vinohrady, Praha 2 
+                        <strong>Eva Kadlecová - Centrum Unity</strong>, IČO: 73750565, se sídlem Šmilovského 10, Vinohrady, Praha 2 
                         a kupujícím.
                     </p>
 
@@ -56,7 +56,7 @@ const TermsPage: React.FC = () => {
 
                     <h3>5. Dodání služby (Plnění)</h3>
                     <p>
-                        Služba pronájmu je poskytnuta ve sjednaném čase v prostorách studia Centrum Unity na adrese Šmilovského 1268/9, Praha 2. 
+                        Služba pronájmu je poskytnuta ve sjednaném čase v prostorách studia Centrum Unity na adrese Šmilovského 10, Praha 2. 
                         Kupující obdrží potvrzení s instrukcemi ohledně vstupu na e-mail po dokončení platby. Náklady na dodání jsou 0 Kč, 
                         nejedná se o fyzické zboží.
                     </p>

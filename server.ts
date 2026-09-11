@@ -2094,7 +2094,7 @@ async function startServer() {
         ics += `DTSTART;TZID=Europe/Prague:${floatFmt(start)}\r\n`;
         ics += `DTEND;TZID=Europe/Prague:${floatFmt(end)}\r\n`;
         ics += `SUMMARY:${esc(summary)}\r\n`;
-        ics += `LOCATION:${esc("Šmilovského 1268/9, Vinohrady, Praha 2")}\r\n`;
+        ics += `LOCATION:${esc("Šmilovského 10, Vinohrady, Praha 2")}\r\n`;
         if (descParts.length) ics += `DESCRIPTION:${esc(descParts.join("\n"))}\r\n`;
         ics += "END:VEVENT\r\n";
       });
@@ -2146,7 +2146,7 @@ async function startServer() {
         ics += `DTSTART;TZID=Europe/Prague:${floatFmt(start)}\r\n`;
         ics += `DTEND;TZID=Europe/Prague:${floatFmt(end)}\r\n`;
         ics += `SUMMARY:${esc(summary)}\r\n`;
-        ics += `LOCATION:${esc("Šmilovského 1268/9, Vinohrady, Praha 2")}\r\n`;
+        ics += `LOCATION:${esc("Šmilovského 10, Vinohrady, Praha 2")}\r\n`;
         if (descParts.length) ics += `DESCRIPTION:${esc(descParts.join("\n"))}\r\n`;
         ics += "END:VEVENT\r\n";
       });
@@ -2254,7 +2254,7 @@ async function startServer() {
         ics += `DTSTART;TZID=Europe/Prague:${floatFmt(start)}\r\n`;
         ics += `DTEND;TZID=Europe/Prague:${floatFmt(end)}\r\n`;
         ics += `SUMMARY:${esc(summary)}\r\n`;
-        ics += `LOCATION:${esc("Šmilovského 1268/9, Vinohrady, Praha 2")}\r\n`;
+        ics += `LOCATION:${esc("Šmilovského 10, Vinohrady, Praha 2")}\r\n`;
         if (descParts.length) ics += `DESCRIPTION:${esc(descParts.join("\n"))}\r\n`;
         ics += "END:VEVENT\r\n";
       });
@@ -2309,7 +2309,7 @@ async function startServer() {
         ics += `DTSTART;TZID=Europe/Prague:${floatFmt(start)}\r\n`;
         ics += `DTEND;TZID=Europe/Prague:${floatFmt(end)}\r\n`;
         ics += `SUMMARY:${esc(summary)}\r\n`;
-        ics += `LOCATION:${esc("Šmilovského 1268/9, Vinohrady, Praha 2")}\r\n`;
+        ics += `LOCATION:${esc("Šmilovského 10, Vinohrady, Praha 2")}\r\n`;
         if (descParts.length) ics += `DESCRIPTION:${esc(descParts.join("\n"))}\r\n`;
         ics += "END:VEVENT\r\n";
       });

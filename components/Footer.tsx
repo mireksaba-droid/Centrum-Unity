@@ -32,7 +32,7 @@ export const Footer: React.FC = () => {
                         </li>
                         <li className="flex items-start gap-2 mt-2">
                             <MapPin className="w-4 h-4 text-sage-600 mt-0.5 shrink-0" />
-                            <span>Šmilovského 1268/9, Vinohrady<br/>Praha 2, 120 00</span>
+                            <span>Šmilovského 10, Vinohrady<br/>Praha 2, 120 00</span>
                         </li>
                         <li className="flex items-center gap-2 mt-2">
                             <Mail className="w-4 h-4 text-sage-600 shrink-0" />

@@ -152,7 +152,7 @@ export const generateConfirmationEmail = (booking: Partial<Booking>, isPaid: boo
           <!-- Adresa -->
           <div style="margin-bottom:24px;">
             <div style="color:#78716c;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Kde nás najdete</div>
-            <div style="color:#1c1917;font-size:15px;font-weight:600;">Šmilovského 1268/9, Vinohrady, Praha 2</div>
+            <div style="color:#1c1917;font-size:15px;font-weight:600;">Šmilovského 10, Vinohrady, Praha 2</div>
           </div>
 
           <!-- Storno podmínky -->
@@ -347,7 +347,7 @@ export const generateEventRegistrationConfirmationEmail = (registration: any, ev
               ` : ''}
               <tr>
                 <td style="padding:8px 0;color:#78716c;font-size:14px;">Místo konání</td>
-                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;">Centrum Unity (Šmilovského 1268/9, Praha 2)</td>
+                <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;">Centrum Unity (Šmilovského 10, Praha 2)</td>
               </tr>
             </table>
           </div>

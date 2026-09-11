@@ -24,7 +24,7 @@ const PrivacyPage: React.FC = () => {
                     <h3>Správce osobních údajů</h3>
                     <p>
                         Správcem vašich osobních údajů je podnikatelka <strong>Eva Kadlecová - Centrum Unity</strong>, IČO: 73750565, 
-                        se sídlem Šmilovského 1268/9, Vinohrady, Praha 2 (dále jen "Poskytovatel").
+                        se sídlem Šmilovského 10, Vinohrady, Praha 2 (dále jen "Poskytovatel").
                     </p>
 
                     <h3>Jaké údaje zpracováváme a proč</h3>
