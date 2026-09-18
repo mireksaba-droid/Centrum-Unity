@@ -4,6 +4,8 @@
 
 ## 1. Přehled projektu
 **Název:** Centrum Unity (Coworking Space pro wellness)
+**Adresa studia:** Šmilovského 10, Vinohrady, Praha 2, 120 00
+**Provozovatel:** Eva Kadlecová - Centrum Unity (IČO: 73750565)
 **Popis:** Platforma pro správu coworkingového wellness centra. Lektoři (terapeuti, kouči, maséři) si rezervují místnosti, správce (Eva) spravuje kalendář, profily, skupinové události a platby. Součástí jsou online platby přes GoPay a e-mailové notifikace.
 
 ## 2. Technologický Stack
@@ -66,7 +68,11 @@ Uživatel vybere profil a zadá PIN. Po ověření (dnes na klientovi) zavolá `
 4. Cena se počítá funkcí `calculateRentalPrice` (admin má **0 Kč zdarma**).
 5. Uložení: lokální store + Firestore (`saveBookingToFirestore`, transakce a kolizní zámek proti dvojité rezervaci).
 6. Platba podle scénáře (viz sekce 6).
-7. Storno/přesun přes `cancelBooking` a `adminRescheduleBooking` (zápis do Firestore s kontrolou kolizí).
+7. **Prodloužení již zaplacené rezervace (Extension):**
+   - Lektor má možnost si v `PractitionerDashboard` i `StudioSchedule` prodloužit již zaplacenou rezervaci (+30, +60, +90, +120, +180 min).
+   - Systém živě ověřuje kolize nového prodlouženého intervalu (včetně hygienických pauz 30/60 min a navazujících akcí) přes `checkBookingCollision`.
+   - Vypočítá se rozdíl v ceně (`calculateRentalPrice`), vytvoří se nová platba v GoPay na doplatek (`/api/create-extension-payment`), otevře se platební brána a po zaplacení (`reconcilePayment`) se v databázi upraví `durationMinutes`, `price`, `extendedAt` a odešle se potvrzovací e-mail `generateExtensionConfirmationEmail`.
+8. Storno/přesun přes `cancelBooking` a `adminRescheduleBooking` (zápis do Firestore s kontrolou kolizí).
 
 ### C. Skupinové události (veřejné)
 Admin vytvoří `GroupEvent` pro Velkou místnost s kapacitou a cenou. Vygeneruje se veřejná URL `/event/:eventId`. Klient se registruje; Firestore **transakce** hlídá, že se nepřekročí kapacita.
@@ -100,6 +106,7 @@ Administrátorský dashboard obsahuje dedikovanou záložku „Analytika“, kte
 - `equipment`: `table` (Lehátko) | `futon` — volitelné vybavení místnosti.
 - `clientName` / `clientEmail` / `clientPhone` — kontakt na klienta (CRM).
 - `paymentId` — ID platby v GoPay (párování, refundace).
+- `extendedAt`, `extensionPaymentId`, `pendingExtension` — evidence a stav prodloužení rezervace a doplatku.
 - `createdAt` — čas vytvoření.
 - `paymentRequestedAt` — čas odeslání výzvy k platbě (od něj běží 24h okno).
 - `note`, `cancelledAt`, `recurringGroupId` — volitelné.
@@ -113,6 +120,7 @@ Administrátorský dashboard obsahuje dedikovanou záložku „Analytika“, kte
 ### Odesílání e-mailů (SMTP / Resend)
 E-maily posílá backend přes `nodemailer` / `Resend` (`sendEmail()` v `server.ts`). Endpoint `/api/send-email` (chráněný JWT) a interní volání v cronu/cleanupu a při registraci na události. Když e-mailové proměnné chybí, odeslání se jen zaloguje (mock). Šablony jsou v `utils/emailTemplates.ts`:
 - `generateConfirmationEmail(booking, isPaid)` — potvrzení individuální rezervace místnosti (řádek s vybavením, stav Zaplaceno/Faktura, oslovení ve 5. pádu).
+- `generateExtensionConfirmationEmail(booking, extraMinutes, diffPrice)` — potvrzení úspěšného prodloužení rezervace s novou délkou a uhrazeným doplatkem.
 - `generatePaymentRequestEmail(booking, baseUrl)` — výzva k platbě s odkazem na `/#/pay/:id`.
 - `generatePaymentReminderEmail(booking, hoursLeft, baseUrl)` — připomínka platby před vypršením 24h lhůty.
 - `generateCancellationEmail(booking, reason)` — storno rezervace.
@@ -157,7 +165,8 @@ Konfigurace je v `firebase-applet-config.json`. Klient i server používají web
 
 ### GoPay (platby)
 - Vytváření plateb: `/api/create-payment` (auth) a `/api/public-payment` (veřejné, rate-limit).
-- Webhook: `/api/gopay/notify` asynchronně aktualizuje stav rezervace (`PAID` → `paid`, `CANCELED`/`TIMEOUTED` → `cancelled`, `REFUNDED` → `refunded`), idempotentně.
+- Webhook: `/api/gopay/notify` asynchronně aktualizuje stav rezervace (`PAID` → `paid`, `CANCELED`/`TIMEOUTED` → `cancelled`, `REFUNDED` → `refunded`).
+- **Priorita úspěšné platby (`PAID`):** Pokud klient provedl opakovaný pokus a z brány dorazí stav `PAID`, systém tento stav bezpodmínečně aplikuje (i kdyby předchozí pokus byl stornován či vypršel), odstraní případné `cancelledAt`/`cancellationReason` a zapíše `paidAt`.
 - Ověření stavu po návratu: `/api/gopay/status`.
 - Refundace: `/api/refund` — jen vlastník nebo admin, a jen je-li do termínu **≥ 24 h**. Částky v haléřích.
 

@@ -20,6 +20,7 @@
    - V AI Studio (a obecně v iframech) nefunguje inline GoPay brána kvůli `X-Frame-Options`. Platba musí být otevírána do nového okna `window.open(url, '_blank')` nebo natvrdo přes `window.location.href`.
    - Backendové API pro GoPay refundace (`/api/refund`) vrací někdy `text/plain` při chybách, proto je nutné parsovat odpovědi obezřetně (`res.text()` a v bloku `try/catch` zkusit `JSON.parse`).
    - GoPay očekává částky v **haléřích** (`amount * 100`).
+   - **Přednost stavu PAID (zpracování webhooku):** Pokud z GoPay dorazí notifikace se stavem `PAID` (úspěšná úhrada), má absolutní přednost a rezervaci vždy aktivuje do stavu `paid` (smaže případné `cancelledAt`/`cancellationReason` a zapíše `paidAt`), i kdyby byl předchozí pokus o platbu stornován či vypršel.
 
 5. **Odesílání e-mailů (SMTP přes webkitty.eu):**
    - E-maily se posílají přes SMTP pomocí `nodemailer` z backendu (`server.ts`, endpoint `/api/send-email` a pozadí). Konfigurace přes proměnné `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `FROM_EMAIL` (viz `.env.example`).

@@ -10,6 +10,7 @@ import { Link } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
 import { useStore } from '../store/useStore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, PieChart, Pie, Legend } from 'recharts';
+import ExtendBookingModal from '../components/ExtendBookingModal';
 
 interface PractitionerDashboardProps {
   practitioners: Practitioner[];
@@ -39,13 +40,14 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
   onCancelBooking,
   onInternalBook
 }) => {
-  const { token } = useStore();
+  const { token, groupEvents } = useStore();
   const { addToast } = useToast();
   const [activeTab, setActiveTab] = useState<'calendar'>('calendar');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [currentWeekStart, setCurrentWeekStart] = useState(new Date());
   const [showCalendarPicker, setShowCalendarPicker] = useState(false);
   const [bookingToCancel, setBookingToCancel] = useState<Booking | null>(null);
+  const [bookingToExtend, setBookingToExtend] = useState<Booking | null>(null);
   
   // Temporary state for editing entire practitioner object
   const [tempPractitioner, setTempPractitioner] = useState<Practitioner | null>(currentUser);
@@ -653,24 +655,36 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
                                             )}
 
                                 {/* Action Buttons */}
-                                <div className="mt-4 flex gap-3 pt-3 border-t border-stone-100">
-                                                 <Button 
-                                                    variant="outline" 
-                                                    size="sm" 
-                                                    className="flex-1 border-stone-300 text-stone-700 hover:bg-stone-50"
-                                                    onClick={() => addToast('info', 'Přebukování', 'Tato funkce bude brzy spuštěna.')}
-                                                 >
-                                                    Přebukovat
-                                                 </Button>
-                                                 <Button 
-                                                    variant="outline" 
-                                                    size="sm" 
-                                                    className="flex-1 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300"
-                                                    onClick={() => setBookingToCancel(booking)}
-                                                 >
-                                                    Storno
-                                                 </Button>
-                                            </div>
+                                {!isCancelled && (
+                                    <div className="mt-4 flex gap-2 pt-3 border-t border-stone-100 flex-wrap">
+                                        <Button 
+                                            variant="outline" 
+                                            size="sm" 
+                                            className="flex-1 min-w-[100px] border-emerald-300 text-emerald-800 hover:bg-emerald-50 hover:border-emerald-400 font-semibold"
+                                            onClick={() => setBookingToExtend(booking)}
+                                            id={`extend-booking-btn-${booking.id}`}
+                                        >
+                                            <Clock className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                                            Prodloužit
+                                        </Button>
+                                        <Button 
+                                            variant="outline" 
+                                            size="sm" 
+                                            className="flex-1 min-w-[100px] border-stone-300 text-stone-700 hover:bg-stone-50"
+                                            onClick={() => addToast('info', 'Přebukování', 'Tato funkce bude brzy spuštěna.')}
+                                        >
+                                            Přebukovat
+                                        </Button>
+                                        <Button 
+                                            variant="outline" 
+                                            size="sm" 
+                                            className="flex-1 min-w-[80px] border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300"
+                                            onClick={() => setBookingToCancel(booking)}
+                                        >
+                                            Storno
+                                        </Button>
+                                    </div>
+                                )}
                                         </div>
                                     </div>
                                 </div>
@@ -931,6 +945,20 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
           </div>
           );
       })()}
+
+      {/* Extend Booking Modal */}
+      {bookingToExtend && (
+        <ExtendBookingModal
+          booking={bookingToExtend}
+          allBookings={allBookings}
+          groupEvents={groupEvents}
+          onClose={() => setBookingToExtend(null)}
+          onSuccess={(newDur, newPrice) => {
+            addToast('success', 'Rezervace prodloužena', `Rezervace byla úspěšně prodloužena na ${newDur} minut.`);
+            setBookingToExtend(null);
+          }}
+        />
+      )}
 
     </div>
   );

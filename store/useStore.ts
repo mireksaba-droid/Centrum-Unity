@@ -35,6 +35,7 @@ interface AppState {
   // Bookings
   addBooking: (bookingData: Partial<Booking>) => Promise<void>;
   updateBookingStatus: (bookingId: string, status: string, reason?: string) => Promise<void>;
+  extendBooking: (bookingId: string, extraMinutes: number, newTotalPrice: number) => Promise<void>;
   attachPaymentId: (bookingId: string, paymentId: string) => void;
   removeBooking: (bookingId: string) => Promise<void>;
   cancelBooking: (bookingId: string) => Promise<void>;
@@ -194,6 +195,23 @@ export const useStore = create<AppState>()(
           set((state) => ({
              bookings: state.bookings.map(b =>
                 b.id === bookingId ? { ...b, ...data } : b
+             )
+          }));
+      },
+
+      extendBooking: async (bookingId: string, extraMinutes: number, newTotalPrice: number) => {
+          const booking = get().bookings.find(b => b.id === bookingId);
+          if (!booking) return;
+          const newDurationMinutes = (booking.durationMinutes || 60) + extraMinutes;
+          const updateData = {
+              durationMinutes: newDurationMinutes,
+              price: newTotalPrice,
+              extendedAt: new Date().toISOString()
+          };
+          await updateBookingInFirestore(bookingId, updateData);
+          set((state) => ({
+             bookings: state.bookings.map(b =>
+                b.id === bookingId ? { ...b, ...updateData } : b
              )
           }));
       },

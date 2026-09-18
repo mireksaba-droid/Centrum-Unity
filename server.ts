@@ -14,7 +14,7 @@ import firebaseConfig from "./firebase-applet-config.json";
 import { Booking } from "./types";
 import { PRACTITIONERS } from "./constants";
 import { calculateRentalPrice, checkBookingCollision } from "./utils/scheduler";
-import { generatePaymentRequestEmail, generateConfirmationEmail, generateCancellationEmail, generateAdminDailySummaryEmail, generatePaymentReminderEmail, generateEventRegistrationConfirmationEmail, generateEventRegistrationCancellationEmail, generateAdminEventRegistrationNotificationEmail, generateAdminEventCancellationNotificationEmail } from "./utils/emailTemplates";
+import { generatePaymentRequestEmail, generateConfirmationEmail, generateCancellationEmail, generateAdminDailySummaryEmail, generatePaymentReminderEmail, generateEventRegistrationConfirmationEmail, generateEventRegistrationCancellationEmail, generateAdminEventRegistrationNotificationEmail, generateAdminEventCancellationNotificationEmail, generateExtensionConfirmationEmail } from "./utils/emailTemplates";
 
 async function safeJson(res: any) {
   const text = await res.text();
@@ -1236,6 +1236,171 @@ async function startServer() {
     }
   });
 
+  // Prodloužení existující rezervace (GoPay doplatek / 0 Kč pro admina)
+  app.post("/api/create-extension-payment", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      const { bookingId, extraMinutes, returnUrl } = req.body;
+      if (!bookingId || !extraMinutes || typeof extraMinutes !== "number" || extraMinutes <= 0) {
+        return res.status(400).json({ error: "Chybí platné parametry (bookingId, extraMinutes)." });
+      }
+
+      const booking = await loadBooking(bookingId);
+      if (!booking) {
+        return res.status(404).json({ error: "Rezervace nebyla nalezena." });
+      }
+
+      const bData = booking.data;
+      const isOwner = req.user && (req.user.id === bData.bookedByUserId || req.user.role === 'ADMIN');
+      if (!isOwner) {
+        return res.status(403).json({ error: "Nemáte oprávnění prodloužit tuto rezervaci." });
+      }
+
+      if (bData.status === 'cancelled' || bData.status === 'refunded') {
+        return res.status(400).json({ error: "Zrušenou nebo refundovanou rezervaci nelze prodloužit." });
+      }
+
+      const currentDuration = Number(bData.durationMinutes) || 60;
+      const newTotalMinutes = currentDuration + extraMinutes;
+      const room = Number(bData.room) as 1 | 2;
+      const userId = bData.bookedByUserId || 'guest';
+      const bookingDate = bData.date;
+      const bookingTime = bData.time;
+
+      // 1. Ověření kolize pro prodloužený časový úsek
+      const q = query(collection(db, "bookings"), where("date", "==", bookingDate));
+      const snapshot = await getDocs(q);
+      const existingBookings = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Booking[];
+
+      const collision = checkBookingCollision({
+        newDate: bookingDate,
+        newTime: bookingTime,
+        durationMinutes: newTotalMinutes,
+        room: room,
+        userId: userId,
+        allBookings: existingBookings,
+        excludeBookingId: String(bookingId)
+      });
+
+      if (collision.hasCollision) {
+        return res.status(409).json({
+          error: `Rezervaci nelze prodloužit: ${collision.reason || 'dochází ke kolizi s jinou rezervací nebo povinnou pauzou na úklid.'}`
+        });
+      }
+
+      // 2. Výpočet doplatku
+      const oldPrice = Number(bData.price) || 0;
+      const newTotalPrice = calculateRentalPrice(userId, newTotalMinutes, room);
+      const diffPrice = Math.max(0, newTotalPrice - oldPrice);
+      const amountHaler = Math.round(diffPrice * 100);
+
+      // 3. Prodloužení zdarma (např. admin nebo cena 0 Kč)
+      if (amountHaler <= 0) {
+        await updateDoc(booking.ref, {
+          durationMinutes: newTotalMinutes,
+          price: newTotalPrice,
+          extendedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+
+        // Odeslání potvrzovacího e-mailu o prodloužení
+        if (emailConfigured()) {
+          try {
+            const recipients = await recipientsFor(bData);
+            if (recipients.length) {
+              await sendEmail({
+                to: recipients,
+                subject: 'Potvrzení prodloužení rezervace - Centrum Unity',
+                html: generateExtensionConfirmationEmail({ ...bData, durationMinutes: newTotalMinutes, price: newTotalPrice }, extraMinutes, 0)
+              });
+            }
+          } catch (e: any) {
+            console.error("Failed to send zero-price extension email:", e.message);
+          }
+        }
+
+        return res.json({
+          paid: true,
+          newDurationMinutes: newTotalMinutes,
+          newPrice: newTotalPrice,
+          message: "Rezervace byla úspěšně prodloužena."
+        });
+      }
+
+      // 4. Vytvoření platby doplatku v GoPay
+      const token = await getGoPayToken();
+      const cleanBase = APP_BASE_URL.replace(/\/+$/, '');
+      const retUrl = returnUrl || `${cleanBase}/`;
+
+      const paymentPayload = {
+        payer: {
+          default_payment_instrument: "PAYMENT_CARD",
+          allowed_payment_instruments: ["PAYMENT_CARD", "BANK_ACCOUNT", "GPAY", "APPLE_PAY"]
+        },
+        amount: amountHaler,
+        currency: "CZK",
+        order_number: `ext-${bookingId}-${Date.now().toString().slice(-6)}`,
+        order_description: `Prodloužení rezervace ${room === 1 ? 'M1' : 'M2'} (+${extraMinutes} min)`,
+        items: [
+          {
+            name: `Doplatek za prodloužení rezervace (+${extraMinutes} min)`,
+            amount: amountHaler,
+            count: 1
+          }
+        ],
+        callback: {
+          return_url: retUrl,
+          notification_url: `${cleanBase}/api/gopay/notify`
+        },
+        additional_params: [
+          { name: "bookingId", value: String(bookingId) },
+          { name: "isExtension", value: "true" },
+          { name: "extraMinutes", value: String(extraMinutes) },
+          { name: "newTotalMinutes", value: String(newTotalMinutes) },
+          { name: "newTotalPrice", value: String(newTotalPrice) },
+          { name: "extensionAmountHaler", value: String(amountHaler) }
+        ],
+        lang: "CS"
+      };
+
+      const response = await fetch(`${GOPAY_URL}/payments/payment`, {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(paymentPayload)
+      });
+
+      const data = await safeJson(response);
+      if (!response.ok) {
+        throw new Error("GoPay create extension payment failed: " + JSON.stringify(data));
+      }
+
+      // Uložíme informaci o probíhajícím prodloužení
+      await updateDoc(booking.ref, {
+        pendingExtension: {
+          extraMinutes,
+          newTotalMinutes,
+          newTotalPrice,
+          paymentId: String(data.id),
+          requestedAt: new Date().toISOString()
+        }
+      });
+
+      res.json({
+        paymentId: data.id,
+        gwUrl: data.gw_url,
+        newDurationMinutes: newTotalMinutes,
+        newPrice: newTotalPrice,
+        extensionPrice: diffPrice
+      });
+    } catch (error: any) {
+      console.error("GoPay Extension Error:", error.message);
+      res.status(400).json({ error: error.message });
+    }
+  });
+
   // Refund endpoint for GoPay
   app.post("/api/refund", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
@@ -1383,7 +1548,7 @@ async function startServer() {
   // přechodu na 'paid') pošle potvrzovací e-mail. Volá se z webhooku i z návratu na return_url,
   // takže potvrzení dorazí i když GoPay z nějakého důvodu nedoručí webhook.
   // Je idempotentní - opakované volání nepřepíše zaplacenou rezervaci ani nepošle e-mail dvakrát.
-  async function reconcilePayment(id: string): Promise<{ state: string }> {
+  async function reconcilePayment(id: string): Promise<{ state: string; isExtension?: boolean }> {
     const token = await getGoPayToken();
     const statusRes = await fetch(`${GOPAY_URL}/payments/payment/${id}`, {
       method: "GET",
@@ -1549,8 +1714,85 @@ async function startServer() {
     }
 
     if (!bookingRef) {
+      // Zkusíme ještě najít rezervaci podle pendingExtension.paymentId
+      const extSnap = await getDocs(query(collection(db, "bookings"), where("pendingExtension.paymentId", "==", String(id))));
+      if (!extSnap.empty) {
+        bookingRef = extSnap.docs[0].ref;
+        bookingId = extSnap.docs[0].id;
+      }
+    }
+
+    if (!bookingRef) {
       console.log(`GoPay reconcile: pro platbu ${id} nenalezena rezervace.`);
       return { state };
+    }
+
+    // Zpracování platby za PRODLOUŽENÍ existující rezervace
+    const isExtensionParam = paymentStatus.additional_params?.find((x: any) => x.name === "isExtension")?.value === "true" ||
+      (paymentStatus.order_number && String(paymentStatus.order_number).startsWith("ext-"));
+
+    if (isExtensionParam) {
+      let transitionedToExtensionPaid = false;
+      let extraMinutesSent = 30;
+
+      await runTransaction(db, async (tx: any) => {
+        transitionedToExtensionPaid = false;
+        const snap = await tx.get(bookingRef!);
+        if (!snap.exists()) return;
+        const current = snap.data() || {};
+
+        if (state === "PAID") {
+          const paramExtraMinutes = paymentStatus.additional_params?.find((p: any) => p.name === "extraMinutes")?.value;
+          const paramNewTotalMinutes = paymentStatus.additional_params?.find((p: any) => p.name === "newTotalMinutes")?.value;
+          const paramNewTotalPrice = paymentStatus.additional_params?.find((p: any) => p.name === "newTotalPrice")?.value;
+
+          const extraMin = Number(paramExtraMinutes || current.pendingExtension?.extraMinutes || 30);
+          extraMinutesSent = extraMin;
+          const newDuration = Number(paramNewTotalMinutes || current.pendingExtension?.newTotalMinutes || ((current.durationMinutes || 60) + extraMin));
+          const newPrice = Number(paramNewTotalPrice || current.pendingExtension?.newTotalPrice || ((current.price || 0) + (Number(paymentStatus.amount) / 100)));
+
+          // Pokud už bylo prodloužení promítnuto (idempotence)
+          if (current.extensionPaymentId === String(id) && current.durationMinutes >= newDuration) {
+            return;
+          }
+
+          tx.update(bookingRef!, {
+            durationMinutes: newDuration,
+            price: newPrice,
+            status: "paid",
+            extensionPaymentId: String(id),
+            pendingExtension: deleteField(),
+            extendedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          });
+          transitionedToExtensionPaid = true;
+        } else if (state === "CANCELED" || state === "TIMEOUTED") {
+          // U neúspěšného doplatku nerušíme původní rezervaci, pouze odstraníme pendingExtension
+          tx.update(bookingRef!, {
+            pendingExtension: deleteField()
+          });
+        }
+      });
+
+      if (transitionedToExtensionPaid && emailConfigured()) {
+        try {
+          const finalDoc = await getDoc(bookingRef!);
+          const bookingData = finalDoc.data() as any;
+          const recipients = await recipientsFor(bookingData);
+          if (recipients.length) {
+            await sendEmail({
+              to: recipients,
+              subject: 'Potvrzení prodloužení rezervace - Centrum Unity',
+              html: generateExtensionConfirmationEmail(bookingData, extraMinutesSent, Number(paymentStatus.amount) / 100)
+            });
+            console.log(`Extension confirmation email sent to ${recipients.join(', ')} for booking ${bookingId}`);
+          }
+        } catch (e: any) {
+          console.error("Failed to send extension confirmation email:", e.message);
+        }
+      }
+
+      return { state, isExtension: true };
     }
 
     const map: Record<string, string> = {

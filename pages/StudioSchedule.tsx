@@ -12,6 +12,7 @@ import { generateConfirmationEmail } from '../utils/emailTemplates';
 import { capitalizeName } from '../utils/vocative';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 import RescheduleModal from '../components/RescheduleModal';
+import ExtendBookingModal from '../components/ExtendBookingModal';
 
 declare global {
   interface Window {
@@ -153,6 +154,9 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
 
     // Host: e-mail pro ověření při rušení vlastní rezervace
     const [guestCancelEmail, setGuestCancelEmail] = useState('');
+
+    // Prodloužení rezervace
+    const [bookingToExtend, setBookingToExtend] = useState<Booking | null>(null);
 
     // Reset fields when modal opens/closes
     useEffect(() => {
@@ -1249,6 +1253,24 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                 </div>
                             )}
 
+                            {/* Prodloužit rezervaci */}
+                            {bookingToCancel.status === 'paid' && (
+                                <div className="mb-3">
+                                    <Button
+                                        variant="outline"
+                                        className="w-full border-emerald-300 text-emerald-800 hover:bg-emerald-50 hover:border-emerald-400 flex items-center justify-center gap-2 py-2.5 font-bold"
+                                        onClick={() => {
+                                            const target = bookingToCancel;
+                                            setBookingToCancel(null);
+                                            setBookingToExtend(target);
+                                        }}
+                                        id="schedule-extend-booking-btn"
+                                    >
+                                        <Clock className="w-4 h-4 text-emerald-600" /> Prodloužit rezervaci (+30 / +60 min)
+                                    </Button>
+                                </div>
+                            )}
+
                             {/* Admin Quick Reschedule Option */}
                             {currentUser.role === Role.ADMIN && (
                                 <div className="mb-4">
@@ -1316,6 +1338,20 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                         } catch (err: any) {
                             addToast('error', 'Chyba přesunu', err.message || 'Nepodařilo se přesunout rezervaci.');
                         }
+                    }}
+                />
+            )}
+
+            {/* Extend Booking Modal */}
+            {bookingToExtend && (
+                <ExtendBookingModal
+                    booking={bookingToExtend}
+                    allBookings={allBookings}
+                    groupEvents={groupEvents}
+                    onClose={() => setBookingToExtend(null)}
+                    onSuccess={(newDur, newPrice) => {
+                        addToast('success', 'Rezervace prodloužena', `Rezervace byla úspěšně prodloužena na ${newDur} minut.`);
+                        setBookingToExtend(null);
                     }}
                 />
             )}

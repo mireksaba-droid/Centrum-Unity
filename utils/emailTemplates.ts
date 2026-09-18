@@ -631,3 +631,72 @@ export const generateAdminEventCancellationNotificationEmail = (
     `;
 };
 
+export const generateExtensionConfirmationEmail = (
+  booking: Partial<Booking>,
+  extraMinutes: number,
+  extensionPrice: number
+) => {
+    const dateParts = booking.date?.split('-') || [];
+    const formattedDate = dateParts.length === 3 ? `${dateParts[2]}. ${dateParts[1]}. ${dateParts[0]}` : booking.date;
+    const roomLabel = booking.room === 1 ? 'M1 – Malá místnost' : 'M2 – Velká místnost';
+    const greetName = booking.bookedByName || '';
+    
+    // Calculate new end time
+    let startMin = 0;
+    if (booking.time) {
+      const [h, m] = booking.time.split(':').map(Number);
+      startMin = h * 60 + m;
+    }
+    const totalDuration = (booking.durationMinutes || 60);
+    const endMin = startMin + totalDuration;
+    const endH = Math.floor(endMin / 60);
+    const endM = endMin % 60;
+    const endTimeStr = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+    
+    const row = (label: string, value: string | number | undefined) => `
+        <tr>
+            <td style="padding:8px 0;color:#78716c;font-size:14px;border-bottom:1px solid #ece3d6;">${label}</td>
+            <td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;border-bottom:1px solid #ece3d6;">${value ?? ''}</td>
+        </tr>`;
+
+    return `
+    <div style="background-color:#f1e9dc;padding:32px 16px;font-family:Helvetica,Arial,sans-serif;">
+      <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06);">
+
+        ${emailHeader()}
+
+        <div style="padding:32px;">
+          <div style="display:inline-block;background:#dcfce7;color:#166534;font-size:13px;font-weight:700;padding:6px 14px;border-radius:999px;margin-bottom:16px;">✓ Rezervace prodloužena</div>
+
+          <h1 style="margin:0 0 8px;font-size:22px;color:#1c1917;">Rezervace úspěšně prodloužena</h1>
+          <p style="margin:0 0 24px;color:#57534e;font-size:15px;line-height:1.6;">
+            ${greetName ? `Dobrý den, ${toVocative(greetName)},` : 'Dobrý den,'}<br/>
+            Vaše rezervace v Centru Unity byla úspěšně prodloužena o <strong>+${extraMinutes} minut</strong>.
+          </p>
+
+          <div style="background:#faf7f2;border:1px solid #ece3d6;border-radius:12px;padding:20px 24px;margin-bottom:24px;">
+            <table style="width:100%;border-collapse:collapse;">
+              ${row('Datum', formattedDate)}
+              ${row('Nový časový úsek', `${booking.time} – ${endTimeStr}`)}
+              ${row('Prodlouženo o', `+${extraMinutes} minut`)}
+              ${row('Celková délka', `${totalDuration} minut`)}
+              ${row('Místnost', roomLabel)}
+              ${row('Doplatek', `${extensionPrice} Kč (uhrazeno online)`)}
+              ${row('Celková cena rezervace', `${booking.price} Kč`)}
+              ${booking.clientName ? row('Klient / Poznámka', booking.clientName) : ''}
+              ${row('Místo konání', 'Centrum Unity, Šmilovského 10, Vinohrady, Praha 2')}
+            </table>
+          </div>
+
+          <p style="color:#57534e;font-size:14px;line-height:1.6;margin:0 0 8px;">
+            Kalendářové exporty (.ics) a rozvrh studia byly automaticky aktualizovány.
+          </p>
+        </div>
+
+        ${emailFooter()}
+      </div>
+    </div>
+    `;
+};
+
+
