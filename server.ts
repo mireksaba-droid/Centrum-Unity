@@ -1266,6 +1266,30 @@ async function startServer() {
       const bookingDate = bData.date;
       const bookingTime = bData.time;
 
+      // Kontrola ochranného pásma: 24 h před akcí a během akce je minimální prodloužení 60 minut, dále po 30 min (60, 90, 120...)
+      const [y, m, d] = String(bookingDate).split('-').map(Number);
+      const [hh, mm] = String(bookingTime).split(':').map(Number);
+      const bookingStartTime = new Date(y, m - 1, d, hh, mm);
+      const bookingEndTime = new Date(bookingStartTime.getTime() + currentDuration * 60000);
+      const protectiveStart = new Date(bookingStartTime.getTime() - 24 * 60 * 60 * 1000);
+      const now = new Date();
+
+      const inProtectiveZone = now >= protectiveStart && now <= bookingEndTime;
+
+      if (inProtectiveZone) {
+        if (extraMinutes < 60 || extraMinutes % 30 !== 0) {
+          return res.status(400).json({
+            error: "V ochranném pásmu (24 hodin před začátkem a během akce) lze rezervaci prodloužit minimálně o 1 hodinu (60 min) a dále po 30 minutách (např. 60, 90, 120 min)."
+          });
+        }
+      } else {
+        if (extraMinutes < 30 || extraMinutes % 30 !== 0) {
+          return res.status(400).json({
+            error: "Rezervaci lze prodloužit minimálně o 30 minut a dále po 30 minutách (např. 30, 60, 90 min)."
+          });
+        }
+      }
+
       // 1. Ověření kolize pro prodloužený časový úsek
       const q = query(collection(db, "bookings"), where("date", "==", bookingDate));
       const snapshot = await getDocs(q);

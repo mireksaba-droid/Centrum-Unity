@@ -69,7 +69,10 @@ Uživatel vybere profil a zadá PIN. Po ověření (dnes na klientovi) zavolá `
 5. Uložení: lokální store + Firestore (`saveBookingToFirestore`, transakce a kolizní zámek proti dvojité rezervaci).
 6. Platba podle scénáře (viz sekce 6).
 7. **Prodloužení již zaplacené rezervace (Extension):**
-   - Lektor má možnost si v `PractitionerDashboard` i `StudioSchedule` prodloužit již zaplacenou rezervaci (+30, +60, +90, +120, +180 min).
+   - Lektor má možnost si v `PractitionerDashboard` i `StudioSchedule` prodloužit již zaplacenou rezervaci.
+   - **Pravidlo ochranného pásma (24 h před akcí a během akce):**
+     - Pokud lektor prodlužuje rezervaci v ochranném pásmu (méně než 24 hodin před začátkem nebo přímo v průběhu lekce), je **minimální doba prodloužení 1 hodina (60 min)** a poté lze prodlužovat po **půlhodinách** (+60 min, +90 min, +120 min, +150 min, +180 min). Možnost +30 min je v tomto pásmu zakázána na klientovi i na backendovém API.
+     - Pokud je do začátku rezervace více než 24 hodin, lze prodlužovat standardně od +30 min výše (+30, +60, +90, +120 min...).
    - Systém živě ověřuje kolize nového prodlouženého intervalu (včetně hygienických pauz 30/60 min a navazujících akcí) přes `checkBookingCollision`.
    - Vypočítá se rozdíl v ceně (`calculateRentalPrice`), vytvoří se nová platba v GoPay na doplatek (`/api/create-extension-payment`), otevře se platební brána a po zaplacení (`reconcilePayment`) se v databázi upraví `durationMinutes`, `price`, `extendedAt` a odešle se potvrzovací e-mail `generateExtensionConfirmationEmail`.
 8. Storno/přesun přes `cancelBooking` a `adminRescheduleBooking` (zápis do Firestore s kontrolou kolizí).

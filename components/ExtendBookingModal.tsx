@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Booking, GroupEvent } from '../types';
-import { formatLocalDate } from '../utils/dateUtils';
+import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 import { checkBookingCollision, calculateRentalPrice } from '../utils/scheduler';
 import { useStore } from '../store/useStore';
 import Button from './Button';
@@ -69,8 +69,22 @@ export const ExtendBookingModal: React.FC<ExtendBookingModalProps> = ({
   const currentDuration = booking.durationMinutes || 60;
   const currentEndTime = formatMinutesToTime(startMinutes + currentDuration);
 
-  // Možné varianty prodloužení (+30 min, +60 min, +90 min, +120 min, +180 min)
-  const candidateIncrements = [30, 60, 90, 120, 180];
+  // Zjištění, zda jsme v ochranném pásmu (24 h před začátkem akce a během akce)
+  const isInProtectiveZone = useMemo(() => {
+    if (!booking.date || !booking.time) return false;
+    const bookingStart = parseLocalDate(booking.date, booking.time);
+    const bookingEnd = new Date(bookingStart.getTime() + (booking.durationMinutes || 60) * 60000);
+    const protectiveStart = new Date(bookingStart.getTime() - 24 * 60 * 60 * 1000);
+    const now = new Date();
+    return now >= protectiveStart && now <= bookingEnd;
+  }, [booking.date, booking.time, booking.durationMinutes]);
+
+  // Možné varianty prodloužení:
+  // V ochranném pásmu (24 h před akcí a během akce): minimálně 1 hodina (60 min), dále po 30 min (60, 90, 120, 150, 180 min)
+  // Mimo ochranné pásmo (>24 h před akcí): od 30 min po 30 min (30, 60, 90, 120, 150, 180 min)
+  const candidateIncrements = useMemo(() => {
+    return isInProtectiveZone ? [60, 90, 120, 150, 180] : [30, 60, 90, 120, 150, 180];
+  }, [isInProtectiveZone]);
 
   const extensionOptions = useMemo(() => {
     return candidateIncrements.map(extra => {
@@ -282,6 +296,16 @@ export const ExtendBookingModal: React.FC<ExtendBookingModalProps> = ({
           ) : !paymentUrl ? (
             /* Výběr doby prodloužení */
             <div className="space-y-4">
+              {isInProtectiveZone && (
+                <div className="bg-amber-50/80 border border-amber-200 text-amber-900 rounded-xl p-3 flex items-start gap-2.5 text-xs">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="font-semibold block text-amber-950">Ochranné pásmo (24 h před akcí a během akce)</strong>
+                    V tomto časovém okně lze rezervaci prodloužit <strong>minimálně o 1 hodinu (60 min)</strong>, následně po 30 minutách (+90 min, +120 min...).
+                  </div>
+                </div>
+              )}
+
               <label className="block text-sm font-bold text-stone-800">
                 Zvolte, o kolik chcete rezervaci prodloužit:
               </label>
