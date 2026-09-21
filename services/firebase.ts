@@ -360,6 +360,37 @@ export const updatePractitionerInFirestore = async (practitioner: Practitioner) 
     }
 };
 
+export const deletePractitionerFromFirestore = async (id: string) => {
+    try {
+        const { useStore } = await import('../store/useStore');
+        const token = useStore.getState().token;
+        if (token) {
+            const response = await fetch(`/api/practitioners/${id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            if (response.ok) {
+                const resData = await response.json();
+                if (resData.success) return true;
+            }
+        }
+    } catch (error) {
+        console.warn("Server-side deletePractitioner failed, falling back to direct Firestore:", error);
+    }
+
+    if (!isFirebaseReady) return true;
+    try {
+        const practitionerRef = doc(db, 'practitioners', id);
+        await deleteDoc(practitionerRef);
+        return true;
+    } catch (error) {
+        console.error("Error deleting practitioner:", error);
+        return false;
+    }
+};
+
 // --- GROUP EVENTS SERVICES ---
 export const saveGroupEventToFirestore = async (event: any, token?: string | null) => {
     // Try server-side API first if we have an admin JWT token

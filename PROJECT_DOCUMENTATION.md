@@ -116,7 +116,8 @@ Administrátorský dashboard obsahuje dedikovanou záložku „Analytika“, kte
 
 ### Practitioner (Lektor)
 `id`, `name`, `title`, `category`, `role`, `pin`, `imageUrl`, `services`, `colorCode`, `isActive`.
-Řazení v UI viz `AGENTS.md` / `sortPractitioners`.
+- **Řazení v UI:** viz `AGENTS.md` / `sortPractitioners`.
+- **Správa a mazání lektorů:** Všichni lektoři (výchozí i nově vytvoření) jsou uloženi v databázi Firestore (`practitioners`). Smazáním v administraci se lektor trvale odstraní z Firestore i všech seznamů a nabídek (odstraněn fallback, který dříve výchozí lektory automaticky obnovoval). Chráněny proti smazání jsou pouze systémové profily `admin` (Eva) a `guest` (Host / Externista).
 
 ## 6. E-maily a platební logika
 

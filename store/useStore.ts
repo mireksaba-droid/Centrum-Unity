@@ -91,7 +91,7 @@ export const useStore = create<AppState>()(
         
         try {
           const practitioners = await loadPractitioners(get().token);
-          if (practitioners.length > 0) {
+          if (practitioners && practitioners.length > 0) {
               // URL obrázků z konstant použijeme JEN pokud lektor nemá v DB nahranou vlastní fotku (base64).
               // Tím se nepřepíše fotka, kterou admin nahrál v aplikaci (ukládá se jako data:image/...).
               const mapped = practitioners.map(p => {
@@ -104,13 +104,6 @@ export const useStore = create<AppState>()(
                   }
                   return p;
               });
-              
-              // Přidáme i ty, co v DB vůbec nejsou, ale v konstantách ano (fallback)
-              for (const staticDef of PRACTITIONERS) {
-                  if (!mapped.find(p => p.id === staticDef.id)) {
-                      mapped.push(staticDef);
-                  }
-              }
 
               set({ practitionersList: sortPractitioners(mapped) });
           }

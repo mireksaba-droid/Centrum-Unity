@@ -816,10 +816,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     };
 
     const handleDeletePractitioner = async (p: Practitioner) => {
-        if (!window.confirm(`Opravdu smazat lektora ${p.name}? Tuto akci nelze vzít zpět.`)) return;
+        if (p.id === 'admin' || p.id === 'guest') {
+            addToast('error', 'Chyba', 'Profil administrátora a hosta nelze smazat.');
+            return;
+        }
+        if (!window.confirm(`Opravdu trvale smazat lektora ${p.name}? Profil bude odstraněn z databáze i všech seznamů a akci nelze vzít zpět.`)) return;
         try {
             await useStore.getState().deletePractitioner(p.id);
-            addToast('success', 'Smazáno', `Lektor ${p.name} byl odstraněn.`);
+            addToast('success', 'Smazáno', `Lektor ${p.name} byl trvale odstraněn.`);
         } catch (e: any) {
             addToast('error', 'Chyba', e.message || 'Smazání se nezdařilo.');
         }
@@ -1850,14 +1854,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     <Button size="sm" variant="secondary" onClick={() => handleOpenEditModal(p)}>
                                         <Edit className="w-4 h-4 mr-1" /> Upravit
                                     </Button>
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => handleDeletePractitioner(p)}
-                                        className="hover:bg-red-50 hover:text-red-600 hover:border-red-200"
-                                    >
-                                        <Trash2 className="w-4 h-4 mr-1" /> Smazat
-                                    </Button>
+                                    {p.id !== 'admin' && p.id !== 'guest' && (
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() => handleDeletePractitioner(p)}
+                                            className="hover:bg-red-50 hover:text-red-600 hover:border-red-200"
+                                        >
+                                            <Trash2 className="w-4 h-4 mr-1" /> Smazat
+                                        </Button>
+                                    )}
                                 </div>
                             </div>
                         ))}

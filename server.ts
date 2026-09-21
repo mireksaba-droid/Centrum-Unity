@@ -392,20 +392,19 @@ async function startServer() {
         return res.status(400).json({ error: "Chybí ID uživatele nebo PIN" });
       }
 
-      // Najdeme uživatele: primárně z databáze (admin mohl PIN změnit), jinak ze seed konstant.
+      // Najdeme uživatele: primárně z databáze Firestore
       let record: any = null;
       try {
         const snap = await getDoc(doc(db, "practitioners", String(userId)));
-        if (snap.exists()) record = snap.data();
+        if (snap.exists()) {
+          record = snap.data();
+        }
       } catch (e) {
-        // pokud DB selže, zkusíme fallback níže
-      }
-      if (!record) {
-        record = (PRACTITIONERS as any[]).find((p) => p.id === userId) || null;
+        console.warn("Chyba při čtení profilu z DB:", e);
       }
 
       if (!record || record.pin === undefined) {
-        return res.status(401).json({ error: "Neplatné přihlášení." });
+        return res.status(401).json({ error: "Neplatné přihlášení nebo smazaný profil." });
       }
 
       // Vlastní ověření PINu na serveru
@@ -454,7 +453,17 @@ async function startServer() {
         }
       }
 
-      const snap = await getDocs(collection(db, "practitioners"));
+      let snap = await getDocs(collection(db, "practitioners"));
+      if (snap.empty) {
+        // Inicializace výchozích lektorů do Firestore při prvním spuštění
+        const batch = writeBatch(db);
+        for (const p of PRACTITIONERS) {
+          batch.set(doc(db, "practitioners", p.id), p);
+        }
+        await batch.commit();
+        snap = await getDocs(collection(db, "practitioners"));
+      }
+
       const practitioners = snap.docs.map(doc => {
          const data = doc.data();
          if (showPins) {
