@@ -10,6 +10,14 @@ export default defineConfig(({ mode }) => {
         port: 3000,
         host: '0.0.0.0',
       },
+      esbuild: {
+        target: 'esnext',
+      },
+      optimizeDeps: {
+        esbuildOptions: {
+          target: 'esnext',
+        },
+      },
       build: {
         target: 'esnext',
       },

@@ -149,8 +149,9 @@ async function startServer() {
   }
 
   // SMTP (nodemailer) lazy initialization - webkitty.eu / vlastní poštovní server
-  let mailTransporter: nodemailer.Transporter | null = null;
-  function getMailer(): nodemailer.Transporter {
+  type MailTransporter = ReturnType<typeof nodemailer.createTransport>;
+  let mailTransporter: MailTransporter | null = null;
+  function getMailer(): MailTransporter {
     if (!mailTransporter) {
       const host = process.env.SMTP_HOST;
       const user = process.env.SMTP_USER;
