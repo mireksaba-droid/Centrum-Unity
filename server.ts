@@ -5,6 +5,7 @@ import nodemailer from "nodemailer";
 import { Resend } from "resend";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
+import rateLimit from "express-rate-limit";
 
 import { runTransaction, getDoc, DocumentReference, db, collection, doc, updateDoc, deleteDoc, getDocs, query, where, setDoc, writeBatch, deleteField } from "./server-firebase";
 import firebaseConfig from "./firebase-applet-config.json";
@@ -85,6 +86,35 @@ async function startServer() {
   const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   app.set("trust proxy", 1); // správná klientská IP za reverzní proxy (rate limiting)
+
+  // Bezpečnostní rate limitery (ochrana proti DoS a brute-force útokům dle CodeQL doporučení)
+  const globalLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minuta
+    max: 600, // 600 požadavků za minutu na IP (pro běžné procházení a statické soubory)
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Příliš mnoho požadavků, zkuste to prosím za chvíli." },
+  });
+
+  const apiLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minuta
+    max: 200, // 200 požadavků za minutu na IP pro API endpointy
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Příliš mnoho požadavků na API, zkuste to prosím za chvíli." },
+  });
+
+  const authLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minuta
+    max: 30, // 30 požadavků za minutu na IP pro citlivé autorizační a přihlašovací endpointy
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Příliš mnoho pokusů o přihlášení nebo autorizaci, zkuste to prosím za chvíli." },
+  });
+
+  app.use(globalLimiter);
+  app.use("/api", apiLimiter);
+
   app.use(express.json());
 
   // Diagnostika prostředí při startu - vypíše, které proměnné jsou načtené (nikdy jejich hodnoty).
@@ -385,7 +415,7 @@ async function startServer() {
 
   // Login endpoint - PIN se ověřuje na SERVERU (ne v prohlížeči).
   // Jméno a role se berou z uloženého záznamu, ne od klienta (nejde je podvrhnout).
-  app.post("/api/login", async (req, res) => {
+  app.post("/api/login", authLimiter, async (req, res) => {
     try {
       const { userId, pin } = req.body;
 
@@ -2301,7 +2331,7 @@ async function startServer() {
   // --- Napojení na osobní kalendář (ICS odběr) ---
 
   // Vrátí přihlášenému lektorovi jeho odkaz pro odběr kalendáře (vytvoří token, pokud chybí).
-  app.get("/api/my-calendar-url", requireAuth, async (req: AuthRequest, res: Response) => {
+  app.get("/api/my-calendar-url", authLimiter, requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       const id = req.user?.id;
       if (!id || id === "guest") return res.status(400).json({ error: "Pro tento profil není kalendář dostupný." });
@@ -2464,7 +2494,7 @@ async function startServer() {
   });
 
   // Admin: odkaz na MASTER kalendář (všechny rezervace, obě místnosti) do telefonu.
-  app.get("/api/master-calendar-url", requireAuth, async (req: AuthRequest, res: Response) => {
+  app.get("/api/master-calendar-url", authLimiter, requireAuth, async (req: AuthRequest, res: Response) => {
     try {
       if (!isAdmin(req)) return res.status(403).json({ error: "Master kalendář je jen pro administrátora." });
       const id = req.user?.id;

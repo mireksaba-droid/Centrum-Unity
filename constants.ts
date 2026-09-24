@@ -721,6 +721,23 @@ export const RAW_PRACTITIONERS: Practitioner[] = [
 ];
 
 
+const isCustomPractitionerImage = (url?: string): boolean => {
+  if (!url || url.trim().length <= 5) return false;
+  const cleanUrl = url.trim();
+  // Lokální soubory z /public nebo data URL jsou vždy vlastní fotografie
+  if (cleanUrl.startsWith('/') || cleanUrl.startsWith('./') || cleanUrl.startsWith('data:')) {
+    return true;
+  }
+  try {
+    const parsed = new URL(cleanUrl);
+    const host = parsed.hostname.toLowerCase();
+    // Výchozí generované placeholdery z Unsplash nepovažujeme za vlastní fotografii
+    return !(host === 'images.unsplash.com' || host.endsWith('.unsplash.com'));
+  } catch {
+    return false;
+  }
+};
+
 export const sortPractitioners = (practitioners: Practitioner[]): Practitioner[] => {
   return [...practitioners].sort((a, b) => {
     const getPriority = (id: string) => {
@@ -737,8 +754,8 @@ export const sortPractitioners = (practitioners: Practitioner[]): Practitioner[]
       return priorityA - priorityB;
     }
 
-    const aHasImg = a.imageUrl && !a.imageUrl.includes('unsplash.com') && a.imageUrl.length > 5;
-    const bHasImg = b.imageUrl && !b.imageUrl.includes('unsplash.com') && b.imageUrl.length > 5;
+    const aHasImg = isCustomPractitionerImage(a.imageUrl);
+    const bHasImg = isCustomPractitionerImage(b.imageUrl);
 
     if (aHasImg && !bHasImg) return -1;
     if (!aHasImg && bHasImg) return 1;
