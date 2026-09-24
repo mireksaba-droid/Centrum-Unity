@@ -12,6 +12,7 @@ import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 import { useStore } from '../store/useStore';
 import { isDemoMode } from '../services/firebase';
 import { generatePaymentRequestEmail } from '../utils/emailTemplates';
+import { isPreviewEnvironment } from '../utils/env';
 
 // Testovací / ignorovaná jména – nezobrazují se ve statistikách, aktivitě ani seznamu objednávek.
 // Normalizace = malá písmena + odstranění diakritiky + sjednocení mezer, ať to chytne i "MIREK SABA", "Mírek  Sába" apod.
@@ -1887,9 +1888,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             const isFull = registeredCount >= event.capacity;
                             const practitioner = practitioners.find(p => p.id === event.practitionerId);
                             const practitionerDisplayName = event.practitionerName || (event.practitionerId === 'guest' ? 'Externí lektor' : (practitioner?.name || 'Nezadáno'));
-                            const isPreview = window.location.hostname.includes('usercontent.goog') || 
-                                              window.location.hostname.includes('webcontainer.io') ||
-                                              window.location.hostname.includes('idx.google.com');
+                            const isPreview = isPreviewEnvironment();
                             const eventUrl = isPreview 
                                 ? `${window.location.origin}/#/event/${event.id}` 
                                 : `${window.location.origin}/event/${event.id}`;

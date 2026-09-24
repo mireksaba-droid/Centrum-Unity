@@ -13,6 +13,7 @@ import { Footer } from './components/Footer.tsx';
 import { Monitoring } from './services/monitoring.ts';
 import { ToastProvider } from './contexts/ToastContext.tsx';
 import { useStore } from './store/useStore.ts';
+import { isPreviewEnvironment } from './utils/env.ts';
 
 // --- Analytics & UX Helpers ---
 const PageTracker = () => {
@@ -160,9 +161,7 @@ const AppContent = () => {
 };
 
 const App = () => { 
-    const isPreview = window.location.hostname.includes('usercontent.goog') || 
-                      window.location.hostname.includes('webcontainer.io') ||
-                      window.location.hostname.includes('idx.google.com');
+    const isPreview = isPreviewEnvironment();
 
     const Router = isPreview ? HashRouter : BrowserRouter;
 

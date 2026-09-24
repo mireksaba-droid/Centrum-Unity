@@ -1,5 +1,6 @@
 import { Booking } from '../types';
 import { toVocative } from './vocative';
+import { isPreviewEnvironment } from './env';
 import { PRACTITIONERS } from '../constants';
 
 // Veřejná URL loga (v produkci se servíruje z public/logo.png)
@@ -23,11 +24,7 @@ const emailFooter = () => `
     </div>`;
 
 export const generatePaymentRequestEmail = (booking: Partial<Booking>, baseUrl: string = 'https://rezervace.centrumunity.cz') => {
-    const hasHash = baseUrl.includes('/#') || (typeof window !== 'undefined' && (
-        window.location.hostname.includes('usercontent.goog') ||
-        window.location.hostname.includes('webcontainer.io') ||
-        window.location.hostname.includes('idx.google.com')
-    ));
+    const hasHash = baseUrl.includes('/#') || isPreviewEnvironment();
     const cleanBase = baseUrl.replace(/\/+$/, '').replace('/#', '');
     const paymentLink = hasHash 
         ? `${cleanBase}/#/pay/${encodeURIComponent(booking.id || '')}` 
@@ -54,11 +51,7 @@ export const generatePaymentRequestEmail = (booking: Partial<Booking>, baseUrl: 
 
 // Připomínka platby - pošle se pár hodin před vypršením lhůty, když rezervace stále není zaplacená.
 export const generatePaymentReminderEmail = (booking: Partial<Booking>, hoursLeft: number = 6, baseUrl: string = 'https://rezervace.centrumunity.cz') => {
-    const hasHash = baseUrl.includes('/#') || (typeof window !== 'undefined' && (
-        window.location.hostname.includes('usercontent.goog') ||
-        window.location.hostname.includes('webcontainer.io') ||
-        window.location.hostname.includes('idx.google.com')
-    ));
+    const hasHash = baseUrl.includes('/#') || isPreviewEnvironment();
     const cleanBase = baseUrl.replace(/\/+$/, '').replace('/#', '');
     const paymentLink = hasHash 
         ? `${cleanBase}/#/pay/${encodeURIComponent(booking.id || '')}` 

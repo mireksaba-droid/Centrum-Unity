@@ -1435,6 +1435,15 @@ async function startServer() {
     }
   });
 
+  // Pomocná funkce pro bezpečné ověření formátu ID platby (ochrana proti SSRF a injektování cesty)
+  function sanitizePaymentId(id: unknown): string {
+    const str = typeof id === "number" ? String(id) : (typeof id === "string" ? id.trim() : "");
+    if (!/^\d{1,20}$/.test(str)) {
+      throw new Error("Neplatný formát ID platby (očekáváno pouze číselné ID).");
+    }
+    return str;
+  }
+
   // Refund endpoint for GoPay
   app.post("/api/refund", requireAuth, async (req: AuthRequest, res: Response) => {
     try {
@@ -1444,10 +1453,17 @@ async function startServer() {
         return res.status(400).json({ error: "Missing paymentId" });
       }
 
+      let cleanPaymentId: string;
+      try {
+        cleanPaymentId = sanitizePaymentId(paymentId);
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message || "Invalid paymentId format" });
+      }
+
       const token = await getGoPayToken();
 
       // Get payment status
-      const statusRes = await fetch(`${GOPAY_URL}/payments/payment/${paymentId}`, {
+      const statusRes = await fetch(`${GOPAY_URL}/payments/payment/${encodeURIComponent(cleanPaymentId)}`, {
         method: "GET",
         headers: {
           "Accept": "application/json",
@@ -1514,7 +1530,7 @@ async function startServer() {
         : paidAmount;
 
       // Refund the payment
-      const refundRes = await fetch(`${GOPAY_URL}/payments/payment/${paymentId}/refund`, {
+      const refundRes = await fetch(`${GOPAY_URL}/payments/payment/${encodeURIComponent(cleanPaymentId)}/refund`, {
          method: "POST",
          headers: {
            "Accept": "application/json",
@@ -1553,9 +1569,16 @@ async function startServer() {
         return res.status(400).json({ error: "Missing paymentId" });
       }
 
+      let cleanPaymentId: string;
+      try {
+        cleanPaymentId = sanitizePaymentId(paymentId);
+      } catch (err: any) {
+        return res.status(400).json({ error: err.message || "Invalid paymentId format" });
+      }
+
       const token = await getGoPayToken();
 
-      const captureRes = await fetch(`${GOPAY_URL}/payments/payment/${paymentId}/capture`, {
+      const captureRes = await fetch(`${GOPAY_URL}/payments/payment/${encodeURIComponent(cleanPaymentId)}/capture`, {
          method: "POST",
          headers: {
            "Accept": "application/json",
@@ -1582,9 +1605,10 @@ async function startServer() {
   // přechodu na 'paid') pošle potvrzovací e-mail. Volá se z webhooku i z návratu na return_url,
   // takže potvrzení dorazí i když GoPay z nějakého důvodu nedoručí webhook.
   // Je idempotentní - opakované volání nepřepíše zaplacenou rezervaci ani nepošle e-mail dvakrát.
-  async function reconcilePayment(id: string): Promise<{ state: string; isExtension?: boolean }> {
+  async function reconcilePayment(rawId: string): Promise<{ state: string; isExtension?: boolean }> {
+    const id = sanitizePaymentId(rawId);
     const token = await getGoPayToken();
-    const statusRes = await fetch(`${GOPAY_URL}/payments/payment/${id}`, {
+    const statusRes = await fetch(`${GOPAY_URL}/payments/payment/${encodeURIComponent(id)}`, {
       method: "GET",
       headers: { "Accept": "application/json", "Authorization": `Bearer ${token}` }
     });
@@ -1939,16 +1963,17 @@ async function startServer() {
   // Webhook pro notifikace z GoPay (změna stavu platby)
   app.all("/api/gopay/notify", async (req: Request, res: Response) => {
       try {
-          const id = req.query.id || req.body?.id; // GoPay posílá ID platby v query parametru nebo body
-          if (!id) {
+          const rawId = req.query.id || req.body?.id; // GoPay posílá ID platby v query parametru nebo body
+          if (!rawId) {
              return res.status(400).json({ error: "Missing payment ID" });
           }
-          const { state } = await reconcilePayment(String(id));
+          const id = sanitizePaymentId(rawId);
+          const { state } = await reconcilePayment(id);
           console.log(`GoPay Notification - Payment ID: ${id}, State: ${state}`);
           res.send("OK"); // GoPay očekává jakoukoliv HTTP 200 odpověď
       } catch (error: any) {
           console.error("GoPay Webhook Error:", error.message);
-          res.status(500).send("Error");
+          res.status(400).send("Error");
       }
   });
 
@@ -1957,15 +1982,16 @@ async function startServer() {
   // takže potvrzovací e-mail dorazí i bez webhooku.
   app.get("/api/gopay/status", async (req: Request, res: Response) => {
       try {
-          const { id } = req.query;
-          if (!id) {
+          const { id: rawId } = req.query;
+          if (!rawId) {
              return res.status(400).json({ error: "Missing payment ID" });
           }
-          const { state } = await reconcilePayment(String(id));
+          const id = sanitizePaymentId(rawId);
+          const { state } = await reconcilePayment(id);
           res.json({ state });
       } catch (error: any) {
           console.error("GoPay Status Error:", error.message);
-          res.status(500).json({ error: error.message });
+          res.status(400).json({ error: error.message });
       }
   });
 
