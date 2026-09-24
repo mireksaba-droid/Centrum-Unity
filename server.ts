@@ -213,8 +213,22 @@ async function startServer() {
     !!(process.env.RESEND_API_KEY || (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS));
 
   // Jednotné odeslání e-mailu: přednostně Resend, jinak SMTP.
-  // Vyčistí příjemce: rozdělí čárkou spojené adresy, ořízne mezery, ověří formát a odstraní duplicity.
-  const EMAIL_RE = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/;
+  // Vyčistí příjemce: rozdělí čárkou spojené adresy, ořízne mezery, ověří formát (bezpečně proti ReDoS) a odstraní duplicity.
+  function isValidEmail(email: string): boolean {
+    if (!email || email.length > 254 || email.length < 5) return false;
+    const parts = email.split("@");
+    if (parts.length !== 2) return false;
+    const [local, domain] = parts;
+    if (!local || !domain || local.length > 64 || domain.length > 253) return false;
+    if (local.startsWith(".") || local.endsWith(".") || domain.startsWith(".") || domain.endsWith(".")) return false;
+    if (local.includes("..") || domain.includes("..")) return false;
+    const domainParts = domain.split(".");
+    if (domainParts.length < 2) return false;
+    const tld = domainParts[domainParts.length - 1];
+    if (tld.length < 2) return false;
+    return /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(local) && /^[a-zA-Z0-9.-]+$/.test(domain);
+  }
+
   function normalizeRecipients(to: string | string[]): string[] {
     const raw = Array.isArray(to) ? to : [to];
     const out: string[] = [];
@@ -222,7 +236,7 @@ async function startServer() {
       for (const part of String(item ?? "").split(",")) {
         const e = part.trim();
         if (!e) continue;
-        if (EMAIL_RE.test(e)) out.push(e);
+        if (isValidEmail(e)) out.push(e);
         else console.warn(`sendEmail: přeskakuji neplatnou e-mailovou adresu "${e}"`);
       }
     }
