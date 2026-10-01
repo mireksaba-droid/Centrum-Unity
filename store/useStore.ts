@@ -35,11 +35,12 @@ interface AppState {
   // Bookings
   addBooking: (bookingData: Partial<Booking>) => Promise<void>;
   updateBookingStatus: (bookingId: string, status: string, reason?: string) => Promise<void>;
+  updateBookingEquipment: (bookingId: string, equipment: 'table' | 'futon' | 'none') => Promise<void>;
   extendBooking: (bookingId: string, extraMinutes: number, newTotalPrice: number) => Promise<void>;
   attachPaymentId: (bookingId: string, paymentId: string) => void;
   removeBooking: (bookingId: string) => Promise<void>;
   cancelBooking: (bookingId: string) => Promise<void>;
-  adminRescheduleBooking: (bookingId: string, newDate: string, newTime: string, reason?: string, newRoom?: 1 | 2) => Promise<void>;
+  adminRescheduleBooking: (bookingId: string, newDate: string, newTime: string, reason?: string, newRoom?: 1 | 2, newEquipment?: 'table' | 'futon' | 'none') => Promise<void>;
   
   // Practitioners
   updatePractitioner: (updatedP: Practitioner) => void;
@@ -192,6 +193,15 @@ export const useStore = create<AppState>()(
           }));
       },
 
+      updateBookingEquipment: async (bookingId: string, equipment: 'table' | 'futon' | 'none') => {
+          await updateBookingInFirestore(bookingId, { equipment });
+          set((state) => ({
+             bookings: state.bookings.map(b =>
+                b.id === bookingId ? { ...b, equipment } : b
+             )
+          }));
+      },
+
       extendBooking: async (bookingId: string, extraMinutes: number, newTotalPrice: number) => {
           const booking = get().bookings.find(b => b.id === bookingId);
           if (!booking) return;
@@ -301,12 +311,13 @@ export const useStore = create<AppState>()(
         }));
       },
 
-      adminRescheduleBooking: async (bookingId, newDate, newTime, reason, newRoom) => {
+      adminRescheduleBooking: async (bookingId, newDate, newTime, reason, newRoom, newEquipment) => {
         const state = get();
         const b = state.bookings.find(b => b.id === bookingId);
         if (!b) return;
 
         const targetRoom = newRoom ?? b.room ?? 1;
+        const targetEquipment = newEquipment ?? b.equipment ?? 'table';
 
         // Validace kolizí: přednost má vždy existující rezervace
         const { checkBookingCollision } = await import('../utils/scheduler');
@@ -330,6 +341,7 @@ export const useStore = create<AppState>()(
           date: newDate, 
           time: newTime, 
           room: targetRoom, 
+          equipment: targetEquipment,
           note: newNote 
         });
 
@@ -341,6 +353,7 @@ export const useStore = create<AppState>()(
               date: newDate,
               time: newTime,
               room: targetRoom,
+              equipment: targetEquipment,
               note: newNote
             };
           })

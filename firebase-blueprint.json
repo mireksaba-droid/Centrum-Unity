@@ -18,7 +18,8 @@
       "properties": {
         "id": { "type": "string" },
         "bookedByUserId": { "type": "string" },
-        "date": { "type": "string" }
+        "date": { "type": "string" },
+        "equipment": { "type": "string" }
       },
       "required": ["id", "bookedByUserId", "date"]
     },

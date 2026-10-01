@@ -41,8 +41,23 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
     onLogout
 }) => {
     // Hooks
-    const { token, practitionersList, updateBookingStatus, attachPaymentId, removeBooking, adminRescheduleBooking } = useStore();
+    const { token, practitionersList, updateBookingStatus, updateBookingEquipment, attachPaymentId, removeBooking, adminRescheduleBooking } = useStore();
     const { addToast } = useToast();
+    const [isUpdatingEquipment, setIsUpdatingEquipment] = useState(false);
+
+    const handleUpdateEquipment = async (bookingId: string, newEq: 'table' | 'futon' | 'none') => {
+        setIsUpdatingEquipment(true);
+        try {
+            await updateBookingEquipment(bookingId, newEq);
+            setBookingToCancel(prev => prev ? { ...prev, equipment: newEq } : null);
+            const eqLabel = newEq === 'futon' ? 'Futon' : newEq === 'table' ? 'Lehátko' : 'Bez vybavení';
+            addToast('success', 'Vybavení upraveno', `Vybavení sálu bylo změněno na ${eqLabel}.`);
+        } catch (err: any) {
+            addToast('error', 'Chyba', err.message || 'Nepodařilo se změnit vybavení.');
+        } finally {
+            setIsUpdatingEquipment(false);
+        }
+    };
 
     const sendConfirmationEmail = async (booking: Booking, isPaid: boolean = false) => {
         // Příjemci: klient (pokud vyplněn) + lektor, který rezervaci vytvořil.
@@ -1253,6 +1268,59 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                 </div>
                             )}
 
+                            {/* Změna vybavení (Lehátko / Futon / Bez) */}
+                            {(isAdmin || bookingToCancel.bookedByUserId === currentUser.id) && !['cancelled', 'refunded'].includes(bookingToCancel.status) && (
+                                <div className="mb-4 text-left bg-stone-50 border border-stone-200 rounded-xl p-3">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-xs font-bold text-stone-700 uppercase">Vybavení sálu</span>
+                                        <span className="text-[11px] font-semibold text-stone-500">
+                                            {(bookingToCancel.equipment || 'table') === 'futon' ? 'Aktuálně: Futon' : (bookingToCancel.equipment || 'table') === 'table' ? 'Aktuálně: Lehátko' : 'Aktuálně: Bez'}
+                                        </span>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <button
+                                            type="button"
+                                            disabled={isUpdatingEquipment}
+                                            onClick={() => handleUpdateEquipment(bookingToCancel.id, 'table')}
+                                            className={`py-2 px-2 rounded-lg border flex flex-col items-center justify-center gap-1 text-xs font-bold transition-all ${
+                                                (bookingToCancel.equipment || 'table') === 'table'
+                                                    ? 'border-indigo-600 bg-indigo-50 text-indigo-900 shadow-sm ring-1 ring-indigo-200'
+                                                    : 'border-stone-200 bg-white text-stone-600 hover:border-stone-300'
+                                            }`}
+                                        >
+                                            <Bed className="w-4 h-4 text-indigo-600" />
+                                            <span>Lehátko</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={isUpdatingEquipment}
+                                            onClick={() => handleUpdateEquipment(bookingToCancel.id, 'futon')}
+                                            className={`py-2 px-2 rounded-lg border flex flex-col items-center justify-center gap-1 text-xs font-bold transition-all ${
+                                                bookingToCancel.equipment === 'futon'
+                                                    ? 'border-indigo-600 bg-indigo-50 text-indigo-900 shadow-sm ring-1 ring-indigo-200'
+                                                    : 'border-stone-200 bg-white text-stone-600 hover:border-stone-300'
+                                            }`}
+                                        >
+                                            <Layers className="w-4 h-4 text-indigo-600" />
+                                            <span>Futon</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={isUpdatingEquipment}
+                                            onClick={() => handleUpdateEquipment(bookingToCancel.id, 'none')}
+                                            className={`py-2 px-2 rounded-lg border flex flex-col items-center justify-center gap-1 text-xs font-bold transition-all ${
+                                                bookingToCancel.equipment === 'none'
+                                                    ? 'border-indigo-600 bg-indigo-50 text-indigo-900 shadow-sm ring-1 ring-indigo-200'
+                                                    : 'border-stone-200 bg-white text-stone-600 hover:border-stone-300'
+                                            }`}
+                                        >
+                                            <X className="w-4 h-4 text-stone-400" />
+                                            <span>Bez</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Prodloužit rezervaci */}
                             {bookingToCancel.status === 'paid' && (
                                 <div className="mb-3">
@@ -1329,9 +1397,9 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                     booking={reschedulingBooking}
                     allBookings={allBookings}
                     onClose={() => setReschedulingBooking(null)}
-                    onConfirm={async (date, time, reason, newRoom) => {
+                    onConfirm={async (date, time, reason, newRoom, newEquipment) => {
                         try {
-                            await adminRescheduleBooking(reschedulingBooking.id, date, time, reason, newRoom);
+                            await adminRescheduleBooking(reschedulingBooking.id, date, time, reason, newRoom, newEquipment);
                             setReschedulingBooking(null);
                             const roomName = (newRoom || reschedulingBooking.room) === 1 ? 'Místnost 1 (Malá)' : 'Místnost 2 (Velká)';
                             addToast('success', 'Rezervace přesunuta', `Rezervace byla úspěšně přesunuta na ${formatLocalDate(date)} v ${time} do ${roomName}.`);

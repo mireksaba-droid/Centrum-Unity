@@ -4,19 +4,20 @@ import { GENERATED_TIMES } from '../constants';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 import { checkBookingCollision } from '../utils/scheduler';
 import Button from './Button';
-import { AlertTriangle, Clock, Calendar as CalendarIcon, X, Check, Lock, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, Clock, Calendar as CalendarIcon, X, Check, Lock, ShieldAlert, Bed, Layers } from 'lucide-react';
 
 interface RescheduleModalProps {
   booking: Booking;
   allBookings?: Booking[];
   onClose: () => void;
-  onConfirm: (newDate: string, newTime: string, reason?: string, newRoom?: 1 | 2) => void;
+  onConfirm: (newDate: string, newTime: string, reason?: string, newRoom?: 1 | 2, newEquipment?: 'table' | 'futon' | 'none') => void;
 }
 
 const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, allBookings = [], onClose, onConfirm }) => {
   const [newDate, setNewDate] = useState(booking.date);
   const [newTime, setNewTime] = useState(booking.time);
   const [newRoom, setNewRoom] = useState<1 | 2>(booking.room || 1);
+  const [newEquipment, setNewEquipment] = useState<'table' | 'futon' | 'none'>(booking.equipment || 'table');
   const [reason, setReason] = useState('');
   const [isOverrideConfirmed, setIsOverrideConfirmed] = useState(false);
   const [isLateReschedule, setIsLateReschedule] = useState(false);
@@ -65,7 +66,7 @@ const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, allBookings 
           alert("Při pozdní změně (méně než 25h) je nutné vyplnit důvod pro Audit log.");
           return;
       }
-      onConfirm(newDate, newTime, reason, newRoom);
+      onConfirm(newDate, newTime, reason, newRoom, newEquipment);
   };
 
   const dates = Array.from({length: 30}, (_, i) => {
@@ -129,6 +130,51 @@ const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, allBookings 
                                 {newRoom === 2 && <Check className="w-4 h-4 text-indigo-600" />}
                             </div>
                             <span className="text-[11px] text-stone-500 block">Masážní lehátko i futon</span>
+                        </button>
+                    </div>
+                </div>
+
+                {/* Target Equipment Selection */}
+                <div>
+                    <label className="block text-xs font-bold text-stone-700 mb-1.5 uppercase">Vybavení (Lehátko / Futon)</label>
+                    <div className="grid grid-cols-3 gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setNewEquipment('table')}
+                            className={`p-2.5 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${
+                                newEquipment === 'table' 
+                                    ? 'border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-200 text-indigo-900 font-bold' 
+                                    : 'border-stone-200 hover:border-stone-300 bg-white text-stone-600'
+                            }`}
+                        >
+                            <Bed className="w-4 h-4 text-indigo-600" />
+                            <span className="text-xs">Lehátko</span>
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => setNewEquipment('futon')}
+                            className={`p-2.5 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${
+                                newEquipment === 'futon' 
+                                    ? 'border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-200 text-indigo-900 font-bold' 
+                                    : 'border-stone-200 hover:border-stone-300 bg-white text-stone-600'
+                            }`}
+                        >
+                            <Layers className="w-4 h-4 text-indigo-600" />
+                            <span className="text-xs">Futon</span>
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => setNewEquipment('none')}
+                            className={`p-2.5 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${
+                                newEquipment === 'none' 
+                                    ? 'border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-200 text-indigo-900 font-bold' 
+                                    : 'border-stone-200 hover:border-stone-300 bg-white text-stone-600'
+                            }`}
+                        >
+                            <X className="w-4 h-4 text-stone-400" />
+                            <span className="text-xs">Bez</span>
                         </button>
                     </div>
                 </div>

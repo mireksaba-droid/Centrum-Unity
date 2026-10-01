@@ -40,7 +40,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
   onCancelBooking,
   onInternalBook
 }) => {
-  const { token, groupEvents } = useStore();
+  const { token, groupEvents, updateBookingEquipment } = useStore();
   const { addToast } = useToast();
   const [activeTab, setActiveTab] = useState<'calendar'>('calendar');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -48,6 +48,20 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
   const [showCalendarPicker, setShowCalendarPicker] = useState(false);
   const [bookingToCancel, setBookingToCancel] = useState<Booking | null>(null);
   const [bookingToExtend, setBookingToExtend] = useState<Booking | null>(null);
+  const [updatingEquipmentId, setUpdatingEquipmentId] = useState<string | null>(null);
+
+  const handleUpdateEquipment = async (bookingId: string, newEq: 'table' | 'futon' | 'none') => {
+    setUpdatingEquipmentId(bookingId);
+    try {
+      await updateBookingEquipment(bookingId, newEq);
+      const eqLabel = newEq === 'futon' ? 'Futon' : newEq === 'table' ? 'Lehátko' : 'Bez vybavení';
+      addToast('success', 'Vybavení upraveno', `Vybavení rezervace bylo změněno na ${eqLabel}.`);
+    } catch (err: any) {
+      addToast('error', 'Chyba', err.message || 'Nepodařilo se změnit vybavení.');
+    } finally {
+      setUpdatingEquipmentId(null);
+    }
+  };
   
   // Temporary state for editing entire practitioner object
   const [tempPractitioner, setTempPractitioner] = useState<Practitioner | null>(currentUser);
@@ -627,6 +641,60 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
                                                     {booking.room === 1 ? 'Malá (R1)' : 'Velká (R2)'}
                                                 </div>
                                             </div>
+
+                                            {/* Vybavení sálu - možnost změny Lehátko / Futon */}
+                                            {!isCancelled && (
+                                                <div className="mt-3 pt-3 border-t border-stone-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-stone-50/80 p-2.5 rounded-xl border border-stone-200/70">
+                                                    <div className="flex items-center gap-2 text-xs font-bold text-stone-700">
+                                                        <span>Vybavení sálu:</span>
+                                                        <span className="text-[11px] font-semibold text-stone-500">
+                                                            {(booking.equipment || 'table') === 'futon' ? 'Futon' : (booking.equipment || 'table') === 'table' ? 'Lehátko' : 'Bez'}
+                                                        </span>
+                                                    </div>
+                                                    <div className="inline-flex items-center p-1 bg-stone-200/60 rounded-lg gap-1 self-start sm:self-auto">
+                                                        <button
+                                                            type="button"
+                                                            disabled={updatingEquipmentId === booking.id}
+                                                            onClick={() => handleUpdateEquipment(booking.id, 'table')}
+                                                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
+                                                                (booking.equipment || 'table') === 'table'
+                                                                    ? 'bg-white text-stone-900 shadow-sm ring-1 ring-stone-300'
+                                                                    : 'text-stone-600 hover:text-stone-900 hover:bg-white/50'
+                                                            }`}
+                                                        >
+                                                            <Bed className="w-3.5 h-3.5 text-sage-600" />
+                                                            <span>Lehátko</span>
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            disabled={updatingEquipmentId === booking.id}
+                                                            onClick={() => handleUpdateEquipment(booking.id, 'futon')}
+                                                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
+                                                                booking.equipment === 'futon'
+                                                                    ? 'bg-white text-stone-900 shadow-sm ring-1 ring-stone-300'
+                                                                    : 'text-stone-600 hover:text-stone-900 hover:bg-white/50'
+                                                            }`}
+                                                        >
+                                                            <Layers className="w-3.5 h-3.5 text-stone-600" />
+                                                            <span>Futon</span>
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            disabled={updatingEquipmentId === booking.id}
+                                                            onClick={() => handleUpdateEquipment(booking.id, 'none')}
+                                                            className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-md transition-all ${
+                                                                booking.equipment === 'none'
+                                                                    ? 'bg-white text-stone-900 shadow-sm ring-1 ring-stone-300'
+                                                                    : 'text-stone-500 hover:text-stone-900 hover:bg-white/50'
+                                                            }`}
+                                                            title="Bez vybavení"
+                                                        >
+                                                            <X className="w-3.5 h-3.5 text-stone-400" />
+                                                            <span>Bez</span>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
                                             
                                             {/* CRM Info Display */}
                                             {(booking.clientName || booking.clientEmail || booking.clientPhone || booking.note) && (

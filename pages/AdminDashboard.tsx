@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Booking, Practitioner, Service, Role, GroupEvent, EventRegistration } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronRight, Loader2, Smartphone, BarChart3 } from 'lucide-react';
+import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, Bed, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronRight, Loader2, Smartphone, BarChart3 } from 'lucide-react';
 import Button from '../components/Button';
 import StudioSchedule from './StudioSchedule';
 import RescheduleModal from '../components/RescheduleModal';
@@ -45,7 +45,7 @@ interface AdminDashboardProps {
   eventRegistrations: EventRegistration[];
   updatePractitioner: (p: Practitioner) => void;
   onAddPractitioner: (p: Practitioner) => void;
-  onAdminReschedule: (bookingId: string, newDate: string, newTime: string, reason?: string, newRoom?: 1 | 2) => Promise<void>;
+  onAdminReschedule: (bookingId: string, newDate: string, newTime: string, reason?: string, newRoom?: 1 | 2, newEquipment?: 'table' | 'futon' | 'none') => Promise<void>;
   onCreateGroupEvent: (event: GroupEvent) => void;
   onUpdateGroupEvent: (event: GroupEvent) => void;
   onDeleteGroupEvent: (eventId: string) => void;
@@ -1757,9 +1757,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                 <div className="text-xs text-indigo-600 font-medium">{booking.serviceName}</div>
                                             </td>
                                             <td className="px-6 py-4">
-                                                <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${booking.room === 1 ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>
-                                                    {booking.room === 1 ? 'Malá (R1)' : 'Velká (R2)'}
-                                                </span>
+                                                <div className="flex flex-col gap-1">
+                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold w-fit ${booking.room === 1 ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>
+                                                        {booking.room === 1 ? 'Malá (R1)' : 'Velká (R2)'}
+                                                    </span>
+                                                    <span className="inline-flex items-center gap-1 text-[11px] text-stone-600 font-medium">
+                                                        {booking.equipment === 'futon' ? (
+                                                            <><Layers className="w-3 h-3 text-stone-500" /> Futon</>
+                                                        ) : booking.equipment === 'none' ? (
+                                                            <><X className="w-3 h-3 text-stone-400" /> Bez</>
+                                                        ) : (
+                                                            <><Bed className="w-3 h-3 text-indigo-500" /> Lehátko</>
+                                                        )}
+                                                    </span>
+                                                </div>
                                             </td>
                                             <td className="px-6 py-4">
                                                 {!['cancelled', 'refunded'].includes(booking.status) ? (
@@ -2469,12 +2480,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     booking={reschedulingBooking} 
                     allBookings={allBookings}
                     onClose={() => setReschedulingBooking(null)} 
-                    onConfirm={async (date, time, reason, newRoom) => {
+                    onConfirm={async (date, time, reason, newRoom, newEquipment) => {
                         try {
-                            await onAdminReschedule(reschedulingBooking.id, date, time, reason, newRoom);
+                            await onAdminReschedule(reschedulingBooking.id, date, time, reason, newRoom, newEquipment);
                             setReschedulingBooking(null);
                             const roomName = (newRoom || reschedulingBooking.room) === 1 ? 'Místnost 1 (Malá)' : 'Místnost 2 (Velká)';
-                            addToast('success', 'Rezervace přesunuta', `Rezervace byla úspěšně přesunuta na ${formatLocalDate(date)} v ${time} do ${roomName}.`);
+                            const eqLabel = newEquipment === 'futon' ? 'Futon' : newEquipment === 'table' ? 'Lehátko' : 'Bez';
+                            addToast('success', 'Rezervace upravena', `Rezervace byla úspěšně uložena na ${formatLocalDate(date)} v ${time} v ${roomName} (${eqLabel}).`);
                         } catch (err: any) {
                             addToast('error', 'Chyba přesunu', err.message || 'Nepodařilo se přesunout rezervaci.');
                         }
