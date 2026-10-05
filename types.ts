@@ -65,6 +65,11 @@ export interface Booking {
   cancelledAt?: string; // ISO date string
   cancellationReason?: string; // Proč byla rezervace zrušena (payment_expired, payment_cancelled, cancelled_by_guest, cancelled_by_admin, ...)
   
+  rescheduledAt?: string; // Kdy byla rezervace přesunuta administrátorem
+  originalDate?: string;  // Původní datum před přesunem
+  originalTime?: string;  // Původní čas před přesunem
+  rescheduleReason?: string; // Důvod přesunu termínu
+
   paymentId?: string; // Pro refundace testovacích nebo skutečných plateb před uplynutím termínu
 
   createdAt: string;

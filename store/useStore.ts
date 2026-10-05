@@ -336,13 +336,20 @@ export const useStore = create<AppState>()(
         }
 
         const newNote = reason ? (b.note ? `${b.note}\nADMIN RESCHEDULE: ${reason}` : `ADMIN RESCHEDULE: ${reason}`) : b.note;
+        const rescheduledAt = new Date().toISOString();
+        const originalDate = b.originalDate || b.date;
+        const originalTime = b.originalTime || b.time;
         
         await updateBookingInFirestore(bookingId, { 
           date: newDate, 
           time: newTime, 
           room: targetRoom, 
           equipment: targetEquipment,
-          note: newNote 
+          note: newNote,
+          rescheduledAt,
+          originalDate,
+          originalTime,
+          rescheduleReason: reason || undefined
         });
 
         set((state) => ({
@@ -354,7 +361,11 @@ export const useStore = create<AppState>()(
               time: newTime,
               room: targetRoom,
               equipment: targetEquipment,
-              note: newNote
+              note: newNote,
+              rescheduledAt,
+              originalDate,
+              originalTime,
+              rescheduleReason: reason || undefined
             };
           })
         }));

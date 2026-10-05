@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Booking, Practitioner, Service, Role, GroupEvent, EventRegistration } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, Bed, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronRight, Loader2, Smartphone, BarChart3 } from 'lucide-react';
+import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, Bed, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronUp, ChevronRight, RefreshCw, Loader2, Smartphone, BarChart3 } from 'lucide-react';
 import Button from '../components/Button';
 import StudioSchedule from './StudioSchedule';
 import RescheduleModal from '../components/RescheduleModal';
@@ -93,6 +93,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     
     // Reschedule Modal State
     const [reschedulingBooking, setReschedulingBooking] = useState<Booking | null>(null);
+    const [show6DayWindowDetails, setShow6DayWindowDetails] = useState(false);
 
     // Practitioner Modal State (Add/Edit)
     const [isPractitionerModalOpen, setIsPractitionerModalOpen] = useState(false);
@@ -482,23 +483,121 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         const paidEverCount = paidBookings.length + stornoBookings.length;  // vše, co bylo někdy zaplaceno
         const cancellationRate = paidEverCount > 0 ? ((totalCancelled / paidEverCount) * 100).toFixed(1) : "0";
 
-        // Lead time distribuce – jen z reálných storen
-        const leadTimes = { critical: 0, warning: 0, safe: 0 };
+        // Lead time distribuce storen a přesunů termínů:
+        // 1. < 24h (Krizové: méně než 24h před akcí, bez nároku na online refundaci)
+        // 2. 24h – 7 dní / 168h (Rizikové 6denní okno: bezplatné storno/přesun, ale sál se na poslední chvíli obtížně zaplní)
+        // 3. > 7 dní (Bezpečné: dostatečný předstih pro re-obsazení sálu)
+        const leadTimes = { critical: 0, sixDayWindow: 0, safe: 0 };
+        const leadTimeValues = { critical: 0, sixDayWindow: 0, safe: 0 };
+
+        interface SixDayWindowItem {
+            id: string;
+            practitionerName: string;
+            date: string;
+            time: string;
+            room: 1 | 2;
+            price: number;
+            type: 'cancellation' | 'reschedule';
+            diffHours: number;
+            daysAhead: number;
+            reason?: string;
+        }
+        const sixDayWindowItems: SixDayWindowItem[] = [];
+
         stornoBookings.forEach(b => {
             if (!b.cancelledAt) return;
             const bookingDate = parseLocalDate(b.date, b.time);
             const cancelDate = new Date(b.cancelledAt);
             const diffHours = (bookingDate.getTime() - cancelDate.getTime()) / (1000 * 60 * 60);
-            if (diffHours < 24) leadTimes.critical++;
-            else if (diffHours < 48) leadTimes.warning++;
-            else leadTimes.safe++;
+            const price = b.price || 0;
+
+            if (diffHours < 24) {
+                leadTimes.critical++;
+                leadTimeValues.critical += price;
+            } else if (diffHours < 168) {
+                leadTimes.sixDayWindow++;
+                leadTimeValues.sixDayWindow += price;
+                sixDayWindowItems.push({
+                    id: b.id,
+                    practitionerName: resolvePractitionerDisplayName(b, practitioners),
+                    date: b.date,
+                    time: b.time,
+                    room: b.room,
+                    price,
+                    type: 'cancellation',
+                    diffHours,
+                    daysAhead: Math.round((diffHours / 24) * 10) / 10,
+                    reason: b.cancellationReason
+                });
+            } else {
+                leadTimes.safe++;
+                leadTimeValues.safe += price;
+            }
         });
 
+        // Sledování přesunů termínů (Reschedules) v jednotlivých oknech
+        const rescheduleLeadTimes = { critical: 0, sixDayWindow: 0, safe: 0 };
+        const rescheduleLeadValues = { critical: 0, sixDayWindow: 0, safe: 0 };
+
+        src.forEach(b => {
+            const isRescheduled = !!b.rescheduledAt || (b.note && b.note.includes('ADMIN RESCHEDULE'));
+            if (!isRescheduled) return;
+
+            const originalDateStr = b.originalDate || b.date;
+            const originalTimeStr = b.originalTime || b.time;
+            const originalDateTime = parseLocalDate(originalDateStr, originalTimeStr);
+            const rescheduleTimestamp = b.rescheduledAt 
+                ? new Date(b.rescheduledAt) 
+                : (b as any).updatedAt 
+                    ? new Date((b as any).updatedAt) 
+                    : null;
+            if (!rescheduleTimestamp) return;
+
+            const diffHours = (originalDateTime.getTime() - rescheduleTimestamp.getTime()) / (1000 * 60 * 60);
+            const price = b.price || 0;
+
+            if (diffHours < 24) {
+                rescheduleLeadTimes.critical++;
+                rescheduleLeadValues.critical += price;
+            } else if (diffHours < 168) {
+                rescheduleLeadTimes.sixDayWindow++;
+                rescheduleLeadValues.sixDayWindow += price;
+                sixDayWindowItems.push({
+                    id: b.id,
+                    practitionerName: resolvePractitionerDisplayName(b, practitioners),
+                    date: originalDateStr,
+                    time: originalTimeStr,
+                    room: b.room,
+                    price,
+                    type: 'reschedule',
+                    diffHours,
+                    daysAhead: Math.round((diffHours / 24) * 10) / 10,
+                    reason: b.rescheduleReason || (b.note ? b.note.replace(/^.*ADMIN RESCHEDULE:\s*/s, '') : undefined)
+                });
+            } else {
+                rescheduleLeadTimes.safe++;
+                rescheduleLeadValues.safe += price;
+            }
+        });
+
+        // Seřadíme události v 6denním okně chronologicky podle předstihu (od nejkritičtějších)
+        sixDayWindowItems.sort((a, b) => a.diffHours - b.diffHours);
+
         const cancellationLeadTimeData = [
-            { name: '< 24h (Krizové)', value: leadTimes.critical, color: '#ef4444' },
-            { name: '24-48h (Varovné)', value: leadTimes.warning, color: '#f59e0b' },
-            { name: '> 48h (Bezpečné)', value: leadTimes.safe, color: '#10b981' },
+            { name: '< 24h (Krizové)', value: leadTimes.critical, price: leadTimeValues.critical, color: '#ef4444' },
+            { name: '24h–7d (Rizikové 6denní okno)', value: leadTimes.sixDayWindow, price: leadTimeValues.sixDayWindow, color: '#f59e0b' },
+            { name: '> 7 dní (Bezpečné)', value: leadTimes.safe, price: leadTimeValues.safe, color: '#10b981' },
         ];
+
+        const sixDayWindowMetrics = {
+            cancellationsCount: leadTimes.sixDayWindow,
+            cancellationsValue: leadTimeValues.sixDayWindow,
+            reschedulesCount: rescheduleLeadTimes.sixDayWindow,
+            reschedulesValue: rescheduleLeadValues.sixDayWindow,
+            totalChangesCount: leadTimes.sixDayWindow + rescheduleLeadTimes.sixDayWindow,
+            totalChangesValue: leadTimeValues.sixDayWindow + rescheduleLeadValues.sixDayWindow,
+            items: sixDayWindowItems
+        };
 
         // 8. NAPLNĚNOST MÍSTNOSTÍ (% využití) po měsících (od června po budoucí měsíce).
         // Jmenovatel = provozní doba (08:00–24:00 = 16 h) × počet dní v měsíci.
@@ -692,6 +791,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             revenueTrendData,
             topPerformersData,
             cancellationLeadTimeData,
+            sixDayWindowMetrics,
             cancellationRate,
             totalCancelled,
             paidEverCount,
@@ -1428,36 +1528,193 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             </div>
 
                             {/* SECTION 2: OPERATIONAL RISKS & CANCELLATIONS */}
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                {/* Cancellation Rate Card */}
-                                <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm flex flex-col items-center justify-center text-center">
-                                    <div className="p-3 bg-red-50 rounded-full mb-3">
-                                        <AlertTriangle className="w-6 h-6 text-red-500" />
+                            <div className="space-y-6">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    {/* Cancellation Rate Card */}
+                                    <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm flex flex-col items-center justify-center text-center">
+                                        <div className="p-3 bg-red-50 rounded-full mb-3">
+                                            <AlertTriangle className="w-6 h-6 text-red-500" />
+                                        </div>
+                                        <h4 className="text-3xl font-bold text-stone-900">{stats.cancellationRate}%</h4>
+                                        <p className="text-sm text-stone-500 font-medium">Míra storna zaplacených</p>
+                                        <p className="text-xs text-stone-400 mt-1">{stats.totalCancelled} z {stats.paidEverCount} zaplacených rezervací zrušeno</p>
                                     </div>
-                                    <h4 className="text-3xl font-bold text-stone-900">{stats.cancellationRate}%</h4>
-                                    <p className="text-sm text-stone-500 font-medium">Míra storna zaplacených</p>
-                                    <p className="text-xs text-stone-400 mt-1">{stats.totalCancelled} z {stats.paidEverCount} zaplacených rezervací zrušeno</p>
+
+                                    {/* Cancellation Lead Time (Donut) */}
+                                    <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm md:col-span-2">
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-2">
+                                            <h3 className="text-lg font-bold text-stone-900 flex items-center gap-2">
+                                                <Clock className="w-5 h-5 text-stone-600" /> Storno okna a předstih změn
+                                            </h3>
+                                            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 w-fit">
+                                                6denní okno (24h–7d) = {stats.sixDayWindowMetrics.cancellationsCount} storen
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-stone-500 mb-3">Rozdělení storen podle předstihu před začátkem rezervace.</p>
+                                        
+                                        <div className="h-48 w-full flex items-center">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <PieChart>
+                                                    <Pie data={stats.cancellationLeadTimeData} cx="50%" cy="50%" innerRadius={48} outerRadius={78} paddingAngle={3} dataKey="value">
+                                                        {stats.cancellationLeadTimeData.map((entry, index) => (
+                                                            <Cell key={`cell-${index}`} fill={entry.color} />
+                                                        ))}
+                                                    </Pie>
+                                                    <Tooltip 
+                                                        formatter={(value: any, name: any, item: any) => [
+                                                            `${value}× rezervací (${((item?.payload?.price || 0)).toLocaleString()} Kč)`,
+                                                            name
+                                                        ]}
+                                                    />
+                                                    <Legend verticalAlign="middle" align="right" layout="vertical" iconType="circle" />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
                                 </div>
 
-                                {/* Cancellation Lead Time (Donut) */}
-                                <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm md:col-span-2">
-                                    <h3 className="text-lg font-bold text-stone-900 mb-2 flex items-center gap-2">
-                                        <Clock className="w-5 h-5 text-stone-600" /> Storno okna
-                                    </h3>
-                                    <p className="text-xs text-stone-500 mb-4">Kdy dochází ke zrušení rezervace před termínem.</p>
-                                    
-                                    <div className="h-48 w-full flex items-center">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <PieChart>
-                                                <Pie data={stats.cancellationLeadTimeData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2} dataKey="value">
-                                                    {stats.cancellationLeadTimeData.map((entry, index) => (
-                                                        <Cell key={`cell-${index}`} fill={entry.color} />
-                                                    ))}
-                                                </Pie>
-                                                <Tooltip />
-                                                <Legend verticalAlign="middle" align="right" layout="vertical" iconType="circle" />
-                                            </PieChart>
-                                        </ResponsiveContainer>
+                                {/* DEDICATED 6-DAY WINDOW ANALYTICS (24h až 7 dní před akcí) */}
+                                <div className="bg-gradient-to-br from-amber-50/60 via-white to-orange-50/40 p-6 rounded-2xl border-2 border-amber-200/80 shadow-sm">
+                                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-4 border-b border-amber-100">
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="p-2 rounded-xl bg-amber-500 text-white shadow-sm">
+                                                    <Clock className="w-5 h-5" />
+                                                </span>
+                                                <h3 className="text-lg font-bold text-stone-900">
+                                                    Rizikové 6denní okno změn (24h až 7 dní před akcí)
+                                                </h3>
+                                            </div>
+                                            <p className="text-xs text-stone-600 mt-1 max-w-2xl leading-relaxed">
+                                                Období 6 dnů před 24h uzávěrkou: Klient/lektor má stále nárok na bezplatné zrušení či přesun (100% refundaci), 
+                                                ale uvolněný sál 2–7 dní před začátkem se již velmi obtížně znovu obsazuje.
+                                            </p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 shadow-xs">
+                                                Kritická zóna pro storno poplatky
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {/* 4 KPI Cards for the 6-Day Window */}
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-5">
+                                        <div className="bg-white p-4 rounded-xl border border-amber-200 shadow-xs">
+                                            <div className="text-xs font-semibold text-stone-500 uppercase tracking-wide">Celkem změn v okně</div>
+                                            <div className="text-2xl font-bold text-amber-700 mt-1">
+                                                {stats.sixDayWindowMetrics.totalChangesCount}×
+                                            </div>
+                                            <div className="text-[11px] text-stone-400 mt-0.5">storna i přesuny dohromady</div>
+                                        </div>
+
+                                        <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-xs">
+                                            <div className="text-xs font-semibold text-stone-500 uppercase tracking-wide flex items-center gap-1">
+                                                <XCircle className="w-3.5 h-3.5 text-red-500" /> Zrušeno v okně
+                                            </div>
+                                            <div className="text-2xl font-bold text-stone-900 mt-1">
+                                                {stats.sixDayWindowMetrics.cancellationsCount}×
+                                            </div>
+                                            <div className="text-[11px] text-stone-500 font-medium mt-0.5">
+                                                {stats.sixDayWindowMetrics.cancellationsValue.toLocaleString()} Kč uvolněno
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-xs">
+                                            <div className="text-xs font-semibold text-stone-500 uppercase tracking-wide flex items-center gap-1">
+                                                <RefreshCw className="w-3.5 h-3.5 text-indigo-500" /> Přesunuto v okně
+                                            </div>
+                                            <div className="text-2xl font-bold text-stone-900 mt-1">
+                                                {stats.sixDayWindowMetrics.reschedulesCount}×
+                                            </div>
+                                            <div className="text-[11px] text-stone-500 font-medium mt-0.5">
+                                                {stats.sixDayWindowMetrics.reschedulesValue.toLocaleString()} Kč v termínech
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-xs">
+                                            <div className="text-xs font-semibold text-stone-500 uppercase tracking-wide">Ohrožená tržba sálů</div>
+                                            <div className="text-2xl font-bold text-red-600 mt-1">
+                                                {stats.sixDayWindowMetrics.totalChangesValue.toLocaleString()} Kč
+                                            </div>
+                                            <div className="text-[11px] text-stone-400 mt-0.5">celková hodnota dotčených slotů</div>
+                                        </div>
+                                    </div>
+
+                                    {/* Expandable list of specific bookings */}
+                                    <div className="mt-5 pt-4 border-t border-amber-200/70">
+                                        <div className="flex items-center justify-between">
+                                            <button
+                                                type="button"
+                                                onClick={() => setShow6DayWindowDetails(!show6DayWindowDetails)}
+                                                className="flex items-center gap-2 text-xs font-bold text-stone-800 hover:text-amber-700 transition-colors"
+                                            >
+                                                {show6DayWindowDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                                <span>
+                                                    {show6DayWindowDetails ? 'Skrýt detail termínů' : `Zobrazit konkrétní termíny v 6denním okně (${stats.sixDayWindowMetrics.items.length})`}
+                                                </span>
+                                            </button>
+                                            <span className="text-[11px] text-stone-500">
+                                                Řazeno od nejkratšího předstihu (blíže k 24h uzávěrce)
+                                            </span>
+                                        </div>
+
+                                        {show6DayWindowDetails && (
+                                            <div className="mt-3 overflow-x-auto bg-white rounded-xl border border-stone-200">
+                                                {stats.sixDayWindowMetrics.items.length === 0 ? (
+                                                    <div className="p-6 text-center text-xs text-stone-500 font-medium">
+                                                        V tomto 6denním rizikovém okně zatím nedošlo k žádnému zrušení ani přesunu termínu.
+                                                    </div>
+                                                ) : (
+                                                    <table className="w-full text-left text-xs">
+                                                        <thead className="bg-stone-50 text-stone-500 font-bold border-b border-stone-200">
+                                                            <tr>
+                                                                <th className="py-2.5 px-4">Typ změny</th>
+                                                                <th className="py-2.5 px-4">Lektor</th>
+                                                                <th className="py-2.5 px-4">Původní termín</th>
+                                                                <th className="py-2.5 px-4">Místnost</th>
+                                                                <th className="py-2.5 px-4">Předstih změny</th>
+                                                                <th className="py-2.5 px-4 text-right">Hodnota</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-stone-100 font-medium">
+                                                            {stats.sixDayWindowMetrics.items.map((item, idx) => (
+                                                                <tr key={`${item.id}-${idx}`} className="hover:bg-amber-50/40 transition-colors">
+                                                                    <td className="py-2.5 px-4">
+                                                                        {item.type === 'cancellation' ? (
+                                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-red-100 text-red-700">
+                                                                                <X className="w-3 h-3" /> Zrušeno
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-indigo-100 text-indigo-700">
+                                                                                <RefreshCw className="w-3 h-3" /> Přesunuto
+                                                                            </span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="py-2.5 px-4 font-bold text-stone-900">{item.practitionerName}</td>
+                                                                    <td className="py-2.5 px-4 text-stone-700">{formatLocalDate(item.date)} v {item.time}</td>
+                                                                    <td className="py-2.5 px-4">
+                                                                        <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold ${item.room === 1 ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>
+                                                                            {item.room === 1 ? 'Malá (R1)' : 'Velká (R2)'}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="py-2.5 px-4">
+                                                                        <span className="font-bold text-amber-800">
+                                                                            {item.daysAhead} dne předem
+                                                                        </span>
+                                                                        <span className="text-stone-400 text-[10px] ml-1">
+                                                                            ({Math.round(item.diffHours)} h)
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="py-2.5 px-4 text-right font-bold text-stone-900">
+                                                                        {item.price.toLocaleString()} Kč
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
