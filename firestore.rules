@@ -28,6 +28,11 @@ service cloud.firestore {
       allow write: if true; // Temporarily unlocked for AI Studio dev server. Lock to 'if false' in production with a service account.
     }
 
+    match /referralLogs/{logId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

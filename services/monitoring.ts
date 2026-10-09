@@ -33,8 +33,9 @@ export const Monitoring = {
   trackEvent: (event: AnalyticsEvent) => {
     if (process.env.NODE_ENV === 'development') {
       console.log(`📊 [Analytics]: ${event.name}`, event.params);
-    } else {
-      // TODO: window.gtag('event', event.name, event.params);
+    }
+    if (typeof window !== 'undefined' && typeof (window as any).gtag === 'function') {
+      (window as any).gtag('event', event.name, event.params);
     }
   },
 
@@ -42,8 +43,9 @@ export const Monitoring = {
   trackPageView: (path: string) => {
     if (process.env.NODE_ENV === 'development') {
       console.log(`👀 [PageView]: ${path}`);
-    } else {
-      // TODO: GA4 page_view
+    }
+    if (typeof window !== 'undefined' && typeof (window as any).gtag === 'function') {
+      (window as any).gtag('event', 'page_view', { page_path: path });
     }
   },
 

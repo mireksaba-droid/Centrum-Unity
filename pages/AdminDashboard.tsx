@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
-import { Booking, Practitioner, Service, Role, GroupEvent, EventRegistration } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Booking, Practitioner, Service, Role, GroupEvent, EventRegistration, ReferralStats } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, Bed, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronUp, ChevronRight, RefreshCw, Loader2, Smartphone, BarChart3 } from 'lucide-react';
+import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, Bed, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronUp, ChevronRight, RefreshCw, Loader2, Smartphone, BarChart3, Globe } from 'lucide-react';
 import Button from '../components/Button';
 import StudioSchedule from './StudioSchedule';
 import RescheduleModal from '../components/RescheduleModal';
@@ -94,6 +94,30 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     // Reschedule Modal State
     const [reschedulingBooking, setReschedulingBooking] = useState<Booking | null>(null);
     const [show6DayWindowDetails, setShow6DayWindowDetails] = useState(false);
+
+    // Referral Stats State (Příchody z centrumunity.cz)
+    const [referralStats, setReferralStats] = useState<ReferralStats | null>(null);
+    const [loadingReferrals, setLoadingReferrals] = useState(false);
+    const [showReferralHistory, setShowReferralHistory] = useState(false);
+
+    const loadReferrals = async () => {
+        setLoadingReferrals(true);
+        try {
+            const res = await fetch('/api/analytics/referrals');
+            if (res.ok) {
+                const data = await res.json();
+                setReferralStats(data);
+            }
+        } catch (e) {
+            console.warn('Chyba načítání referral statistik:', e);
+        } finally {
+            setLoadingReferrals(false);
+        }
+    };
+
+    useEffect(() => {
+        loadReferrals();
+    }, [activeTab]);
 
     // Practitioner Modal State (Add/Edit)
     const [isPractitionerModalOpen, setIsPractitionerModalOpen] = useState(false);
@@ -1303,6 +1327,124 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     <div className="text-2xl font-bold text-stone-900">{stats.refundedRevenue.toLocaleString()} Kč</div>
                                     <div className="text-xs text-stone-400 mt-1">Storna s refundací přes GoPay.</div>
                                 </div>
+                            </div>
+
+                            {/* SECTION 0.5: PŘÍCHODY LEKTORŮ Z WEBU CENTRUMUNITY.CZ */}
+                            <div className="bg-gradient-to-r from-blue-50/70 via-indigo-50/40 to-white p-6 rounded-xl border border-indigo-200/80 shadow-sm space-y-4">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                    <div className="flex items-center gap-2.5">
+                                        <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-xs">
+                                            <Globe className="w-5 h-5" />
+                                        </div>
+                                        <div>
+                                            <h3 className="text-lg font-bold text-stone-900 flex items-center gap-2">
+                                                Příchody lektorů z webu centrumunity.cz
+                                            </h3>
+                                            <p className="text-xs text-stone-500">
+                                                Automaticky detekuje a počítá návštěvníky a lektory, kteří přišli z odkazu v patičce a menu na hlavní prezentaci.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={loadReferrals}
+                                            disabled={loadingReferrals}
+                                            className="p-1.5 text-stone-500 hover:text-indigo-600 hover:bg-white rounded-lg border border-stone-200 transition-colors"
+                                            title="Aktualizovat statistiky"
+                                        >
+                                            <RefreshCw className={`w-4 h-4 ${loadingReferrals ? 'animate-spin' : ''}`} />
+                                        </button>
+                                        <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                            Aktivní sledování příchodů
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                                    <div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-xs">
+                                        <div className="text-[11px] font-semibold text-stone-400 uppercase tracking-wide">Celkem příchodů</div>
+                                        <div className="text-2xl font-bold text-indigo-950 mt-1">
+                                            {referralStats ? referralStats.total : 0}
+                                        </div>
+                                        <div className="text-[10px] text-stone-400 mt-0.5">z webu centrumunity.cz</div>
+                                    </div>
+
+                                    <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-xs">
+                                        <div className="text-[11px] font-semibold text-stone-400 uppercase tracking-wide">Dnes</div>
+                                        <div className="text-2xl font-bold text-emerald-600 mt-1">
+                                            {referralStats ? referralStats.today : 0}
+                                        </div>
+                                        <div className="text-[10px] text-stone-400 mt-0.5">příchodů za dnešek</div>
+                                    </div>
+
+                                    <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-xs">
+                                        <div className="text-[11px] font-semibold text-stone-400 uppercase tracking-wide">Posledních 7 dní</div>
+                                        <div className="text-2xl font-bold text-stone-900 mt-1">
+                                            {referralStats ? referralStats.last7Days : 0}
+                                        </div>
+                                        <div className="text-[10px] text-stone-400 mt-0.5">za uplynulý týden</div>
+                                    </div>
+
+                                    <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-xs">
+                                        <div className="text-[11px] font-semibold text-stone-400 uppercase tracking-wide">Poslední příchod</div>
+                                        <div className="text-sm font-bold text-stone-800 mt-2 truncate">
+                                            {referralStats?.lastReferralAt 
+                                                ? new Date(referralStats.lastReferralAt).toLocaleString('cs-CZ', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })
+                                                : 'Zatím žádný'}
+                                        </div>
+                                        <div className="text-[10px] text-stone-400 mt-0.5">datum a čas návštěvy</div>
+                                    </div>
+                                </div>
+
+                                {referralStats && referralStats.recent && referralStats.recent.length > 0 && (
+                                    <div className="pt-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowReferralHistory(!showReferralHistory)}
+                                            className="flex items-center gap-1.5 text-xs font-semibold text-indigo-700 hover:text-indigo-900 transition-colors"
+                                        >
+                                            {showReferralHistory ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                            <span>
+                                                {showReferralHistory ? 'Skrýt historii příchodů' : `Zobrazit historii posledních příchodů (${referralStats.recent.length})`}
+                                            </span>
+                                        </button>
+
+                                        {showReferralHistory && (
+                                            <div className="mt-3 bg-white rounded-xl border border-stone-200 overflow-hidden">
+                                                <table className="w-full text-left text-xs">
+                                                    <thead className="bg-stone-50 text-stone-500 font-bold border-b border-stone-200">
+                                                        <tr>
+                                                            <th className="py-2 px-3">Datum a čas</th>
+                                                            <th className="py-2 px-3">Zdroj</th>
+                                                            <th className="py-2 px-3">Cílová stránka</th>
+                                                            <th className="py-2 px-3">Původní odkaz (Referrer)</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-stone-100">
+                                                        {referralStats.recent.map((log) => (
+                                                            <tr key={log.id} className="hover:bg-stone-50">
+                                                                <td className="py-2 px-3 font-semibold text-stone-800">
+                                                                    {new Date(log.timestamp).toLocaleString('cs-CZ')}
+                                                                </td>
+                                                                <td className="py-2 px-3 text-indigo-600 font-bold">
+                                                                    {log.source}
+                                                                </td>
+                                                                <td className="py-2 px-3 text-stone-600 font-mono text-[11px]">
+                                                                    {log.path}
+                                                                </td>
+                                                                <td className="py-2 px-3 text-stone-400 text-[11px] truncate max-w-xs">
+                                                                    {log.referrer || 'Přímý proklik'}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
 
                             {/* SECTION 0.6: ZREALIZOVANÉ A PROBĚHLÉ REZERVACE */}

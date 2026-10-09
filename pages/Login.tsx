@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Practitioner, Role } from '../types';
 import Button from '../components/Button';
@@ -17,6 +17,34 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [error, setError] = useState('');
 
   const users = useStore(state => state.practitionersList);
+
+  useEffect(() => {
+    try {
+      const ref = document.referrer || '';
+      const urlParams = new URLSearchParams(window.location.search);
+      const isFromWeb =
+        (ref.includes('centrumunity.cz') && !ref.includes('rezervace.centrumunity.cz')) ||
+        urlParams.get('ref') === 'web' ||
+        urlParams.get('utm_source') === 'centrumunity' ||
+        urlParams.get('source') === 'web';
+
+      const sessionTracked = sessionStorage.getItem('unity_web_referral_logged');
+      if (isFromWeb && !sessionTracked) {
+        sessionStorage.setItem('unity_web_referral_logged', 'true');
+        fetch('/api/analytics/track-referral', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            referrer: ref,
+            path: window.location.pathname + window.location.search,
+            source: 'centrumunity.cz'
+          })
+        }).catch(() => {});
+      }
+    } catch {
+      // Tichý fallback
+    }
+  }, []);
 
   const handleUserSelect = (user: Practitioner) => {
       setSelectedUser(user);

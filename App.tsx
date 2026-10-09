@@ -22,6 +22,36 @@ const PageTracker = () => {
     Monitoring.trackPageView(location.pathname);
     window.scrollTo(0, 0); 
   }, [location]);
+
+  // Detekce příchodu z hlavního webu centrumunity.cz
+  useEffect(() => {
+    try {
+      const ref = document.referrer || '';
+      const urlParams = new URLSearchParams(window.location.search);
+      const isFromWeb =
+        (ref.includes('centrumunity.cz') && !ref.includes('rezervace.centrumunity.cz')) ||
+        urlParams.get('ref') === 'web' ||
+        urlParams.get('utm_source') === 'centrumunity' ||
+        urlParams.get('source') === 'web';
+
+      const sessionTracked = sessionStorage.getItem('unity_web_referral_logged');
+      if (isFromWeb && !sessionTracked) {
+        sessionStorage.setItem('unity_web_referral_logged', 'true');
+        fetch('/api/analytics/track-referral', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            referrer: ref,
+            path: window.location.pathname + window.location.search,
+            source: 'centrumunity.cz'
+          })
+        }).catch(() => {});
+      }
+    } catch {
+      // Tichý fallback
+    }
+  }, []);
+
   return null;
 };
 

@@ -481,6 +481,60 @@ async function startServer() {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // --- ANALYTICS: TRACKING PŘÍCHODŮ Z WEBU CENTRUMUNITY.CZ ---
+  app.post("/api/analytics/track-referral", async (req, res) => {
+    try {
+      const { referrer, path, source } = req.body || {};
+      const now = new Date();
+      const dateStr = now.toISOString().split("T")[0];
+      const logId = `ref_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+      const logData = {
+        id: logId,
+        source: source || "centrumunity.cz",
+        referrer: referrer || req.headers.referer || "",
+        path: path || "/login",
+        timestamp: now.toISOString(),
+        date: dateStr,
+        createdAt: now.toISOString()
+      };
+
+      await setDoc(doc(db, "referralLogs", logId), logData);
+      res.json({ success: true, logId });
+    } catch (e: any) {
+      console.warn("Chyba při logování příchodu z webu:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/analytics/referrals", async (req, res) => {
+    try {
+      const snap = await getDocs(collection(db, "referralLogs"));
+      const logs = snap.docs.map(d => d.data() as any);
+      
+      const now = new Date();
+      const todayStr = now.toISOString().split("T")[0];
+      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      const todayCount = logs.filter(l => l.date === todayStr).length;
+      const last7DaysCount = logs.filter(l => new Date(l.timestamp) >= sevenDaysAgo).length;
+
+      logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      const lastReferral = logs[0];
+
+      res.json({
+        total: logs.length,
+        today: todayCount,
+        last7Days: last7DaysCount,
+        lastReferralAt: lastReferral?.timestamp || null,
+        recent: logs.slice(0, 30)
+      });
+    } catch (e: any) {
+      console.warn("Chyba při načítání statistik příchodů z webu:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Get practitioners (public info only, unless authenticated as ADMIN)
   app.get("/api/practitioners", async (req, res) => {
     try {

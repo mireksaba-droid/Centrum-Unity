@@ -147,3 +147,20 @@ export interface ChatMessage {
   text: string;
   timestamp: number;
 }
+
+export interface ReferralLog {
+  id: string;
+  source: string;
+  referrer: string;
+  path: string;
+  timestamp: string;
+  date: string;
+}
+
+export interface ReferralStats {
+  total: number;
+  today: number;
+  last7Days: number;
+  lastReferralAt?: string;
+  recent: ReferralLog[];
+}

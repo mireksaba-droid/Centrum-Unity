@@ -55,6 +55,20 @@
         "ticketTypeSpots": { "type": "number" }
       },
       "required": ["id", "eventId", "clientName", "clientEmail", "paymentStatus"]
+    },
+    "ReferralLog": {
+      "title": "ReferralLog",
+      "description": "Log of visitors coming from main website",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "source": { "type": "string" },
+        "referrer": { "type": "string" },
+        "path": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "source", "timestamp"]
     }
   },
   "firestore": {
@@ -73,6 +87,10 @@
     "/eventRegistrations/{registrationId}": {
       "schema": "EventRegistration",
       "description": "Event registration documents"
+    },
+    "/referralLogs/{logId}": {
+      "schema": "ReferralLog",
+      "description": "Visitor referral logs"
     }
   }
 }
