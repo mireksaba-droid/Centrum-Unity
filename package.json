@@ -31,6 +31,8 @@
     "zustand": "^5.0.12"
   },
   "overrides": {
+    "@fastify/busboy": "^3.2.3",
+    "@grpc/grpc-js": "^1.14.6",
     "websocket-driver": "^0.7.5",
     "ws": "^8.21.3",
     "vite": "^6.4.3",
