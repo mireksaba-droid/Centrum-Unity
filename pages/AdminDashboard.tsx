@@ -100,6 +100,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const [loadingReferrals, setLoadingReferrals] = useState(false);
     const [showReferralHistory, setShowReferralHistory] = useState(false);
 
+    // Storno po měsících a lektorech
+    const [stornoSelectedMonth, setStornoSelectedMonth] = useState<string>('current');
+    const [expandedStornoLecturer, setExpandedStornoLecturer] = useState<string | null>(null);
+
     const loadReferrals = async () => {
         setLoadingReferrals(true);
         try {
@@ -500,7 +504,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             b.status === 'refunded' ||
             (b.status === 'cancelled' && (
                 !!b.paidAt ||
-                ['cancelled_by_admin_paid', 'cancelled_by_guest_refunded'].includes(b.cancellationReason || '')
+                ['cancelled_by_admin_paid', 'cancelled_by_guest_refunded', 'cancelled_by_practitioner', 'cancelled_by_admin'].includes(b.cancellationReason || '')
             ));
         const stornoBookings = src.filter(wasPaidThenCancelled);
         const totalCancelled = stornoBookings.length;                       // reálně stornované (zaplacené) rezervace
@@ -737,14 +741,128 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             return sum + standardPrice;
         }, 0);
 
-        // 9. KDO DĚLÁ NEJVÍC STOREN – počet i míra (storna ÷ jeho zaplacené rezervace).
-        const perPract: Record<string, { paid: number; storno: number }> = {};
-        paidBookings.forEach(b => { const n = resolvePractitionerDisplayName(b, practitioners); (perPract[n] ||= { paid: 0, storno: 0 }).paid++; });
-        stornoBookings.forEach(b => { const n = resolvePractitionerDisplayName(b, practitioners); (perPract[n] ||= { paid: 0, storno: 0 }).storno++; });
-        const cancellationsByPractitioner = Object.entries(perPract)
-            .map(([name, v]) => ({ name, storno: v.storno, total: v.paid + v.storno, rate: (v.paid + v.storno) > 0 ? Math.round((v.storno / (v.paid + v.storno)) * 100) : 0 }))
-            .filter(x => x.storno > 0)
-            .sort((a, b) => (b.storno - a.storno) || (b.rate - a.rate));
+        // 9. KDO DĚLÁ NEJVÍC STOREN – rozpad dle měsíců i celkově, s počtem a FINANČNÍ HODNOTOU v Kč.
+        interface StornoPractitionerDetail {
+            name: string;
+            stornoCount: number;
+            stornoValue: number;
+            paidCount: number;
+            paidValue: number;
+            totalCount: number;
+            rate: number;
+            bookings: Array<{
+                id: string;
+                date: string;
+                time: string;
+                room: 1 | 2;
+                price: number;
+                reason?: string;
+                cancelledAt?: string;
+            }>;
+        }
+
+        interface MonthlyStornoReport {
+            key: string;
+            label: string;
+            isCurrent: boolean;
+            totalStornoCount: number;
+            totalStornoValue: number;
+            practitioners: StornoPractitionerDetail[];
+        }
+
+        const computeStornoReportForFilter = (key: string, label: string, isCurrent: boolean, filterFn: (b: Booking) => boolean): MonthlyStornoReport => {
+            const pMap: Record<string, {
+                paidCount: number;
+                paidValue: number;
+                stornoCount: number;
+                stornoValue: number;
+                bookings: any[];
+            }> = {};
+
+            paidBookings.filter(filterFn).forEach(b => {
+                const n = resolvePractitionerDisplayName(b, practitioners);
+                const rec = (pMap[n] ||= { paidCount: 0, paidValue: 0, stornoCount: 0, stornoValue: 0, bookings: [] });
+                rec.paidCount++;
+                rec.paidValue += (b.price || 0);
+            });
+
+            stornoBookings.filter(filterFn).forEach(b => {
+                const n = resolvePractitionerDisplayName(b, practitioners);
+                const rec = (pMap[n] ||= { paidCount: 0, paidValue: 0, stornoCount: 0, stornoValue: 0, bookings: [] });
+                rec.stornoCount++;
+                rec.stornoValue += (b.price || 0);
+                rec.bookings.push({
+                    id: b.id,
+                    date: b.date,
+                    time: b.time,
+                    room: b.room,
+                    price: b.price || 0,
+                    reason: b.cancellationReason,
+                    cancelledAt: b.cancelledAt
+                });
+            });
+
+            let totalStornoCount = 0;
+            let totalStornoValue = 0;
+
+            const practitionersList: StornoPractitionerDetail[] = Object.entries(pMap)
+                .map(([name, v]) => {
+                    totalStornoCount += v.stornoCount;
+                    totalStornoValue += v.stornoValue;
+                    const total = v.paidCount + v.stornoCount;
+                    const rate = total > 0 ? Math.round((v.stornoCount / total) * 100) : 0;
+                    v.bookings.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+                    return {
+                        name,
+                        stornoCount: v.stornoCount,
+                        stornoValue: v.stornoValue,
+                        paidCount: v.paidCount,
+                        paidValue: v.paidValue,
+                        totalCount: total,
+                        rate,
+                        bookings: v.bookings
+                    };
+                })
+                .filter(x => x.stornoCount > 0)
+                .sort((a, b) => (b.stornoValue - a.stornoValue) || (b.stornoCount - a.stornoCount) || (b.rate - a.rate));
+
+            return {
+                key,
+                label,
+                isCurrent,
+                totalStornoCount,
+                totalStornoValue,
+                practitioners: practitionersList
+            };
+        };
+
+        const monthlyStornoReports: MonthlyStornoReport[] = [];
+
+        // Jednotlivé měsíce
+        const sortedTrendMonths = [...trendMonths].sort((a, b) => b.getTime() - a.getTime());
+        sortedTrendMonths.forEach(mDate => {
+            const mm = mDate.getMonth();
+            const yy = mDate.getFullYear();
+            const isCurrent = mm === today.getMonth() && yy === today.getFullYear();
+            const nm = mDate.toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' });
+            const capName = nm.charAt(0).toUpperCase() + nm.slice(1);
+            const key = `${yy}-${String(mm + 1).padStart(2, '0')}`;
+            monthlyStornoReports.push(
+                computeStornoReportForFilter(key, isCurrent ? `${capName} (Tento měsíc)` : capName, isCurrent, b => inMonth(parseLocalDate(b.date), mm, yy))
+            );
+        });
+
+        // Celé období
+        const allTimeStornoReport = computeStornoReportForFilter('all', 'Celé období (Vše)', false, () => true);
+        monthlyStornoReports.unshift(allTimeStornoReport);
+
+        const cancellationsByPractitioner = allTimeStornoReport.practitioners.map(p => ({
+            name: p.name,
+            storno: p.stornoCount,
+            stornoValue: p.stornoValue,
+            total: p.totalCount,
+            rate: p.rate
+        }));
 
         // 10. MĚSÍČNÍ PŘEHLED: REZERVACE V HODNOTĚ XYZ VS. ZREALIZOVÁNO XYZ
         // Pro každý měsíc spočítáme:
@@ -829,9 +947,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             evaAllSavedValue,
             evaAllConfirmedCount: evaAllConfirmedBookings.length,
             monthlyRealizationData,
-            currentMonthRealization
+            currentMonthRealization,
+            monthlyStornoReports
         };
     }, [allBookings, practitioners]);
+
+    const selectedStornoReport = useMemo(() => {
+        if (!stats.monthlyStornoReports || stats.monthlyStornoReports.length === 0) return null;
+        if (stornoSelectedMonth === 'current') {
+            return stats.monthlyStornoReports.find(r => r.isCurrent) || stats.monthlyStornoReports[0];
+        }
+        return stats.monthlyStornoReports.find(r => r.key === stornoSelectedMonth) || stats.monthlyStornoReports[0];
+    }, [stats.monthlyStornoReports, stornoSelectedMonth]);
 
     // Feed poslední aktivity: nové rezervace (dle createdAt) a zrušení (dle cancelledAt)
     // Poslední aktivita seskupená podle lektora – jeden řádek na rezervaci (ne na akci),
@@ -1946,27 +2073,130 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     </div>
                                 </div>
 
-                                {/* Kdo dělá nejvíc storen */}
-                                <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm">
-                                    <h3 className="text-lg font-bold text-stone-900 mb-1 flex items-center gap-2">
-                                        <AlertTriangle className="w-5 h-5 text-red-500" /> Kdo dělá nejvíc storen
-                                    </h3>
-                                    <p className="text-xs text-stone-500 mb-4">Zrušené zaplacené rezervace a míra vůči objemu daného lektora.</p>
-                                    {stats.cancellationsByPractitioner.length === 0 ? (
-                                        <p className="text-sm text-stone-500">Zatím žádná storna zaplacených rezervací. 🎉</p>
-                                    ) : (
-                                        <div className="overflow-hidden">
-                                            <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 text-[11px] font-bold text-stone-400 uppercase tracking-wide pb-2 border-b border-stone-100">
-                                                <span>Lektor</span><span className="text-right">Storna</span><span className="text-right">Míra</span>
-                                            </div>
-                                            <div className="divide-y divide-stone-100">
-                                                {stats.cancellationsByPractitioner.map((p) => (
-                                                    <div key={p.name} className="grid grid-cols-[1fr_auto_auto] gap-x-4 items-center py-2.5">
-                                                        <span className="text-sm font-semibold text-stone-800 truncate">{p.name}</span>
-                                                        <span className="text-sm text-stone-700 text-right">{p.storno} <span className="text-stone-400">/ {p.total}</span></span>
-                                                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full justify-self-end ${p.rate >= 30 ? 'bg-red-100 text-red-700' : p.rate >= 15 ? 'bg-amber-100 text-amber-700' : 'bg-stone-100 text-stone-600'}`}>{p.rate}%</span>
-                                                    </div>
+                                {/* Kdo dělá nejvíc storen – s měsíčním filtrem a hodnotou v Kč */}
+                                <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm space-y-4">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                        <div>
+                                            <h3 className="text-lg font-bold text-stone-900 flex items-center gap-2">
+                                                <AlertTriangle className="w-5 h-5 text-red-500" /> Storna lektorů dle měsíců
+                                            </h3>
+                                            <p className="text-xs text-stone-500 mt-0.5">
+                                                Přehled počtu a finanční hodnoty (v Kč) zrušených rezervací pro jednotlivé lektory.
+                                            </p>
+                                        </div>
+
+                                        {/* Výběr měsíce */}
+                                        <div className="flex items-center gap-2">
+                                            <select
+                                                value={stornoSelectedMonth}
+                                                onChange={(e) => {
+                                                    setStornoSelectedMonth(e.target.value);
+                                                    setExpandedStornoLecturer(null);
+                                                }}
+                                                className="bg-stone-50 border border-stone-300 text-stone-800 text-xs font-semibold rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                            >
+                                                {stats.monthlyStornoReports.map(rep => (
+                                                    <option key={rep.key} value={rep.key}>
+                                                        {rep.label}
+                                                    </option>
                                                 ))}
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {/* Souhrnná lišta za vybraný měsíc */}
+                                    {selectedStornoReport && (
+                                        <div className="bg-red-50/70 border border-red-200/80 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs font-bold text-red-900 uppercase tracking-wide">
+                                                    {selectedStornoReport.label}:
+                                                </span>
+                                                <span className="text-xs text-red-700">
+                                                    Celkem stornováno <strong className="font-bold text-red-950">{selectedStornoReport.totalStornoValue.toLocaleString()} Kč</strong>
+                                                </span>
+                                                <span className="text-xs text-stone-300">•</span>
+                                                <span className="text-xs text-stone-600">
+                                                    {selectedStornoReport.totalStornoCount} zrušených lekcí
+                                                </span>
+                                            </div>
+                                            <div className="text-[11px] text-red-800 font-medium">
+                                                {selectedStornoReport.practitioners.length} lektorů se stornem
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Tabulka lektorů */}
+                                    {!selectedStornoReport || selectedStornoReport.practitioners.length === 0 ? (
+                                        <div className="text-center py-8 text-stone-400 text-sm">
+                                            V tomto období nejsou evidována žádná storna. 🎉
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 text-[11px] font-bold text-stone-400 uppercase tracking-wide pb-2 border-b border-stone-100">
+                                                <span>Lektor</span>
+                                                <span className="text-right">Hodnota storna</span>
+                                                <span className="text-right">Počet</span>
+                                                <span className="text-right">Míra</span>
+                                            </div>
+
+                                            <div className="divide-y divide-stone-100">
+                                                {selectedStornoReport.practitioners.map((p) => {
+                                                    const isExpanded = expandedStornoLecturer === p.name;
+                                                    return (
+                                                        <div key={p.name} className="py-2.5">
+                                                            <div 
+                                                                onClick={() => setExpandedStornoLecturer(isExpanded ? null : p.name)}
+                                                                className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 items-center cursor-pointer hover:bg-stone-50/80 p-1.5 -mx-1.5 rounded-lg transition-colors"
+                                                            >
+                                                                <div className="flex items-center gap-1.5 min-w-0">
+                                                                    <span className="text-stone-400 text-xs">
+                                                                        {isExpanded ? '▾' : '▸'}
+                                                                    </span>
+                                                                    <span className="text-sm font-semibold text-stone-800 truncate">
+                                                                        {p.name}
+                                                                    </span>
+                                                                </div>
+
+                                                                <span className="text-sm font-bold text-red-600 text-right">
+                                                                    {p.stornoValue.toLocaleString()} Kč
+                                                                </span>
+
+                                                                <span className="text-xs text-stone-600 text-right">
+                                                                    {p.stornoCount}× <span className="text-stone-400">/ {p.totalCount}</span>
+                                                                </span>
+
+                                                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full justify-self-end ${
+                                                                    p.rate >= 30 ? 'bg-red-100 text-red-700' : p.rate >= 15 ? 'bg-amber-100 text-amber-700' : 'bg-stone-100 text-stone-600'
+                                                                }`}>
+                                                                    {p.rate}%
+                                                                </span>
+                                                            </div>
+
+                                                            {/* Rozbalovací detail zrušených rezervací lektora */}
+                                                            {isExpanded && p.bookings.length > 0 && (
+                                                                <div className="mt-2 ml-5 p-3 bg-stone-50 rounded-xl border border-stone-200 space-y-1.5 text-xs">
+                                                                    <div className="font-bold text-stone-700 mb-1">
+                                                                        Konkrétní stornované termíny lektora ({p.bookings.length}):
+                                                                    </div>
+                                                                    {p.bookings.map((b: any, idx: number) => {
+                                                                        const dateParts = (b.date || '').split('-');
+                                                                        const dateFormatted = dateParts.length === 3 ? `${dateParts[2]}.${dateParts[1]}.${dateParts[0]}` : b.date;
+                                                                        return (
+                                                                            <div key={b.id || idx} className="flex items-center justify-between py-1 border-b border-stone-200/50 last:border-none">
+                                                                                <span className="text-stone-700">
+                                                                                    <strong>{dateFormatted}</strong> v {b.time} · {b.room === 1 ? 'M1 (Malá)' : 'M2 (Velká)'}
+                                                                                </span>
+                                                                                <span className="font-bold text-red-700">
+                                                                                    {b.price.toLocaleString()} Kč
+                                                                                </span>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
                                         </div>
                                     )}
