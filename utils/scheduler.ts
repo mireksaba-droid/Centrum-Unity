@@ -59,6 +59,13 @@ export const checkBookingCollision = ({
     });
 
     if (roomCollision) {
+        if (roomCollision.bookedByUserId === userId && roomCollision.status === 'awaiting_payment') {
+            return {
+                hasCollision: true,
+                reason: `Tento termín již máte rozpracovaný z předchozího pokusu (čeká na úhradu). Pokud jste platbu nedokončil(a), vyčkejte prosím 15 minut na automatické uvolnění termínu.`,
+                conflictingBooking: roomCollision
+            };
+        }
         return { hasCollision: true, reason: `Kolize s rezervací (${roomCollision.bookedByName}) nebo povinnou pauzou na úklid.`, conflictingBooking: roomCollision };
     }
 
