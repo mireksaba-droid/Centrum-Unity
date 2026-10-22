@@ -62,11 +62,7 @@ const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, allBookings 
           alert(`Tento termín v Místnosti ${newRoom} nelze vybrat: dochází ke kolizi s dříve vytvořenou rezervací. První vytvořená rezervace má přednostní právo.`);
           return;
       }
-      if (isLateReschedule && !reason.trim()) {
-          alert("Při pozdní změně (méně než 25h) je nutné vyplnit důvod pro Audit log.");
-          return;
-      }
-      onConfirm(newDate, newTime, reason, newRoom, newEquipment);
+      onConfirm(newDate, newTime, reason.trim() || undefined, newRoom, newEquipment);
   };
 
   const dates = Array.from({length: 30}, (_, i) => {
@@ -76,17 +72,17 @@ const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, allBookings 
   });
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
-        <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-stone-200">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg border border-stone-200 flex flex-col max-h-[92vh] overflow-hidden">
             {/* Header */}
-            <div className={`p-4 flex justify-between items-center text-white ${isLateReschedule ? 'bg-amber-600' : 'bg-indigo-600'}`}>
+            <div className={`p-4 flex justify-between items-center text-white shrink-0 ${isLateReschedule ? 'bg-amber-600' : 'bg-indigo-600'}`}>
                 <h3 className="font-bold text-lg flex items-center gap-2">
                     <Clock className="w-5 h-5" /> Přesunout rezervaci (Čas i Místnost)
                 </h3>
                 <button onClick={onClose} className="hover:bg-white/20 p-1 rounded-full transition-colors"><X className="w-5 h-5" /></button>
             </div>
 
-            <div className="p-6 space-y-6">
+            <div className="p-5 sm:p-6 space-y-5 overflow-y-auto flex-1">
                 {/* Current Info */}
                 <div className="bg-stone-50 p-3 rounded-lg border border-stone-200 text-sm">
                     <span className="block text-stone-500 text-xs uppercase font-bold mb-1">Původní termín a místnost</span>
@@ -227,57 +223,42 @@ const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, allBookings 
                     </div>
                 )}
 
-                {/* 25h Warning / Soft Block Logic (only for non-admin bookings) */}
+                {/* 25h Warning / Info for Admin */}
                 {isLateReschedule && !isAdminBooking && (
-                    <div className="animate-in slide-in-from-top-2 fade-in">
-                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
-                            <div className="flex items-start gap-3">
-                                <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                                <div>
-                                    <h4 className="text-sm font-bold text-amber-800">Méně než 25 hodin do začátku</h4>
-                                    <p className="text-xs text-amber-700 mt-1 leading-relaxed">
-                                        Standardně nelze rezervaci takto blízko termínu měnit. 
-                                        Jako administrátor můžete toto pravidlo obejít, ale akce bude zaznamenána v Audit logu.
-                                    </p>
-                                </div>
+                    <div className="animate-in slide-in-from-top-2 fade-in space-y-3">
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex items-start gap-3">
+                            <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                            <div>
+                                <h4 className="text-sm font-bold text-amber-900">Méně než 25 hodin do začátku</h4>
+                                <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
+                                    Jako administrátorka můžete termín lektora přesunout i v tomto okně. Změna se uloží do historie.
+                                </p>
                             </div>
                         </div>
 
-                        <div className="space-y-3">
-                            <div>
-                                <label className="block text-xs font-bold text-stone-700 mb-1">Důvod změny (Povinné pro Audit Log)</label>
-                                <input 
-                                    type="text" 
-                                    value={reason} 
-                                    onChange={(e) => setReason(e.target.value)}
-                                    placeholder="Např. Nemoc lektora, dohoda s klientem..."
-                                    className="w-full p-2 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-red-200 outline-none"
-                                />
-                            </div>
-                            
-                            <label className="flex items-center gap-2 p-3 border border-stone-200 rounded-lg cursor-pointer hover:bg-stone-50 transition-colors">
-                                <input 
-                                    type="checkbox" 
-                                    checked={isOverrideConfirmed}
-                                    onChange={(e) => setIsOverrideConfirmed(e.target.checked)}
-                                    className="w-4 h-4 text-indigo-600 rounded border-stone-300 focus:ring-indigo-500"
-                                />
-                                <span className="text-sm font-medium text-stone-700">Potvrzuji vynucenou změnu</span>
-                            </label>
+                        <div>
+                            <label className="block text-xs font-bold text-stone-700 mb-1">Důvod změny (volitelné – např. dohoda s lektorem)</label>
+                            <input 
+                                type="text" 
+                                value={reason} 
+                                onChange={(e) => setReason(e.target.value)}
+                                placeholder="Např. Nemoc lektora, domluva s klientem..."
+                                className="w-full p-2.5 border border-stone-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-300 outline-none"
+                            />
                         </div>
                     </div>
                 )}
             </div>
 
-            {/* Footer */}
-            <div className="bg-stone-50 p-4 border-t border-stone-200 flex justify-end gap-3">
+            {/* Footer - Always visible and pinned */}
+            <div className="bg-stone-50 p-4 border-t border-stone-200 flex justify-end gap-3 shrink-0">
                 <Button variant="ghost" onClick={onClose} size="sm">Zpět</Button>
                 <Button 
                     onClick={handleSubmit} 
-                    disabled={collision.hasCollision || (isLateReschedule && (!isOverrideConfirmed || !reason.trim()))}
-                    className={collision.hasCollision ? 'bg-stone-300 text-stone-500 cursor-not-allowed' : isLateReschedule ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}
+                    disabled={collision.hasCollision}
+                    className={collision.hasCollision ? 'bg-stone-300 text-stone-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 text-white font-bold'}
                 >
-                    {collision.hasCollision ? 'Nelze (Kolize)' : isLateReschedule ? 'Vynutit přesun' : 'Potvrdit přesun'}
+                    {collision.hasCollision ? 'Nelze (Kolize)' : 'Potvrdit přesun'}
                 </Button>
             </div>
         </div>
