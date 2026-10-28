@@ -27,11 +27,19 @@ function runTest(name: string, fn: () => void) {
 // ==========================================
 console.log('--- 1. Testy storno pásem (calculateCancellationPolicy) ---');
 
-const baseDate = new Date('2026-10-20T10:00:00Z');
+const baseDate = new Date('2026-11-05T10:00:00Z');
 
-runTest('Více než 7 dní předem (10 dní) -> 100% refund, 0% storno poplatek', () => {
-  // Lekce je 30. 10. 2026 v 10:00, aktuální čas je 20. 10. 2026 v 10:00 (= 240 hodin předem)
-  const result = calculateCancellationPolicy('2026-10-30', '10:00', 350, baseDate);
+runTest('Před 1. listopadem (např. 28. 10. pro 29. 10.) -> uplatňuje se přechodné pravidlo (> 24 h = 100 % refund)', () => {
+  const octDate = new Date('2026-10-28T10:00:00Z');
+  const result = calculateCancellationPolicy('2026-10-29', '18:00', 875, octDate);
+  assert.strictEqual(result.tier, 'full_refund');
+  assert.strictEqual(result.refundAmount, 875);
+  assert.strictEqual(result.feeAmount, 0);
+});
+
+runTest('Od 1. 11.: Více než 7 dní předem (10 dní) -> 100% refund, 0% storno poplatek', () => {
+  // Lekce je 15. 11. 2026 v 10:00, aktuální čas je 5. 11. 2026 v 10:00 (= 240 hodin předem)
+  const result = calculateCancellationPolicy('2026-11-15', '10:00', 350, baseDate);
   assert.strictEqual(result.tier, 'full_refund');
   assert.strictEqual(result.feePercentage, 0);
   assert.strictEqual(result.refundPercentage, 100);
@@ -39,9 +47,9 @@ runTest('Více než 7 dní předem (10 dní) -> 100% refund, 0% storno poplatek'
   assert.strictEqual(result.feeAmount, 0);
 });
 
-runTest('Přesně 7 dní předem (168 h) -> 100% refund, 0% storno poplatek', () => {
-  // Lekce je 27. 10. 2026 v 10:00 (= přesně 7 dní / 168 hodin)
-  const result = calculateCancellationPolicy('2026-10-27', '10:00', 350, baseDate);
+runTest('Od 1. 11.: Přesně 7 dní předem (168 h) -> 100% refund, 0% storno poplatek', () => {
+  // Lekce je 12. 11. 2026 v 10:00 (= přesně 7 dní / 168 hodin)
+  const result = calculateCancellationPolicy('2026-11-12', '10:00', 350, baseDate);
   assert.strictEqual(result.tier, 'full_refund');
   assert.strictEqual(result.feePercentage, 0);
   assert.strictEqual(result.refundPercentage, 100);
@@ -49,9 +57,9 @@ runTest('Přesně 7 dní předem (168 h) -> 100% refund, 0% storno poplatek', ()
   assert.strictEqual(result.feeAmount, 0);
 });
 
-runTest('Mezi 24 h a 7 dny (např. 3 dny předem) -> 50% storno poplatek, 50% refund', () => {
-  // Lekce je 23. 10. 2026 v 10:00 (= 72 hodin předem)
-  const result = calculateCancellationPolicy('2026-10-23', '10:00', 350, baseDate);
+runTest('Od 1. 11.: Mezi 24 h a 7 dny (např. 3 dny předem) -> 50% storno poplatek, 50% refund', () => {
+  // Lekce je 8. 11. 2026 v 10:00 (= 72 hodin předem)
+  const result = calculateCancellationPolicy('2026-11-08', '10:00', 350, baseDate);
   assert.strictEqual(result.tier, 'half_fee');
   assert.strictEqual(result.feePercentage, 50);
   assert.strictEqual(result.refundPercentage, 50);
@@ -59,9 +67,9 @@ runTest('Mezi 24 h a 7 dny (např. 3 dny předem) -> 50% storno poplatek, 50% re
   assert.strictEqual(result.feeAmount, 175);
 });
 
-runTest('Přesně 24 hodin předem -> 50% storno poplatek, 50% refund', () => {
-  // Lekce je 21. 10. 2026 v 10:00 (= přesně 24 hodin předem)
-  const result = calculateCancellationPolicy('2026-10-21', '10:00', 350, baseDate);
+runTest('Od 1. 11.: Přesně 24 hodin předem -> 50% storno poplatek, 50% refund', () => {
+  // Lekce je 6. 11. 2026 v 10:00 (= přesně 24 hodin předem)
+  const result = calculateCancellationPolicy('2026-11-06', '10:00', 350, baseDate);
   assert.strictEqual(result.tier, 'half_fee');
   assert.strictEqual(result.feePercentage, 50);
   assert.strictEqual(result.refundPercentage, 50);
@@ -69,17 +77,17 @@ runTest('Přesně 24 hodin předem -> 50% storno poplatek, 50% refund', () => {
   assert.strictEqual(result.feeAmount, 175);
 });
 
-runTest('Lichá cena pronájmu (např. 525 Kč za 1,5 h) se správně zaokrouhluje na koruny', () => {
-  const result = calculateCancellationPolicy('2026-10-23', '10:00', 525, baseDate);
+runTest('Od 1. 11.: Lichá cena pronájmu (např. 525 Kč za 1,5 h) se správně zaokrouhluje na koruny', () => {
+  const result = calculateCancellationPolicy('2026-11-08', '10:00', 525, baseDate);
   assert.strictEqual(result.tier, 'half_fee');
   assert.strictEqual(result.refundAmount + result.feeAmount, 525);
   assert.strictEqual(result.refundAmount, 263);
   assert.strictEqual(result.feeAmount, 262);
 });
 
-runTest('Méně než 24 hodin předem (např. 12 hodin) -> 100% storno poplatek, 0 Kč refund', () => {
-  // Lekce je 20. 10. 2026 v 22:00 (= 12 hodin předem)
-  const result = calculateCancellationPolicy('2026-10-20', '22:00', 350, baseDate);
+runTest('Od 1. 11.: Méně než 24 hodin předem (např. 12 hodin) -> 100% storno poplatek, 0 Kč refund', () => {
+  // Lekce je 5. 11. 2026 v 22:00 (= 12 hodin předem)
+  const result = calculateCancellationPolicy('2026-11-05', '22:00', 350, baseDate);
   assert.strictEqual(result.tier, 'full_fee');
   assert.strictEqual(result.feePercentage, 100);
   assert.strictEqual(result.refundPercentage, 0);
@@ -87,16 +95,16 @@ runTest('Méně než 24 hodin předem (např. 12 hodin) -> 100% storno poplatek,
   assert.strictEqual(result.feeAmount, 350);
 });
 
-runTest('2 hodiny předem -> 100% storno poplatek, 0 Kč refund', () => {
-  // Lekce je 20. 10. 2026 v 12:00 (= 2 hodiny předem)
-  const result = calculateCancellationPolicy('2026-10-20', '12:00', 350, baseDate);
+runTest('Od 1. 11.: 2 hodiny předem -> 100% storno poplatek, 0 Kč refund', () => {
+  // Lekce je 5. 11. 2026 v 12:00 (= 2 hodiny předem)
+  const result = calculateCancellationPolicy('2026-11-05', '12:00', 350, baseDate);
   assert.strictEqual(result.tier, 'full_fee');
   assert.strictEqual(result.refundAmount, 0);
   assert.strictEqual(result.feeAmount, 350);
 });
 
-runTest('Rezervace s cenou 0 Kč (např. interní/admin) nevytváří záporné částky', () => {
-  const result = calculateCancellationPolicy('2026-10-23', '10:00', 0, baseDate);
+runTest('Od 1. 11.: Rezervace s cenou 0 Kč (např. interní/admin) nevytváří záporné částky', () => {
+  const result = calculateCancellationPolicy('2026-11-08', '10:00', 0, baseDate);
   assert.strictEqual(result.refundAmount, 0);
   assert.strictEqual(result.feeAmount, 0);
 });

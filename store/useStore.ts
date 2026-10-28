@@ -262,7 +262,21 @@ export const useStore = create<AppState>()(
             : isGuestBooking
                 ? 'cancelled_by_guest'
                 : 'cancelled_by_practitioner';
-        await updateBookingInFirestore(bookingId, { status: 'cancelled', cancelledAt, cancellationReason });
+
+        const { calculateCancellationPolicy } = await import('../utils/cancellationPolicy');
+        const policy = calculateCancellationPolicy(booking.date, booking.time, booking.price);
+        const isPaid = booking.status === 'paid' || booking.status === 'completed';
+        const refundAmount = isPaid ? policy.refundAmount : 0;
+        const feeAmount = isPaid ? policy.feeAmount : 0;
+        const newStatus = (isPaid && refundAmount > 0 && feeAmount === 0) ? 'refunded' : 'cancelled';
+
+        await updateBookingInFirestore(bookingId, { 
+            status: newStatus, 
+            cancelledAt, 
+            cancellationReason,
+            refundAmount,
+            cancellationFee: feeAmount
+        });
 
         // Odeslání storno e-mailu klientovi i lektorovi (pokud mají vyplněný e-mail).
         // Důvod rozlišíme podle toho, kdo rezervaci ruší.
@@ -273,16 +287,33 @@ export const useStore = create<AppState>()(
             .join(', ');
 
         if (recipientList) {
-            const reason = isAdmin
+            let reason = isAdmin
                 ? "Rezervace byla zrušena administrátorem studia."
                 : isGuestBooking
                     ? "Rezervace byla zrušena na Vaši žádost."
-                    : "Rezervace byla zrušena ze strany studia (lektorem).";
+                    : "Rezervace byla zrušena lektorem.";
+
+            if (isPaid) {
+                if (policy.tier === 'full_refund') {
+                    reason += ` Zrušeno více než 7 dní před začátkem (storno poplatek 0 %). Celá zaplacená částka (${refundAmount} Kč) bude vrácena na platební kartu.`;
+                } else if (policy.tier === 'half_fee') {
+                    reason += ` Zrušeno v pásmu 24 h až 7 dní před začátkem. V souladu se storno podmínkami činí storno poplatek 50 % (${feeAmount} Kč) a polovina zaplacené částky (${refundAmount} Kč) bude vrácena na platební kartu.`;
+                } else {
+                    reason += ` Zrušeno méně než 24 hodin před začátkem. V souladu se storno podmínkami činí storno poplatek 100 % (${feeAmount} Kč) a zaplacená částka se nevrací.`;
+                }
+            }
+
             try {
                 if (state.token) {
                     // Přihlášený uživatel (lektor/admin) → přes chráněný endpoint s naší šablonou
                     const html = generateCancellationEmail(
-                        { ...booking, status: 'cancelled', cancelledAt },
+                        { 
+                            ...booking, 
+                            status: newStatus, 
+                            cancelledAt,
+                            refundAmount,
+                            cancellationFee: feeAmount
+                        },
                         reason
                     );
                     sendTransactionalEmail({
@@ -306,7 +337,14 @@ export const useStore = create<AppState>()(
 
         set((state) => ({
           bookings: state.bookings.map(b =>
-            b.id === bookingId ? { ...b, status: 'cancelled', cancelledAt, cancellationReason } : b
+            b.id === bookingId ? { 
+                ...b, 
+                status: newStatus, 
+                cancelledAt, 
+                cancellationReason,
+                refundAmount,
+                cancellationFee: feeAmount
+            } : b
           )
         }));
       },

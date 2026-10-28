@@ -43,11 +43,11 @@ const TermsPage: React.FC = () => {
                         (záleží na formě spolupráce).
                     </p>
 
-                    <h3>4. Zrušení rezervace, storno podmínky a možnost přesunu</h3>
+                    <h3>4. Zrušení rezervace, storno podmínky a možnost přesunu (účinné od 1. listopadu 2026)</h3>
                     <p>
                         Dle občanského zákoníku se na smlouvy o poskytnutí služeb volného času a pronájmu v přesně stanoveném 
                         termínu <strong>nevztahuje zákonná lhůta pro odstoupení do 14 dnů bez udání důvodu</strong>. 
-                        V Centru Unity platí následující storno pravidla a garance pro lektory i klienty:
+                        <strong>S účinností od 1. listopadu 2026</strong> platí v Centru Unity následující storno pravidla a garance pro lektory i klienty:
                     </p>
                     <ul className="list-disc pl-5 space-y-1.5">
                         <li><strong>Více než 7 dní před začátkem rezervace:</strong> vrácení 100 % zaplacené částky (storno poplatek 0 %).</li>
@@ -55,8 +55,8 @@ const TermsPage: React.FC = () => {
                         <li><strong>Méně než 24 hodin před začátkem rezervace:</strong> storno poplatek 100 % z ceny rezervace (zaplacená částka se nevrací).</li>
                     </ul>
                     <div className="mt-4 p-3.5 bg-amber-50/80 border border-amber-200/80 rounded-xl text-stone-700">
-                        <strong>Garance 1× bezplatného přesunu termínu:</strong><br/>
-                        U každé rezervace je nově umožněn jeden přesun na jiný volný termín v rezervačním systému. Pokud vám například onemocní klient, můžete ho přeobjednat a rezervace vám nepropadne. Každou rezervaci lze bezplatně přesunout pouze 1×.
+                        <strong>Garance 1× bezplatného přesunu termínu (od 1. listopadu 2026):</strong><br/>
+                        U každé rezervace je nově umožněn jeden přesun na jiný volný termín v rezervačním systému. Pokud vám například onemocní klient, můžete ho bezplatně přeobjednat a rezervace vám nepropadne. Každou rezervaci lze bezplatně přesunout pouze 1×.
                     </div>
 
                     <h3>5. Dodání služby (Plnění)</h3>
@@ -79,7 +79,7 @@ const TermsPage: React.FC = () => {
 
                     <h3>7. Závěrečná ustanovení</h3>
                     <p>
-                        Tyto podmínky nabývají platnosti a účinnosti dnem 1. ledna 2026.<br/>
+                        Tyto aktualizované obchodní a storno podmínky nabývají platnosti a účinnosti dnem <strong>1. listopadu 2026</strong>.<br/>
                         Provozovatel si vyhrazuje právo obchodní podmínky měnit a doplňovat.
                     </p>
                 </div>

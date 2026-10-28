@@ -17,6 +17,8 @@ export interface CancellationPolicyResult {
   description: string;
 }
 
+export const CANCELLATION_POLICY_EFFECTIVE_DATE = '2026-11-01';
+
 export function calculateCancellationPolicy(
   dateStr: string,
   timeStr: string,
@@ -33,6 +35,40 @@ export function calculateCancellationPolicy(
 
   const validPrice = Math.max(0, Number(price) || 0);
 
+  // Kontrola data účinnosti (1. listopadu 2026):
+  // Pokud storno probíhá ještě v říjnu 2026 pro říjnový termín, uplatňuje se původní pravidlo
+  // (> 24 h = 100 % vrácení), aby nová pravidla neplatila zpětně před 1. 11. 2026.
+  const isBeforeEffective = now < new Date('2026-11-01T00:00:00') && (dateStr || '') < '2026-11-01';
+
+  if (isBeforeEffective) {
+    if (hoursDifference >= 24) {
+      return {
+        hoursDifference,
+        daysDifference,
+        tier: 'full_refund',
+        feePercentage: 0,
+        refundPercentage: 100,
+        feeAmount: 0,
+        refundAmount: validPrice,
+        label: 'Více než 24 h předem (platnost do 31. 10.)',
+        description: 'V přechodném období do 31. 10. 2026 je při zrušení více než 24 h předem vráceno 100 % částky. Nové 3 storno pásma vstupují v účinnost od 1. 11. 2026.'
+      };
+    } else {
+      return {
+        hoursDifference,
+        daysDifference,
+        tier: 'full_fee',
+        feePercentage: 100,
+        refundPercentage: 0,
+        feeAmount: validPrice,
+        refundAmount: 0,
+        label: 'Méně než 24 hodin předem',
+        description: 'Storno poplatek 100 %. Zaplacená částka se nevrací.'
+      };
+    }
+  }
+
+  // S účinností od 1. listopadu 2026 (a pro všechny rezervace od 1. 11. 2026):
   // 1. Více než 7 dní (168 h): vrácení 100 %, storno poplatek 0 %
   if (hoursDifference >= 168) {
     return {
