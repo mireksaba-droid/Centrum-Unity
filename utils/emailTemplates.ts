@@ -150,9 +150,12 @@ export const generateConfirmationEmail = (booking: Partial<Booking>, isPaid: boo
 
           <!-- Storno podmínky -->
           <div style="background:#fff;border-left:3px solid #6b8f71;padding:12px 16px;">
-            <div style="color:#1c1917;font-size:13px;font-weight:700;margin-bottom:4px;">Storno podmínky</div>
+            <div style="color:#1c1917;font-size:13px;font-weight:700;margin-bottom:4px;">Storno podmínky & možnost přesunu</div>
             <div style="color:#78716c;font-size:13px;line-height:1.6;">
-              Rezervaci lze bezplatně zrušit nejpozději 24 hodin před termínem. Při včasném zrušení Vám bude zaplacená částka vrácena v plné výši.
+              • Více než 7 dní předem: vrácení 100 % částky (storno poplatek 0 %).<br/>
+              • 7 dní až 24 hodin předem: storno poplatek 50 % (vrácení 50 % částky).<br/>
+              • Méně než 24 hodin předem: storno poplatek 100 % (částka se nevrací).<br/>
+              • <strong>1× bezplatný přesun:</strong> Pokud Vám onemocní klient, můžete termín v systému 1× bezplatně přeobjednat a rezervace Vám nepropadne.
             </div>
           </div>
         </div>
@@ -203,6 +206,9 @@ export const generateCancellationEmail = (
             <table style="width:100%;border-collapse:collapse;">
               <tr><td style="padding:8px 0;color:#78716c;font-size:14px;">Termín</td><td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;">${formattedDate} v ${booking.time}</td></tr>
               <tr><td style="padding:8px 0;color:#78716c;font-size:14px;">Místnost</td><td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;">${roomLabel}</td></tr>
+              ${booking.price !== undefined ? `<tr><td style="padding:8px 0;color:#78716c;font-size:14px;">Cena pronájmu</td><td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;">${booking.price} Kč</td></tr>` : ''}
+              ${booking.cancellationFee !== undefined && booking.cancellationFee > 0 ? `<tr><td style="padding:8px 0;color:#78716c;font-size:14px;">Storno poplatek</td><td style="padding:8px 0;color:#991b1b;font-size:14px;font-weight:600;text-align:right;">${booking.cancellationFee} Kč</td></tr>` : ''}
+              ${booking.refundAmount !== undefined && booking.refundAmount > 0 ? `<tr><td style="padding:8px 0;color:#78716c;font-size:14px;">Vráceno na kartu</td><td style="padding:8px 0;color:#15803d;font-size:14px;font-weight:700;text-align:right;">${booking.refundAmount} Kč</td></tr>` : ''}
             </table>
           </div>
 

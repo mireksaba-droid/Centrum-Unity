@@ -11,6 +11,8 @@ import { useToast } from '../contexts/ToastContext';
 import { useStore } from '../store/useStore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, PieChart, Pie, Legend } from 'recharts';
 import ExtendBookingModal from '../components/ExtendBookingModal';
+import RescheduleModal from '../components/RescheduleModal';
+import { calculateCancellationPolicy } from '../utils/cancellationPolicy';
 
 interface PractitionerDashboardProps {
   practitioners: Practitioner[];
@@ -40,7 +42,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
   onCancelBooking,
   onInternalBook
 }) => {
-  const { token, groupEvents, updateBookingEquipment } = useStore();
+  const { token, groupEvents, updateBookingEquipment, adminRescheduleBooking } = useStore();
   const { addToast } = useToast();
   const [activeTab, setActiveTab] = useState<'calendar'>('calendar');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -48,6 +50,7 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
   const [showCalendarPicker, setShowCalendarPicker] = useState(false);
   const [bookingToCancel, setBookingToCancel] = useState<Booking | null>(null);
   const [bookingToExtend, setBookingToExtend] = useState<Booking | null>(null);
+  const [reschedulingBooking, setReschedulingBooking] = useState<Booking | null>(null);
   const [updatingEquipmentId, setUpdatingEquipmentId] = useState<string | null>(null);
 
   const handleUpdateEquipment = async (bookingId: string, newEq: 'table' | 'futon' | 'none') => {
@@ -390,6 +393,8 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
   const handleConfirmCancel = async () => {
         if (!bookingToCancel) return;
         setIsProcessing(true);
+        const policy = calculateCancellationPolicy(bookingToCancel.date, bookingToCancel.time, bookingToCancel.price);
+
         if (bookingToCancel.paymentId) {
             try {
                 const res = await fetch('/api/refund', {
@@ -398,19 +403,25 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`
                     },
-                    body: JSON.stringify({ paymentId: bookingToCancel.paymentId })
+                    body: JSON.stringify({ 
+                        paymentId: bookingToCancel.paymentId,
+                        amount: policy.refundAmount * 100 // v haléřích
+                    })
                 });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'Refund failed');
                 
-                addToast('success', 'Refundace zadána', 'Platba byla úspěšně zrušena přes GoPay.');
-                onCancelBooking(bookingToCancel.id);
-                addToast('success', 'Rezervace zrušena', 'Termín byl uvolněn.');
+                if (policy.refundAmount > 0) {
+                    addToast('success', 'Platba refundována', `Na kartu bylo vráceno ${policy.refundAmount} Kč (storno poplatek ${policy.feePercentage} %).`);
+                } else {
+                    addToast('info', 'Rezervace stornována', `Storno poplatek činí 100 % (${policy.feeAmount} Kč). Termín byl uvolněn.`);
+                }
+                await onCancelBooking(bookingToCancel.id);
             } catch (err: any) {
                 addToast('error', 'Chyba storna', err.message || 'Nastala chyba při vracení platby přes GoPay. Obraťte se prosím na podporu.');
             }
         } else {
-            onCancelBooking(bookingToCancel.id);
+            await onCancelBooking(bookingToCancel.id);
             addToast('success', 'Rezervace zrušena', 'Termín byl uvolněn.');
         }
         setIsProcessing(false);
@@ -735,14 +746,29 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
                                             <Clock className="w-3.5 h-3.5 mr-1 text-emerald-600" />
                                             Prodloužit
                                         </Button>
-                                        <Button 
-                                            variant="outline" 
-                                            size="sm" 
-                                            className="flex-1 min-w-[100px] border-stone-300 text-stone-700 hover:bg-stone-50"
-                                            onClick={() => addToast('info', 'Přebukování', 'Tato funkce bude brzy spuštěna.')}
-                                        >
-                                            Přebukovat
-                                        </Button>
+                                        {(booking.rescheduleCount || 0) >= 1 ? (
+                                            <Button 
+                                                variant="outline" 
+                                                size="sm" 
+                                                disabled
+                                                className="flex-1 min-w-[100px] border-stone-200 text-stone-400 bg-stone-50 cursor-not-allowed font-medium"
+                                                title="Tato rezervace již byla 1× bezplatně přesunuta (limit byl vyčerpán)."
+                                            >
+                                                <Clock className="w-3.5 h-3.5 mr-1 text-stone-400" />
+                                                Přesunuto (1/1)
+                                            </Button>
+                                        ) : (
+                                            <Button 
+                                                variant="outline" 
+                                                size="sm" 
+                                                className="flex-1 min-w-[100px] border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 font-semibold"
+                                                onClick={() => setReschedulingBooking(booking)}
+                                                title="1× bezplatný přesun termínu při onemocnění klienta"
+                                            >
+                                                <Clock className="w-3.5 h-3.5 mr-1 text-indigo-600" />
+                                                Přesunout (1×)
+                                            </Button>
+                                        )}
                                         <Button 
                                             variant="outline" 
                                             size="sm" 
@@ -961,37 +987,76 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
       
       {/* Cancellation Modal */}
       {bookingToCancel && (() => {
-          const bookingStart = parseLocalDate(bookingToCancel.date, bookingToCancel.time);
-          const now = new Date();
-          const hoursDifference = (bookingStart.getTime() - now.getTime()) / (1000 * 60 * 60);
-          const isAdmin = currentUser?.role === Role.ADMIN || currentUser?.id === 'admin' || bookingToCancel.bookedByUserId === 'admin';
-          const isTooLate = !isAdmin && hoursDifference < 24;
+          const policy = calculateCancellationPolicy(bookingToCancel.date, bookingToCancel.time, bookingToCancel.price);
+          const hasFreeReschedule = (bookingToCancel.rescheduleCount || 0) < 1;
 
           return (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
-              <div className="bg-white max-w-sm w-full rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-white max-w-md w-full rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 border border-stone-200">
                   <div className="p-6 text-center">
                       <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-600">
                           <X className="w-6 h-6" />
                       </div>
-                      <h3 className="text-xl font-bold font-heading mb-2">Zrušit rezervaci</h3>
-                      <p className="text-stone-600 mb-6">
-                          {isTooLate && (
-                              <span className="text-red-600 font-bold block mb-2">Pozor: Zbývá méně než 24 hodin!</span>
-                          )}
-                          Opravdu chcete zrušit tuto rezervaci z {formatLocalDate(bookingToCancel.date)} v {bookingToCancel.time}?
-                          {!isTooLate && bookingToCancel.paymentId && (
-                              <span className="block mt-2 font-medium text-stone-800">
-                                  Částka klienta bude refundována na jeho kartu.
-                              </span>
-                          )}
-                          {isTooLate && (
-                              <span className="block mt-2 font-medium text-red-600">
-                                  Termín je příliš blízko, nelze jej stornovat s nárokem na vrácení peněz klientovi online. Kontaktujte prosím manažera.
-                              </span>
-                          )}
+                      <h3 className="text-xl font-bold font-heading mb-1 text-stone-900">Zrušit rezervaci</h3>
+                      <p className="text-xs text-stone-500 mb-4">
+                          {formatLocalDate(bookingToCancel.date)} v {bookingToCancel.time} • Místnost {bookingToCancel.room} • {bookingToCancel.price} Kč
                       </p>
-                      <div className="flex gap-2">
+
+                      {/* Storno pásmo & výpočet */}
+                      <div className="bg-stone-50 border border-stone-200 rounded-xl p-4 text-left mb-4 space-y-2.5">
+                          <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold uppercase tracking-wider text-stone-500">Pásmo storna:</span>
+                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                  policy.tier === 'full_refund' ? 'bg-emerald-100 text-emerald-800' :
+                                  policy.tier === 'half_fee' ? 'bg-amber-100 text-amber-800' :
+                                  'bg-red-100 text-red-800'
+                              }`}>
+                                  {policy.label}
+                              </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-stone-200">
+                              <div className="bg-white p-2.5 rounded-lg border border-stone-200">
+                                  <div className="text-[11px] text-stone-500 font-medium">Storno poplatek</div>
+                                  <div className="text-base font-bold text-red-600">{policy.feeAmount} Kč <span className="text-xs font-normal">({policy.feePercentage} %)</span></div>
+                              </div>
+                              <div className="bg-white p-2.5 rounded-lg border border-stone-200">
+                                  <div className="text-[11px] text-stone-500 font-medium">Vrátí se na kartu</div>
+                                  <div className="text-base font-bold text-emerald-600">{policy.refundAmount} Kč <span className="text-xs font-normal">({policy.refundPercentage} %)</span></div>
+                              </div>
+                          </div>
+
+                          <p className="text-xs text-stone-600 leading-relaxed pt-1">
+                              {policy.description}
+                          </p>
+                      </div>
+
+                      {/* Garance 1× bezplatného přesunu (nabídka místo storna) */}
+                      {hasFreeReschedule && (
+                          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3.5 text-left mb-5">
+                              <div className="flex items-center gap-2 text-indigo-900 font-bold text-xs mb-1">
+                                  <Clock className="w-4 h-4 text-indigo-600 shrink-0" />
+                                  <span>Onemocněl vám klient? Využijte přesun</span>
+                              </div>
+                              <p className="text-xs text-indigo-800 leading-relaxed mb-2.5">
+                                  Nemusíte platit storno poplatek. Rezervaci můžete <strong>1× bezplatně přesunout</strong> na jiný volný termín v kalendáři a rezervace vám nepropadne.
+                              </p>
+                              <button
+                                  type="button"
+                                  onClick={() => {
+                                      const toReschedule = bookingToCancel;
+                                      setBookingToCancel(null);
+                                      setReschedulingBooking(toReschedule);
+                                  }}
+                                  className="text-xs font-bold text-indigo-700 bg-white hover:bg-indigo-100 border border-indigo-300 px-3 py-2 rounded-lg transition-colors w-full flex items-center justify-center gap-1.5 shadow-sm"
+                              >
+                                  <span>Přesunout termín místo storna (zbývá 1×)</span>
+                                  <ArrowRight className="w-3.5 h-3.5" />
+                              </button>
+                          </div>
+                      )}
+
+                      <div className="flex gap-2.5">
                           <Button 
                               variant="outline" 
                               className="flex-1" 
@@ -1001,11 +1066,13 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
                               Zpět
                           </Button>
                           <Button 
-                              className={`flex-1 text-white ${isTooLate ? 'bg-stone-300 hover:bg-stone-300 cursor-not-allowed opacity-50' : 'bg-red-600 hover:bg-red-700'}`}
+                              className="flex-1 text-white bg-red-600 hover:bg-red-700 font-bold"
                               onClick={handleConfirmCancel}
-                              disabled={isProcessing || isTooLate}
+                              disabled={isProcessing}
                           >
-                              {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Zrušit termín'}
+                              {isProcessing ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : (
+                                  policy.refundAmount > 0 ? `Zrušit (vrátit ${policy.refundAmount} Kč)` : 'Potvrdit storno'
+                              )}
                           </Button>
                       </div>
                   </div>
@@ -1013,6 +1080,25 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
           </div>
           );
       })()}
+
+      {/* 1-Time Free Reschedule Modal for Practitioners */}
+      {reschedulingBooking && (
+        <RescheduleModal
+          booking={reschedulingBooking}
+          allBookings={allBookings}
+          isPractitionerSelfService={true}
+          onClose={() => setReschedulingBooking(null)}
+          onConfirm={async (newDate, newTime, reason, newRoom, newEquipment) => {
+            try {
+              await adminRescheduleBooking(reschedulingBooking.id, newDate, newTime, reason, newRoom, newEquipment, true);
+              addToast('success', 'Termín úspěšně přesunut', `Rezervace byla přeobjednána na ${formatLocalDate(newDate)} v ${newTime}.`);
+              setReschedulingBooking(null);
+            } catch (err: any) {
+              addToast('error', 'Chyba při přesunu', err.message || 'Nepodařilo se přesunout termín.');
+            }
+          }}
+        />
+      )}
 
       {/* Extend Booking Modal */}
       {bookingToExtend && (

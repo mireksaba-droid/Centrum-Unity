@@ -43,16 +43,21 @@ const TermsPage: React.FC = () => {
                         (záleží na formě spolupráce).
                     </p>
 
-                    <h3>4. Zrušení rezervace a Odstoupení od smlouvy</h3>
+                    <h3>4. Zrušení rezervace, storno podmínky a možnost přesunu</h3>
                     <p>
-                        Dle občanského zákoníku se na smlouvy o ubytování a poskytnutí služeb volného času v přesně stanoveném 
-                        termínu <strong>nevztahuje lhůta pro odstoupení do 14 dnů bez udání důvodu</strong>. 
-                        Nicméně v našem studiu platí tyto storno podmínky:
+                        Dle občanského zákoníku se na smlouvy o poskytnutí služeb volného času a pronájmu v přesně stanoveném 
+                        termínu <strong>nevztahuje zákonná lhůta pro odstoupení do 14 dnů bez udání důvodu</strong>. 
+                        V Centru Unity platí následující storno pravidla a garance pro lektory i klienty:
                     </p>
-                    <ul className="list-disc pl-5">
-                        <li>Zrušení více než 24 hodin před začátkem: vrácení plné částky.</li>
-                        <li>Zrušení méně než 24 hodin před začátkem: poplatek 100 % z ceny rezervace.</li>
+                    <ul className="list-disc pl-5 space-y-1.5">
+                        <li><strong>Více než 7 dní před začátkem rezervace:</strong> vrácení 100 % zaplacené částky (storno poplatek 0 %).</li>
+                        <li><strong>7 dní až 24 hodin před začátkem rezervace:</strong> storno poplatek 50 % z ceny rezervace (vrácení 50 % zaplacené částky zpět na platební kartu).</li>
+                        <li><strong>Méně než 24 hodin před začátkem rezervace:</strong> storno poplatek 100 % z ceny rezervace (zaplacená částka se nevrací).</li>
                     </ul>
+                    <div className="mt-4 p-3.5 bg-amber-50/80 border border-amber-200/80 rounded-xl text-stone-700">
+                        <strong>Garance 1× bezplatného přesunu termínu:</strong><br/>
+                        U každé rezervace je nově umožněn jeden přesun na jiný volný termín v rezervačním systému. Pokud vám například onemocní klient, můžete ho přeobjednat a rezervace vám nepropadne. Každou rezervaci lze bezplatně přesunout pouze 1×.
+                    </div>
 
                     <h3>5. Dodání služby (Plnění)</h3>
                     <p>

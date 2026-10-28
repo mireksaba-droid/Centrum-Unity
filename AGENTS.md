@@ -47,5 +47,15 @@
    - **Pravidlo přednosti:** Kdo první vytvoří rezervaci (či zahájí platbu), má absolutní přednostní právo. Server (`server.ts`) i klient (`services/firebase.ts`) validují celý časový interval včetně pauz na úklid (30 min stejný lektor / 60 min střídání). Každý pokus o kolizní rezervaci či přesun je odmítnut.
    - **Google Kalendář synchronizace (zpoždění 4–24 h):** Externí Google Kalendář aktualizuje odebíraný iCal feed ve vlastních cyklech a má zpoždění. Pro ověření dostupnosti termínů je vždy závazná webová aplikace napojená na živou databázi.
 
+10. **Storno podmínky a 1× bezplatný přesun termínu:**
+    - **Storno pásma a refundace přes GoPay:**
+      - Více než 7 dní (> 168 h) před začátkem rezervace: vrácení 100 % zaplacené částky (storno poplatek 0 %).
+      - 7 dní až 24 hodin (24 h – 168 h) před začátkem: storno poplatek 50 % (vrácení 50 % částky zpět na platební kartu).
+      - Méně než 24 hodin (< 24 h) před začátkem: storno poplatek 100 % (termín se uvolní pro ostatní, zaplacená částka propadá).
+      - Logika výpočtu je centralizována v `utils/cancellationPolicy.ts` a uplatňuje se na backendu (`/api/refund`, `/api/guest-cancel`), v e-mailech i v lektorském dashboardu.
+    - **Garance 1× bezplatného přesunu (přeobjednání při nemoci klienta):**
+      - Lektor má u každé aktivní rezervace možnost **1× bezplatně přesunout** rezervaci na jiný volný termín v systému (`rescheduleCount`).
+      - Po prvním přesunu se počítadlo zvedne na `1` a další samoobslužný přesun je uzamčen. Další nestandardní úpravy může provést pouze správce (Eva).
+
 ## Stavy rezervace (`BookingStatus` v `types.ts`)
 `created` · `awaiting_payment` · `deferred_payment` · `paid` · `cancelled` · `completed` · `refunded`

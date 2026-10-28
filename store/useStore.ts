@@ -40,7 +40,7 @@ interface AppState {
   attachPaymentId: (bookingId: string, paymentId: string) => void;
   removeBooking: (bookingId: string) => Promise<void>;
   cancelBooking: (bookingId: string) => Promise<void>;
-  adminRescheduleBooking: (bookingId: string, newDate: string, newTime: string, reason?: string, newRoom?: 1 | 2, newEquipment?: 'table' | 'futon' | 'none') => Promise<void>;
+  adminRescheduleBooking: (bookingId: string, newDate: string, newTime: string, reason?: string, newRoom?: 1 | 2, newEquipment?: 'table' | 'futon' | 'none', isPractitionerSelfService?: boolean) => Promise<void>;
   
   // Practitioners
   updatePractitioner: (updatedP: Practitioner) => void;
@@ -311,10 +311,14 @@ export const useStore = create<AppState>()(
         }));
       },
 
-      adminRescheduleBooking: async (bookingId, newDate, newTime, reason, newRoom, newEquipment) => {
+      adminRescheduleBooking: async (bookingId, newDate, newTime, reason, newRoom, newEquipment, isPractitionerSelfService) => {
         const state = get();
         const b = state.bookings.find(b => b.id === bookingId);
         if (!b) return;
+
+        if (isPractitionerSelfService && (b.rescheduleCount || 0) >= 1) {
+          throw new Error("Tuto rezervaci již není možné přesunout. Každou rezervaci je povoleno přesunout pouze 1×.");
+        }
 
         const targetRoom = newRoom ?? b.room ?? 1;
         const targetEquipment = newEquipment ?? b.equipment ?? 'table';
@@ -335,10 +339,13 @@ export const useStore = create<AppState>()(
           throw new Error(collision.reason || "Dochází ke kolizi s jinou rezervací. První vytvořená rezervace má přednost.");
         }
 
-        const newNote = reason ? (b.note ? `${b.note}\nADMIN RESCHEDULE: ${reason}` : `ADMIN RESCHEDULE: ${reason}`) : b.note;
+        const prefix = isPractitionerSelfService ? 'LEKTOR RESCHEDULE' : 'ADMIN RESCHEDULE';
+        const newNote = reason ? (b.note ? `${b.note}\n${prefix}: ${reason}` : `${prefix}: ${reason}`) : b.note;
         const rescheduledAt = new Date().toISOString();
         const originalDate = b.originalDate || b.date;
         const originalTime = b.originalTime || b.time;
+        const newRescheduleCount = (b.rescheduleCount || 0) + 1;
+        const rescheduledBy = isPractitionerSelfService ? 'practitioner' : 'admin';
         
         await updateBookingInFirestore(bookingId, { 
           date: newDate, 
@@ -349,7 +356,9 @@ export const useStore = create<AppState>()(
           rescheduledAt,
           originalDate,
           originalTime,
-          rescheduleReason: reason || undefined
+          rescheduleReason: reason || undefined,
+          rescheduleCount: newRescheduleCount,
+          rescheduledBy
         });
 
         set((state) => ({
@@ -365,7 +374,9 @@ export const useStore = create<AppState>()(
               rescheduledAt,
               originalDate,
               originalTime,
-              rescheduleReason: reason || undefined
+              rescheduleReason: reason || undefined,
+              rescheduleCount: newRescheduleCount,
+              rescheduledBy
             };
           })
         }));

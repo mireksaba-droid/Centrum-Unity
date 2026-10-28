@@ -64,11 +64,15 @@ export interface Booking {
   
   cancelledAt?: string; // ISO date string
   cancellationReason?: string; // Proč byla rezervace zrušena (payment_expired, payment_cancelled, cancelled_by_guest, cancelled_by_admin, ...)
+  refundAmount?: number; // Vrácená částka v Kč přes GoPay (např. 100 % nebo 50 %)
+  cancellationFee?: number; // Storno poplatek v Kč (např. 0 %, 50 % nebo 100 %)
   
-  rescheduledAt?: string; // Kdy byla rezervace přesunuta administrátorem
+  rescheduledAt?: string; // Kdy byla rezervace přesunuta
   originalDate?: string;  // Původní datum před přesunem
   originalTime?: string;  // Původní čas před přesunem
   rescheduleReason?: string; // Důvod přesunu termínu
+  rescheduleCount?: number; // Počet přesunů (lektor má povolen max. 1 bezplatný přesun)
+  rescheduledBy?: 'admin' | 'practitioner'; // Kdo přesun provedl
 
   paymentId?: string; // Pro refundace testovacích nebo skutečných plateb před uplynutím termínu
 

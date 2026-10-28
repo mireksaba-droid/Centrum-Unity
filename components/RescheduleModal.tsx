@@ -9,20 +9,27 @@ import { AlertTriangle, Clock, Calendar as CalendarIcon, X, Check, Lock, ShieldA
 interface RescheduleModalProps {
   booking: Booking;
   allBookings?: Booking[];
+  isPractitionerSelfService?: boolean;
   onClose: () => void;
   onConfirm: (newDate: string, newTime: string, reason?: string, newRoom?: 1 | 2, newEquipment?: 'table' | 'futon' | 'none') => void;
 }
 
-const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, allBookings = [], onClose, onConfirm }) => {
+const RescheduleModal: React.FC<RescheduleModalProps> = ({ 
+  booking, 
+  allBookings = [], 
+  isPractitionerSelfService = false,
+  onClose, 
+  onConfirm 
+}) => {
   const [newDate, setNewDate] = useState(booking.date);
   const [newTime, setNewTime] = useState(booking.time);
   const [newRoom, setNewRoom] = useState<1 | 2>(booking.room || 1);
   const [newEquipment, setNewEquipment] = useState<'table' | 'futon' | 'none'>(booking.equipment || 'table');
   const [reason, setReason] = useState('');
-  const [isOverrideConfirmed, setIsOverrideConfirmed] = useState(false);
   const [isLateReschedule, setIsLateReschedule] = useState(false);
 
   const isAdminBooking = booking.bookedByUserId === 'admin';
+  const hasAlreadyRescheduled = isPractitionerSelfService && (booking.rescheduleCount || 0) >= 1;
 
   // Check collision for target date, time, and room
   const collision = useMemo(() => {
@@ -75,14 +82,34 @@ const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, allBookings 
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg border border-stone-200 flex flex-col max-h-[92vh] overflow-hidden">
             {/* Header */}
-            <div className={`p-4 flex justify-between items-center text-white shrink-0 ${isLateReschedule ? 'bg-amber-600' : 'bg-indigo-600'}`}>
+            <div className={`p-4 flex justify-between items-center text-white shrink-0 ${isLateReschedule && !isPractitionerSelfService ? 'bg-amber-600' : 'bg-indigo-600'}`}>
                 <h3 className="font-bold text-lg flex items-center gap-2">
-                    <Clock className="w-5 h-5" /> Přesunout rezervaci (Čas i Místnost)
+                    <Clock className="w-5 h-5" /> {isPractitionerSelfService ? 'Přesunout rezervaci (1× bezplatně)' : 'Přesunout rezervaci (Čas i Místnost)'}
                 </h3>
                 <button onClick={onClose} className="hover:bg-white/20 p-1 rounded-full transition-colors"><X className="w-5 h-5" /></button>
             </div>
 
             <div className="p-5 sm:p-6 space-y-5 overflow-y-auto flex-1">
+                {/* 1-time Practitioner Reschedule Info Banner */}
+                {isPractitionerSelfService && (
+                    <div className={`p-3.5 rounded-xl border flex items-start gap-3 ${hasAlreadyRescheduled ? 'bg-red-50 border-red-200 text-red-900' : 'bg-indigo-50 border-indigo-200 text-indigo-900'}`}>
+                        <Clock className={`w-5 h-5 shrink-0 mt-0.5 ${hasAlreadyRescheduled ? 'text-red-600' : 'text-indigo-600'}`} />
+                        <div className="text-xs leading-relaxed">
+                            {hasAlreadyRescheduled ? (
+                                <>
+                                    <strong className="block font-bold text-sm text-red-800 mb-0.5">Limit přesunů vyčerpán (1/1)</strong>
+                                    Tuto rezervaci jste již jednou přesunuli. Každou rezervaci je povoleno bezplatně přesunout pouze 1×. Pro další změny prosím kontaktujte správkyni studia (Evu).
+                                </>
+                            ) : (
+                                <>
+                                    <strong className="block font-bold text-sm text-indigo-900 mb-0.5">1× bezplatný přesun termínu</strong>
+                                    Pokud vám například onemocněl klient, můžete si termín bezplatně přeobjednat na jiný volný čas a rezervace vám nepropadne. Tato možnost je k dispozici 1× pro tuto rezervaci.
+                                </>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 {/* Current Info */}
                 <div className="bg-stone-50 p-3 rounded-lg border border-stone-200 text-sm">
                     <span className="block text-stone-500 text-xs uppercase font-bold mb-1">Původní termín a místnost</span>
@@ -255,10 +282,10 @@ const RescheduleModal: React.FC<RescheduleModalProps> = ({ booking, allBookings 
                 <Button variant="ghost" onClick={onClose} size="sm">Zpět</Button>
                 <Button 
                     onClick={handleSubmit} 
-                    disabled={collision.hasCollision}
-                    className={collision.hasCollision ? 'bg-stone-300 text-stone-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 text-white font-bold'}
+                    disabled={collision.hasCollision || hasAlreadyRescheduled}
+                    className={collision.hasCollision || hasAlreadyRescheduled ? 'bg-stone-300 text-stone-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 text-white font-bold'}
                 >
-                    {collision.hasCollision ? 'Nelze (Kolize)' : 'Potvrdit přesun'}
+                    {hasAlreadyRescheduled ? 'Již přesunuto (limit 1×)' : collision.hasCollision ? 'Nelze (Kolize)' : isPractitionerSelfService ? 'Potvrdit bezplatný přesun (1×)' : 'Potvrdit přesun'}
                 </Button>
             </div>
         </div>

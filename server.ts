@@ -15,6 +15,7 @@ import firebaseConfig from "./firebase-applet-config.json";
 import { Booking } from "./types";
 import { PRACTITIONERS } from "./constants";
 import { calculateRentalPrice, checkBookingCollision } from "./utils/scheduler";
+import { calculateCancellationPolicy } from "./utils/cancellationPolicy";
 import { generatePaymentRequestEmail, generateConfirmationEmail, generateCancellationEmail, generateAdminDailySummaryEmail, generatePaymentReminderEmail, generateEventRegistrationConfirmationEmail, generateEventRegistrationCancellationEmail, generateAdminEventRegistrationNotificationEmail, generateAdminEventCancellationNotificationEmail, generateExtensionConfirmationEmail } from "./utils/emailTemplates";
 
 async function safeJson(res: any) {
@@ -1588,53 +1589,106 @@ async function startServer() {
          return res.json({ success: true, message: "Platba nebyla dokončena, storno rezervace proběhlo bez refundace." });
       }
 
-      // Backend verification of 24h limit
-      if (resDate && resTime) {
-        const dateParts = resDate.split('-');
-        const [hours, minutes] = resTime.split(':').map(Number);
-        if (dateParts.length === 3) {
-          const reservationDateTime = new Date(Number(dateParts[0]), Number(dateParts[1]) - 1, Number(dateParts[2]), hours, minutes);
-          const now = new Date();
-          const differenceInHours = (reservationDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+      // Částka k refundaci
+      const paidAmount = Number(paymentStatus.amount) || 0; // v haléřích
 
-          if (differenceInHours < 24) {
-            return res.status(400).json({ error: "Refundace není možná. Zbývá méně než 24 hodin do začátku rezervace." });
+      // Ověření storno podmínek:
+      // • Více než 7 dní (> 168 h): vrácení 100 % částky (storno poplatek 0 %)
+      // • 7 dní až 24 h (24 h – 168 h): vrácení 50 % částky (storno poplatek 50 %)
+      // • Méně než 24 h (< 24 h): storno poplatek 100 % (žádná refundace, částka propadá)
+      let policyMaxRefundHalere = paidAmount;
+      let policyFeePercentage = 0;
+      let policyRefundPercentage = 100;
+
+      if (resDate && resTime && !isAdmin(req)) {
+        const policy = calculateCancellationPolicy(resDate, resTime, paidAmount / 100);
+        policyFeePercentage = policy.feePercentage;
+        policyRefundPercentage = policy.refundPercentage;
+        policyMaxRefundHalere = Math.round((paidAmount * policy.refundPercentage) / 100);
+
+        // Pokud je méně než 24 hodin, storno poplatek je 100 % (žádná refundace na GoPay)
+        if (policy.tier === 'full_fee') {
+          if (paymentBookingId) {
+            const b = await loadBooking(paymentBookingId);
+            if (b) {
+              await updateDoc(b.ref, {
+                status: 'cancelled',
+                cancelledAt: new Date().toISOString(),
+                cancellationReason: 'cancelled_less_than_24h_full_fee',
+                refundAmount: 0,
+                cancellationFee: paidAmount / 100,
+                note: (b.data.note ? b.data.note + '\n' : '') + `Storno méně než 24 h předem: 100% storno poplatek (${paidAmount / 100} Kč).`
+              });
+            }
           }
+          return res.json({ 
+            success: true, 
+            refundAmount: 0, 
+            cancellationFee: paidAmount / 100,
+            feePercentage: 100,
+            message: "Rezervace byla zrušena. Do začátku zbývá méně než 24 hodin, storno poplatek činí 100 % (zaplacená částka se nevrací)." 
+          });
         }
       }
 
-      // Částku k refundaci nikdy nepřebíráme slepě od klienta - omezíme ji na skutečně zaplacenou
-      const paidAmount = Number(paymentStatus.amount) || 0;
       const requested = Number(amount);
       const refundAmount = (Number.isFinite(requested) && requested > 0)
-        ? Math.min(requested, paidAmount)
-        : paidAmount;
+        ? Math.min(requested, policyMaxRefundHalere)
+        : policyMaxRefundHalere;
 
-      // Refund the payment
-      const refundRes = await fetch(`${GOPAY_URL}/payments/payment/${encodeURIComponent(cleanPaymentId)}/refund`, {
-         method: "POST",
-         headers: {
-           "Accept": "application/json",
-           "Content-Type": "application/x-www-form-urlencoded",
-           "Authorization": `Bearer ${token}`
-         },
-         body: `amount=${refundAmount}`
-      });
+      // Refund platby přes GoPay (pokud refundAmount > 0)
+      let result: any = { message: "No refund amount" };
+      if (refundAmount > 0) {
+        const refundRes = await fetch(`${GOPAY_URL}/payments/payment/${encodeURIComponent(cleanPaymentId)}/refund`, {
+          method: "POST",
+          headers: {
+            "Accept": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": `Bearer ${token}`
+          },
+          body: `amount=${refundAmount}`
+        });
 
-      const textResult = await refundRes.text();
-      let result;
-      try {
+        const textResult = await refundRes.text();
+        try {
           result = textResult ? JSON.parse(textResult) : {};
-      } catch (e) {
+        } catch (e) {
           console.error("GoPay refund returned non-JSON:", textResult);
           result = { error: textResult };
+        }
+
+        if (!refundRes.ok) {
+          return res.status(400).json({ error: `Nelze refundovat platbu: ${JSON.stringify(result)}` });
+        }
       }
 
-      if (!refundRes.ok) {
-         return res.status(400).json({ error: `Nelze refundovat platbu: ${JSON.stringify(result)}` });
+      // Aktualizujeme rezervaci v databázi
+      const returnedCzk = refundAmount / 100;
+      const feeCzk = (paidAmount - refundAmount) / 100;
+      if (paymentBookingId) {
+        const b = await loadBooking(paymentBookingId);
+        if (b) {
+          await updateDoc(b.ref, {
+            status: refundAmount === paidAmount ? 'refunded' : 'cancelled',
+            cancelledAt: new Date().toISOString(),
+            cancellationReason: refundAmount === paidAmount ? 'cancelled_with_full_refund' : 'cancelled_with_half_refund',
+            refundAmount: returnedCzk,
+            cancellationFee: feeCzk,
+            note: (b.data.note ? b.data.note + '\n' : '') + `Storno: vráceno ${returnedCzk} Kč (${policyRefundPercentage} %), storno poplatek ${feeCzk} Kč (${policyFeePercentage} %).`
+          });
+        }
       }
 
-      res.json({ success: true, result });
+      res.json({ 
+        success: true, 
+        result, 
+        refundAmount: returnedCzk, 
+        cancellationFee: feeCzk, 
+        feePercentage: policyFeePercentage,
+        message: refundAmount === paidAmount 
+          ? "Rezervace byla zrušena a celá částka (100 %) byla refundována na kartu." 
+          : `Rezervace byla zrušena. V souladu se storno podmínkami bylo na kartu vráceno ${returnedCzk} Kč (50 %) a ${feeCzk} Kč činí storno poplatek.`
+      });
     } catch (error: any) {
       console.error("GoPay Refund Error:", error.message);
       res.status(400).json({ error: error.message });
@@ -2326,48 +2380,78 @@ async function startServer() {
         return res.json({ success: true, message: "Rezervace už byla zrušena." });
       }
 
-      // Refundace jen u zaplacené rezervace a jen >24 h před termínem
+      // Výpočet storno podmínek:
+      // • > 7 dní: 100 % refund
+      // • 24 h až 7 dní: 50 % refund
+      // • < 24 h: 0 % refund (100% storno poplatek)
       let refundMessage = "";
+      let refundAmountCzk = 0;
+      let cancellationFeeCzk = 0;
+
       if (data.paymentId) {
-        const [y, m, d] = String(data.date).split('-').map(Number);
-        const [hh, mm] = String(data.time).split(':').map(Number);
-        const reservationTime = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0).getTime();
-        const hoursToReservation = (reservationTime - now) / (1000 * 60 * 60);
-        if (hoursToReservation < 24) {
-          return res.status(400).json({ error: "Zrušení s vrácením peněz je možné jen více než 24 hodin před termínem. Kontaktujte prosím studio." });
-        }
         const token = await getGoPayToken();
         const statusRes = await fetch(`${GOPAY_URL}/payments/payment/${data.paymentId}`, {
           method: "GET", headers: { "Accept": "application/json", "Authorization": `Bearer ${token}` }
         });
         const paymentStatus = await safeJson(statusRes);
+
         if (paymentStatus.state === 'PAID') {
-          const refundRes = await fetch(`${GOPAY_URL}/payments/payment/${data.paymentId}/refund`, {
-            method: "POST",
-            headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded", "Authorization": `Bearer ${token}` },
-            body: `amount=${paymentStatus.amount}`
-          });
-          const rtext = await refundRes.text();
-          if (!refundRes.ok) {
-            return res.status(400).json({ error: `Platbu se nepodařilo vrátit: ${rtext}. Kontaktujte prosím studio.` });
+          const totalPaidHalere = Number(paymentStatus.amount) || 0;
+          const policy = calculateCancellationPolicy(data.date, data.time, totalPaidHalere / 100);
+
+          if (policy.tier === 'full_refund') {
+            const refundRes = await fetch(`${GOPAY_URL}/payments/payment/${data.paymentId}/refund`, {
+              method: "POST",
+              headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded", "Authorization": `Bearer ${token}` },
+              body: `amount=${totalPaidHalere}`
+            });
+            const rtext = await refundRes.text();
+            if (!refundRes.ok) {
+              return res.status(400).json({ error: `Platbu se nepodařilo vrátit: ${rtext}. Kontaktujte prosím studio.` });
+            }
+            refundAmountCzk = totalPaidHalere / 100;
+            cancellationFeeCzk = 0;
+            refundMessage = `Rezervace byla zrušena. Celá zaplacená částka (${refundAmountCzk} Kč) Vám bude vrácena na platební kartu.`;
+          } else if (policy.tier === 'half_fee') {
+            const refundHalere = Math.round(totalPaidHalere / 2);
+            const refundRes = await fetch(`${GOPAY_URL}/payments/payment/${data.paymentId}/refund`, {
+              method: "POST",
+              headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded", "Authorization": `Bearer ${token}` },
+              body: `amount=${refundHalere}`
+            });
+            const rtext = await refundRes.text();
+            if (!refundRes.ok) {
+              return res.status(400).json({ error: `Platbu se nepodařilo vrátit: ${rtext}. Kontaktujte prosím studio.` });
+            }
+            refundAmountCzk = refundHalere / 100;
+            cancellationFeeCzk = (totalPaidHalere - refundHalere) / 100;
+            refundMessage = `Rezervace byla zrušena. V souladu se storno podmínkami (storno poplatek 50 %) Vám bude ${refundAmountCzk} Kč vráceno na kartu a ${cancellationFeeCzk} Kč činí storno poplatek.`;
+          } else {
+            // Méně než 24 h: 100% storno poplatek
+            refundAmountCzk = 0;
+            cancellationFeeCzk = totalPaidHalere / 100;
+            refundMessage = `Rezervace byla zrušena. Do začátku zbývá méně než 24 hodin, storno poplatek činí 100 % (${cancellationFeeCzk} Kč) a zaplacená částka se nevrací.`;
           }
-          refundMessage = "Zaplacená částka Vám bude vrácena.";
         }
       }
 
-      await updateDoc(booking.ref, {
-        status: 'cancelled',
+      const updatedFields: any = {
+        status: refundAmountCzk > 0 && cancellationFeeCzk === 0 ? 'refunded' : 'cancelled',
         cancelledAt: new Date().toISOString(),
-        cancellationReason: refundMessage ? 'cancelled_by_guest_refunded' : 'cancelled_by_guest',
-        note: (data.note ? data.note + '\n' : '') + 'Zrušeno hostem (ověřeno e-mailem).'
-      });
+        cancellationReason: refundAmountCzk > 0 ? (cancellationFeeCzk > 0 ? 'cancelled_by_guest_half_refund' : 'cancelled_by_guest_full_refund') : 'cancelled_by_guest_no_refund',
+        refundAmount: refundAmountCzk,
+        cancellationFee: cancellationFeeCzk,
+        note: (data.note ? data.note + '\n' : '') + `Zrušeno hostem (ověřeno e-mailem). ${refundMessage}`
+      };
+
+      await updateDoc(booking.ref, updatedFields);
 
       if (emailConfigured() && data.clientEmail) {
         try {
           await sendEmail({
             to: data.clientEmail,
             subject: 'Zrušení rezervace - Centrum Unity',
-            html: generateCancellationEmail(data, "Rezervace byla zrušena na Vaši žádost.")
+            html: generateCancellationEmail({ ...data, ...updatedFields }, refundMessage)
           });
         } catch (e: any) { console.error("Guest cancel email error:", e.message); }
       }
