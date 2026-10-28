@@ -1,13 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Booking, Practitioner, Service, Role, GroupEvent, EventRegistration, ReferralStats } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, Bed, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronUp, ChevronRight, RefreshCw, Loader2, Smartphone, BarChart3, Globe } from 'lucide-react';
+import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, Bed, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronUp, ChevronRight, RefreshCw, Loader2, Smartphone, BarChart3, Globe, ArrowRight, ShieldCheck } from 'lucide-react';
 import Button from '../components/Button';
 import StudioSchedule from './StudioSchedule';
 import RescheduleModal from '../components/RescheduleModal';
 import { useToast } from '../contexts/ToastContext';
 import { checkBookingCollision, timeToMinutes, calculateRentalPrice } from '../utils/scheduler';
-import { BUFFER_SAME_USER, BUFFER_DIFF_USER, sortGroupEvents } from '../constants';
+import { BUFFER_SAME_USER, BUFFER_DIFF_USER, sortGroupEvents, sortPractitioners } from '../constants';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 import { useStore } from '../store/useStore';
 import { isDemoMode } from '../services/firebase';
@@ -70,7 +70,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     onLogout
 }) => {
     const { addToast } = useToast();
-    const [activeTab, setActiveTab] = useState<'calendar' | 'analytics' | 'schedule' | 'team' | 'events'>('calendar');
+    const [activeTab, setActiveTab] = useState<'calendar' | 'analytics' | 'reschedules' | 'schedule' | 'team' | 'events'>('calendar');
     const [searchQuery, setSearchQuery] = useState('');
     const [scheduleFilter, setScheduleFilter] = useState<'all' | 'today' | 'upcoming'>('all');
     const [masterCalUrl, setMasterCalUrl] = useState<string>('');
@@ -103,6 +103,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     // Storno po měsících a lektorech
     const [stornoSelectedMonth, setStornoSelectedMonth] = useState<string>('current');
     const [expandedStornoLecturer, setExpandedStornoLecturer] = useState<string | null>(null);
+
+    // === AUDIT A MONITORING PŘESUNŮ (RESCHEDULE AUDIT) ===
+    const [rescheduleFilterType, setRescheduleFilterType] = useState<'all' | 'suspicious' | 'late' | 'sixDay' | 'safe' | 'active'>('all');
+    const [reschedulePractitionerFilter, setReschedulePractitionerFilter] = useState<string>('all');
+    const [rescheduleSearch, setRescheduleSearch] = useState<string>('');
+    const [expandedRescheduleRows, setExpandedRescheduleRows] = useState<Record<string, boolean>>({});
+
+    const toggleRescheduleRow = (id: string) => {
+        setExpandedRescheduleRows(prev => ({ ...prev, [id]: !prev[id] }));
+    };
 
     const loadReferrals = async () => {
         setLoadingReferrals(true);
@@ -960,6 +970,191 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         return stats.monthlyStornoReports.find(r => r.key === stornoSelectedMonth) || stats.monthlyStornoReports[0];
     }, [stats.monthlyStornoReports, stornoSelectedMonth]);
 
+    const sortedPractitionersForFilter = useMemo(() => {
+        return sortPractitioners(practitioners);
+    }, [practitioners]);
+
+    const formatCzechDate = (dateStr?: string) => {
+        if (!dateStr) return '—';
+        const parts = dateStr.split('-');
+        if (parts.length === 3) return `${parseInt(parts[2], 10)}. ${parseInt(parts[1], 10)}. ${parts[0]}`;
+        return dateStr;
+    };
+
+    const formatCzechDateTime = (isoStr?: string) => {
+        if (!isoStr) return '—';
+        try {
+            const d = new Date(isoStr);
+            if (isNaN(d.getTime())) return isoStr;
+            return d.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        } catch {
+            return isoStr;
+        }
+    };
+
+    const rescheduleAuditData = useMemo(() => {
+        const rawRescheduled = allBookings.filter(b => {
+            if (isIgnoredName(b.bookedByName)) return false;
+            return !!b.rescheduledAt || 
+                (b.rescheduleCount && b.rescheduleCount > 0) || 
+                (b.note && (b.note.includes('RESCHEDULE') || b.note.includes('PŘESUN')));
+        });
+
+        const items = rawRescheduled.map(b => {
+            const originalDateStr = b.originalDate || b.date;
+            const originalTimeStr = b.originalTime || b.time;
+            const originalDateTime = parseLocalDate(originalDateStr, originalTimeStr);
+            const newDateTime = parseLocalDate(b.date, b.time);
+
+            const rescheduleTimestamp = b.rescheduledAt 
+                ? new Date(b.rescheduledAt) 
+                : (b as any).updatedAt 
+                    ? new Date((b as any).updatedAt) 
+                    : null;
+
+            // Předstih v hodinách mezi okamžikem provedení přesunu a původním začátkem
+            const leadHours = rescheduleTimestamp 
+                ? (originalDateTime.getTime() - rescheduleTimestamp.getTime()) / (1000 * 60 * 60)
+                : null;
+
+            // O kolik dní byl termín posunut (kladné = do budoucna)
+            const daysShifted = Math.round((newDateTime.getTime() - originalDateTime.getTime()) / (1000 * 60 * 60 * 24));
+
+            // Zda byla rezervace následně po přesunu stornována / refundována
+            const isCancelled = b.status === 'cancelled' || b.status === 'refunded';
+
+            const isLate = leadHours !== null && leadHours < 24 && leadHours >= 0;
+            const isRetroactive = leadHours !== null && leadHours < 0;
+            const isSixDay = leadHours !== null && leadHours >= 24 && leadHours < 168;
+            const isSafe = leadHours !== null && leadHours >= 168;
+
+            const isSuspicious = isCancelled;
+
+            const practitionerDisplayName = resolvePractitionerDisplayName(b, practitioners);
+
+            return {
+                booking: b,
+                id: b.id,
+                practitionerName: practitionerDisplayName,
+                practitionerId: b.bookedByUserId,
+                originalDateStr,
+                originalTimeStr,
+                originalDateTime,
+                newDateStr: b.date,
+                newTimeStr: b.time,
+                newDateTime,
+                room: b.room,
+                price: b.price || 0,
+                status: b.status,
+                rescheduledAt: b.rescheduledAt,
+                rescheduleTimestamp,
+                rescheduledBy: b.rescheduledBy || (b.note?.includes('LEKTOR') ? 'practitioner' : 'admin'),
+                rescheduleCount: b.rescheduleCount || 1,
+                rescheduleReason: b.rescheduleReason || (b.note?.match(/RESCHEDULE: (.*)/)?.[1]),
+                leadHours,
+                daysShifted,
+                isCancelled,
+                isLate,
+                isRetroactive,
+                isSixDay,
+                isSafe,
+                isSuspicious,
+                cancelledAt: b.cancelledAt,
+                cancellationReason: b.cancellationReason,
+                refundAmount: b.refundAmount,
+                cancellationFee: b.cancellationFee,
+            };
+        }).sort((a, b) => {
+            const tA = a.rescheduleTimestamp ? a.rescheduleTimestamp.getTime() : 0;
+            const tB = b.rescheduleTimestamp ? b.rescheduleTimestamp.getTime() : 0;
+            return tB - tA;
+        });
+
+        const totalCount = items.length;
+        const totalValue = items.reduce((sum, it) => sum + it.price, 0);
+        const suspiciousCount = items.filter(it => it.isSuspicious).length;
+        const suspiciousValue = items.filter(it => it.isSuspicious).reduce((sum, it) => sum + it.price, 0);
+        const lateCount = items.filter(it => it.isLate || it.isRetroactive).length;
+        const sixDayCount = items.filter(it => it.isSixDay).length;
+        const safeCount = items.filter(it => it.isSafe).length;
+        const activeCount = items.filter(it => !it.isCancelled).length;
+
+        // Souhrn per lektor
+        const practitionerStatsMap = new Map<string, {
+            name: string;
+            total: number;
+            late: number;
+            suspicious: number;
+            totalValue: number;
+        }>();
+
+        items.forEach(it => {
+            const key = it.practitionerName;
+            if (!practitionerStatsMap.has(key)) {
+                practitionerStatsMap.set(key, {
+                    name: key,
+                    total: 0,
+                    late: 0,
+                    suspicious: 0,
+                    totalValue: 0
+                });
+            }
+            const s = practitionerStatsMap.get(key)!;
+            s.total += 1;
+            if (it.isLate || it.isRetroactive) s.late += 1;
+            if (it.isSuspicious) s.suspicious += 1;
+            s.totalValue += it.price;
+        });
+
+        const practitionerSummary = Array.from(practitionerStatsMap.values()).sort((a, b) => b.total - a.total);
+
+        return {
+            items,
+            totalCount,
+            totalValue,
+            suspiciousCount,
+            suspiciousValue,
+            lateCount,
+            sixDayCount,
+            safeCount,
+            activeCount,
+            practitionerSummary
+        };
+    }, [allBookings, practitioners]);
+
+    const filteredRescheduleItems = useMemo(() => {
+        let list = rescheduleAuditData.items;
+
+        if (rescheduleFilterType === 'suspicious') {
+            list = list.filter(it => it.isSuspicious);
+        } else if (rescheduleFilterType === 'late') {
+            list = list.filter(it => it.isLate || it.isRetroactive);
+        } else if (rescheduleFilterType === 'sixDay') {
+            list = list.filter(it => it.isSixDay);
+        } else if (rescheduleFilterType === 'safe') {
+            list = list.filter(it => it.isSafe);
+        } else if (rescheduleFilterType === 'active') {
+            list = list.filter(it => !it.isCancelled);
+        }
+
+        if (reschedulePractitionerFilter !== 'all') {
+            list = list.filter(it => it.practitionerName === reschedulePractitionerFilter || it.practitionerId === reschedulePractitionerFilter);
+        }
+
+        if (rescheduleSearch.trim()) {
+            const q = normalizeName(rescheduleSearch);
+            list = list.filter(it => {
+                return normalizeName(it.practitionerName).includes(q) ||
+                    normalizeName(it.originalDateStr).includes(q) ||
+                    normalizeName(it.newDateStr).includes(q) ||
+                    normalizeName(it.rescheduleReason).includes(q) ||
+                    normalizeName(it.booking.clientName).includes(q);
+            });
+        }
+
+        return list;
+    }, [rescheduleAuditData, rescheduleFilterType, reschedulePractitionerFilter, rescheduleSearch]);
+
     // Feed poslední aktivity: nové rezervace (dle createdAt) a zrušení (dle cancelledAt)
     // Poslední aktivita seskupená podle lektora – jeden řádek na rezervaci (ne na akci),
     // aby se admin vyznal, i když 20 lektorů nadělá spoustu rezervací a zrušení.
@@ -1303,6 +1498,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     className={`px-6 py-3 font-medium text-sm flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === 'analytics' ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-800'}`}
                 >
                     <TrendingUp className="w-4 h-4" /> BI & Statistiky
+                </button>
+                <button 
+                    onClick={() => setActiveTab('reschedules')}
+                    className={`px-6 py-3 font-medium text-sm flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === 'reschedules' ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-800'}`}
+                >
+                    <RefreshCw className="w-4 h-4" /> Audit přesunů
+                    {rescheduleAuditData.suspiciousCount > 0 ? (
+                        <span className="px-1.5 py-0.5 text-xs font-bold bg-red-100 text-red-700 rounded-full border border-red-200 flex items-center gap-0.5 animate-pulse">
+                            🚨 {rescheduleAuditData.suspiciousCount}
+                        </span>
+                    ) : rescheduleAuditData.totalCount > 0 ? (
+                        <span className="px-1.5 py-0.5 text-xs font-semibold bg-stone-100 text-stone-600 rounded-full">
+                            {rescheduleAuditData.totalCount}
+                        </span>
+                    ) : null}
                 </button>
                 <button 
                     onClick={() => setActiveTab('schedule')}
@@ -1888,9 +2098,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                             </div>
                                         </div>
 
-                                        <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-xs">
-                                            <div className="text-xs font-semibold text-stone-500 uppercase tracking-wide flex items-center gap-1">
-                                                <RefreshCw className="w-3.5 h-3.5 text-indigo-500" /> Přesunuto v okně
+                                        <div 
+                                            className="bg-white p-4 rounded-xl border border-stone-200 shadow-xs cursor-pointer hover:border-indigo-400 hover:shadow-sm transition-all"
+                                            onClick={() => setActiveTab('reschedules')}
+                                            title="Klikněte pro zobrazení kompletního auditu přesunů"
+                                        >
+                                            <div className="text-xs font-semibold text-stone-500 uppercase tracking-wide flex items-center justify-between">
+                                                <span className="flex items-center gap-1">
+                                                    <RefreshCw className="w-3.5 h-3.5 text-indigo-500" /> Přesunuto v okně
+                                                </span>
+                                                <span className="text-[10px] text-indigo-600 font-bold hover:underline">Audit →</span>
                                             </div>
                                             <div className="text-2xl font-bold text-stone-900 mt-1">
                                                 {stats.sixDayWindowMetrics.reschedulesCount}×
@@ -1907,6 +2124,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                             </div>
                                             <div className="text-[11px] text-stone-400 mt-0.5">celková hodnota dotčených slotů</div>
                                         </div>
+                                    </div>
+
+                                    {/* Callout button to full Reschedule Audit */}
+                                    <div className="mt-4 p-3 bg-white/90 rounded-xl border border-amber-200/90 flex items-center justify-between flex-wrap gap-2 text-xs">
+                                        <div className="flex items-center gap-2 text-stone-700">
+                                            <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0" />
+                                            <span>
+                                                Chcete podrobně sledovat přeobjednání a odhalit případná storna po přesunu termínu?
+                                            </span>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setActiveTab('reschedules')}
+                                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs transition-colors flex items-center gap-1.5 shadow-xs"
+                                        >
+                                            <RefreshCw className="w-3.5 h-3.5" />
+                                            Otevřít Audit a monitoring přesunů ({rescheduleAuditData.totalCount}×)
+                                        </button>
                                     </div>
 
                                     {/* Expandable list of specific bookings */}
@@ -2318,6 +2553,447 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
             </div>
             </div>
+            )}
+
+            {/* === RESCHEDULE AUDIT & MONITORING TAB === */}
+            {activeTab === 'reschedules' && (
+                <div className="space-y-6 animate-in slide-in-from-bottom-2 fade-in">
+                    {/* Header info banner */}
+                    <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-indigo-950 text-white p-6 rounded-2xl shadow-md border border-indigo-700/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div>
+                            <div className="flex items-center gap-2 mb-2">
+                                <span className="bg-amber-400 text-stone-900 text-[11px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full shadow-xs">
+                                    Monitoring & Ochrana studia
+                                </span>
+                                <span className="text-indigo-200 text-xs">
+                                    Reálné sledování chování po zavedení 1× bezplatného přeobjednání
+                                </span>
+                            </div>
+                            <h2 className="text-2xl font-bold font-heading flex items-center gap-2.5">
+                                <RefreshCw className="w-6 h-6 text-amber-400" />
+                                Audit a monitoring přesunů termínů
+                            </h2>
+                            <p className="text-indigo-200 text-xs mt-1.5 max-w-2xl leading-relaxed">
+                                Kompletní přehled o všech přeobjednaných rezervacích, předstihu před původním termínem a automatická detekce 
+                                podezřelých storen (např. posun do budoucna a následné storno pro získání 100% refundace).
+                            </p>
+                        </div>
+                        <div className="flex md:flex-col items-center md:items-end justify-between gap-2 border-t md:border-t-0 md:border-l border-indigo-700/60 pt-3 md:pt-0 md:pl-6">
+                            <div className="text-left md:text-right">
+                                <div className="text-3xl font-extrabold text-amber-400 font-heading">
+                                    {rescheduleAuditData.totalCount}×
+                                </div>
+                                <div className="text-xs text-indigo-200">
+                                    Celkem přesunů v historii ({rescheduleAuditData.totalValue.toLocaleString()} Kč)
+                                </div>
+                            </div>
+                            {rescheduleAuditData.suspiciousCount > 0 && (
+                                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-red-500/20 text-red-200 border border-red-500/40 rounded-full text-xs font-bold animate-pulse">
+                                    <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                                    {rescheduleAuditData.suspiciousCount} {rescheduleAuditData.suspiciousCount === 1 ? 'storno' : 'storna'} po přesunu!
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* 5 KPI Metric Cards */}
+                    <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                        <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-xs">
+                            <div className="text-xs font-semibold text-stone-500 uppercase tracking-wide flex items-center gap-1.5">
+                                <RefreshCw className="w-3.5 h-3.5 text-indigo-600" /> Celkem přesunů
+                            </div>
+                            <div className="text-2xl font-bold text-stone-900 mt-1">
+                                {rescheduleAuditData.totalCount}×
+                            </div>
+                            <div className="text-[11px] text-stone-500 font-medium mt-0.5">
+                                {rescheduleAuditData.totalValue.toLocaleString()} Kč hodnota
+                            </div>
+                        </div>
+
+                        <div className={`p-4 rounded-xl border shadow-xs ${rescheduleAuditData.suspiciousCount > 0 ? 'bg-red-50/70 border-red-300 ring-1 ring-red-300' : 'bg-white border-stone-200'}`}>
+                            <div className="text-xs font-semibold uppercase tracking-wide flex items-center gap-1.5 text-red-700">
+                                <AlertTriangle className="w-3.5 h-3.5 text-red-600" /> Zrušeno po přesunu
+                            </div>
+                            <div className="text-2xl font-bold text-red-700 mt-1">
+                                {rescheduleAuditData.suspiciousCount}×
+                            </div>
+                            <div className="text-[11px] text-red-600 font-medium mt-0.5">
+                                {rescheduleAuditData.suspiciousCount > 0 ? `${rescheduleAuditData.suspiciousValue.toLocaleString()} Kč podezřelých storen` : 'Žádné podezřelé storno'}
+                            </div>
+                        </div>
+
+                        <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-xs">
+                            <div className="text-xs font-semibold text-stone-500 uppercase tracking-wide flex items-center gap-1.5">
+                                <Clock className="w-3.5 h-3.5 text-red-500" /> Pozdní přesun (&lt; 24h)
+                            </div>
+                            <div className="text-2xl font-bold text-red-600 mt-1">
+                                {rescheduleAuditData.lateCount}×
+                            </div>
+                            <div className="text-[11px] text-stone-400 mt-0.5">
+                                termín uvolněn na poslední chvíli
+                            </div>
+                        </div>
+
+                        <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-xs">
+                            <div className="text-xs font-semibold text-stone-500 uppercase tracking-wide flex items-center gap-1.5">
+                                <Clock className="w-3.5 h-3.5 text-amber-500" /> Okno 24h – 7 dní
+                            </div>
+                            <div className="text-2xl font-bold text-amber-700 mt-1">
+                                {rescheduleAuditData.sixDayCount}×
+                            </div>
+                            <div className="text-[11px] text-stone-400 mt-0.5">
+                                rizikovější na re-obsazení sálu
+                            </div>
+                        </div>
+
+                        <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-xs col-span-2 lg:col-span-1">
+                            <div className="text-xs font-semibold text-stone-500 uppercase tracking-wide flex items-center gap-1.5">
+                                <CheckCircle className="w-3.5 h-3.5 text-emerald-600" /> Včasné (&gt; 7 dní)
+                            </div>
+                            <div className="text-2xl font-bold text-emerald-700 mt-1">
+                                {rescheduleAuditData.safeCount}×
+                            </div>
+                            <div className="text-[11px] text-stone-400 mt-0.5">
+                                bezpečný předstih pro studio
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Educational / Explanatory card for Eva */}
+                    <div className="bg-amber-50/70 border border-amber-200 p-4 rounded-xl text-xs text-amber-950 space-y-2">
+                        <div className="font-bold flex items-center gap-1.5 text-amber-900 text-sm">
+                            <ShieldAlert className="w-4 h-4 text-amber-700" />
+                            Jak tento monitoring chrání Centrum Unity před zneužitím:
+                        </div>
+                        <p className="leading-relaxed">
+                            <strong>Garance 1× bezplatného přesunu</strong> slouží lektorům pro případ, že klient náhle onemocní, aby rezervace nepropadla. 
+                            <strong>Riziko zneužití:</strong> Kdyby lektor zjistil, že klient nemůže přijít a do začátku zbývá méně než 24 h (kdy by storno stálo 100 %), mohl by termín přesunout o měsíc dopředu a z nového termínu ho ihned zrušit se 100% vrácením peněz.
+                        </p>
+                        <p className="leading-relaxed">
+                            <strong>Strategie:</strong> Nyní tento audit v reálném čase monitoruje každý přesun a označuje podezřelá storna červeným štítkem <strong>🚨 ZRUŠENO PO PŘESUNU</strong>. Na základě reálných dat vyhodnotíme, zda je nutné zavést automatické uzamčení storno poplatku k původnímu termínu.
+                        </p>
+                    </div>
+
+                    {/* Practitioner Summary Table */}
+                    {rescheduleAuditData.practitionerSummary.length > 0 && (
+                        <div className="bg-white p-5 rounded-xl border border-stone-200 shadow-xs space-y-3">
+                            <h3 className="text-sm font-bold text-stone-900 flex items-center gap-2">
+                                <Users className="w-4 h-4 text-indigo-600" />
+                                Přehled využití přesunů podle lektorů
+                            </h3>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                                {rescheduleAuditData.practitionerSummary.map(ps => (
+                                    <div 
+                                        key={ps.name}
+                                        onClick={() => {
+                                            setReschedulePractitionerFilter(reschedulePractitionerFilter === ps.name ? 'all' : ps.name);
+                                        }}
+                                        className={`p-3 rounded-xl border transition-all cursor-pointer ${
+                                            reschedulePractitionerFilter === ps.name 
+                                                ? 'bg-indigo-50/70 border-indigo-400 ring-2 ring-indigo-200' 
+                                                : 'bg-stone-50/60 border-stone-200 hover:bg-stone-100/70'
+                                        }`}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <span className="font-bold text-stone-900 text-xs truncate max-w-[150px]">
+                                                {ps.name}
+                                            </span>
+                                            <span className="text-xs font-extrabold px-2 py-0.5 bg-white rounded-md border border-stone-200 text-indigo-700">
+                                                {ps.total}×
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-3 mt-2 text-[11px] text-stone-600">
+                                            <span>Pozdní: <strong className={ps.late > 0 ? 'text-red-600' : 'text-stone-700'}>{ps.late}</strong></span>
+                                            <span>Storna: <strong className={ps.suspicious > 0 ? 'text-red-700 bg-red-100 px-1 rounded' : 'text-stone-700'}>{ps.suspicious}</strong></span>
+                                            <span className="ml-auto text-stone-500 font-medium">{ps.totalValue.toLocaleString()} Kč</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Filter toolbar & Search */}
+                    <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-xs flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                            <button
+                                onClick={() => setRescheduleFilterType('all')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                                    rescheduleFilterType === 'all' 
+                                        ? 'bg-indigo-600 text-white shadow-xs' 
+                                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                }`}
+                            >
+                                Všechny ({rescheduleAuditData.totalCount})
+                            </button>
+                            <button
+                                onClick={() => setRescheduleFilterType('suspicious')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 ${
+                                    rescheduleFilterType === 'suspicious' 
+                                        ? 'bg-red-600 text-white shadow-xs' 
+                                        : rescheduleAuditData.suspiciousCount > 0 
+                                            ? 'bg-red-100 text-red-700 hover:bg-red-200 border border-red-200' 
+                                            : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                }`}
+                            >
+                                🚨 Zrušeno po přesunu ({rescheduleAuditData.suspiciousCount})
+                            </button>
+                            <button
+                                onClick={() => setRescheduleFilterType('late')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                                    rescheduleFilterType === 'late' 
+                                        ? 'bg-red-600 text-white shadow-xs' 
+                                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                }`}
+                            >
+                                🔴 Pozdní &lt; 24h ({rescheduleAuditData.lateCount})
+                            </button>
+                            <button
+                                onClick={() => setRescheduleFilterType('sixDay')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                                    rescheduleFilterType === 'sixDay' 
+                                        ? 'bg-amber-600 text-white shadow-xs' 
+                                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                }`}
+                            >
+                                🟡 24h – 7 dní ({rescheduleAuditData.sixDayCount})
+                            </button>
+                            <button
+                                onClick={() => setRescheduleFilterType('safe')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                                    rescheduleFilterType === 'safe' 
+                                        ? 'bg-emerald-600 text-white shadow-xs' 
+                                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                }`}
+                            >
+                                🟢 &gt; 7 dní ({rescheduleAuditData.safeCount})
+                            </button>
+                            <button
+                                onClick={() => setRescheduleFilterType('active')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                                    rescheduleFilterType === 'active' 
+                                        ? 'bg-stone-800 text-white shadow-xs' 
+                                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                }`}
+                            >
+                                Jen aktivní ({rescheduleAuditData.activeCount})
+                            </button>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                            {/* Practitioner dropdown */}
+                            <select
+                                value={reschedulePractitionerFilter}
+                                onChange={(e) => setReschedulePractitionerFilter(e.target.value)}
+                                className="px-3 py-1.5 border border-stone-300 rounded-lg text-xs bg-white text-stone-700 outline-none focus:ring-2 focus:ring-indigo-500"
+                            >
+                                <option value="all">Všichni lektoři</option>
+                                {sortedPractitionersForFilter.map(p => (
+                                    <option key={p.id} value={p.name}>{p.name}</option>
+                                ))}
+                            </select>
+
+                            {/* Search box */}
+                            <div className="relative">
+                                <Search className="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                <input
+                                    type="text"
+                                    value={rescheduleSearch}
+                                    onChange={(e) => setRescheduleSearch(e.target.value)}
+                                    placeholder="Hledat termín, lektora..."
+                                    className="pl-8 pr-3 py-1.5 border border-stone-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500 w-44 sm:w-56"
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Detailed Reschedule Audit Log Table */}
+                    <div className="bg-white rounded-xl border border-stone-200 shadow-xs overflow-hidden">
+                        {filteredRescheduleItems.length === 0 ? (
+                            <div className="p-12 text-center">
+                                <div className="w-12 h-12 bg-stone-100 rounded-full flex items-center justify-center mx-auto mb-3 text-stone-400">
+                                    <RefreshCw className="w-6 h-6" />
+                                </div>
+                                <h4 className="text-base font-bold text-stone-800 mb-1">
+                                    {rescheduleAuditData.totalCount === 0 ? 'Zatím neproběhl žádný přesun termínu' : 'Žádné záznamy neodpovídají zadanému filtru'}
+                                </h4>
+                                <p className="text-xs text-stone-500 max-w-md mx-auto">
+                                    {rescheduleAuditData.totalCount === 0 
+                                        ? 'Jakmile některý z lektorů nebo administrátor využije možnost přeobjednání na jiný termín, záznam a detailní audit se zobrazí zde.'
+                                        : 'Zkuste změnit nastavení filtrů nebo vyhledávání.'}
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left text-xs">
+                                    <thead className="bg-stone-50 text-stone-600 font-bold border-b border-stone-200">
+                                        <tr>
+                                            <th className="py-3 px-4">Lektor</th>
+                                            <th className="py-3 px-4">Původní termín ➔ Nový termín</th>
+                                            <th className="py-3 px-4">Kdy & Kdo přesunul</th>
+                                            <th className="py-3 px-4">Předstih v době přesunu</th>
+                                            <th className="py-3 px-4">Stav po přesunu</th>
+                                            <th className="py-3 px-4 text-right">Hodnota</th>
+                                            <th className="py-3 px-4 text-center">Detail</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-stone-100">
+                                        {filteredRescheduleItems.map((item) => {
+                                            const isExpanded = !!expandedRescheduleRows[item.id];
+                                            return (
+                                                <React.Fragment key={item.id}>
+                                                    <tr className={`hover:bg-stone-50/70 transition-colors ${item.isSuspicious ? 'bg-red-50/30' : ''}`}>
+                                                        <td className="py-3 px-4">
+                                                            <div className="font-bold text-stone-900">{item.practitionerName}</div>
+                                                            <div className="text-[11px] text-stone-400">
+                                                                Místnost {item.room === 1 ? 'M1 (Malá)' : 'M2 (Velká)'}
+                                                            </div>
+                                                        </td>
+
+                                                        <td className="py-3 px-4">
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                <span className="line-through text-stone-400 font-mono">
+                                                                    {formatCzechDate(item.originalDateStr)} {item.originalTimeStr}
+                                                                </span>
+                                                                <span className="text-stone-400 font-bold">➔</span>
+                                                                <span className="font-bold text-indigo-900 font-mono">
+                                                                    {formatCzechDate(item.newDateStr)} {item.newTimeStr}
+                                                                </span>
+                                                            </div>
+                                                            <div className="text-[11px] text-stone-500 mt-0.5">
+                                                                {item.daysShifted === 0 ? 'Přesunuto v rámci stejného dne' : item.daysShifted > 0 ? `Posun o +${item.daysShifted} ${item.daysShifted === 1 ? 'den' : item.daysShifted < 5 ? 'dny' : 'dní'} dopředu` : `Posun o ${item.daysShifted} dní zpět`}
+                                                            </div>
+                                                        </td>
+
+                                                        <td className="py-3 px-4">
+                                                            <div className="font-medium text-stone-800">
+                                                                {formatCzechDateTime(item.rescheduledAt)}
+                                                            </div>
+                                                            <span className={`inline-block px-1.5 py-0.5 text-[10px] font-bold rounded mt-0.5 ${
+                                                                item.rescheduledBy === 'practitioner' 
+                                                                    ? 'bg-purple-100 text-purple-700 border border-purple-200' 
+                                                                    : 'bg-sky-100 text-sky-700 border border-sky-200'
+                                                            }`}>
+                                                                {item.rescheduledBy === 'practitioner' ? 'Lektorem (1×)' : 'Administrátorem'}
+                                                            </span>
+                                                        </td>
+
+                                                        <td className="py-3 px-4">
+                                                            {item.leadHours === null ? (
+                                                                <span className="text-stone-400">—</span>
+                                                            ) : item.isRetroactive ? (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-stone-200 text-stone-700">
+                                                                    Zpětně po začátku
+                                                                </span>
+                                                            ) : item.isLate ? (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-700 border border-red-200">
+                                                                    🔴 {Math.round(item.leadHours)} h předem (&lt; 24h)
+                                                                </span>
+                                                            ) : item.isSixDay ? (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                                                    🟡 {Math.round(item.leadHours / 24 * 10) / 10} dne předem
+                                                                </span>
+                                                            ) : (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                                                    🟢 {Math.round(item.leadHours / 24)} dní předem
+                                                                </span>
+                                                            )}
+                                                        </td>
+
+                                                        <td className="py-3 px-4">
+                                                            {item.isCancelled ? (
+                                                                <div>
+                                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-600 text-white shadow-xs">
+                                                                        🚨 ZRUŠENO PO PŘESUNU
+                                                                    </span>
+                                                                    <div className="text-[10px] text-red-600 mt-1 font-medium">
+                                                                        Stornováno {formatCzechDateTime(item.cancelledAt)}
+                                                                        {item.refundAmount !== undefined && ` · Vráceno ${item.refundAmount} Kč`}
+                                                                    </div>
+                                                                </div>
+                                                            ) : item.status === 'paid' ? (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
+                                                                    <CheckCircle className="w-3 h-3" /> Zaplaceno / Aktivní
+                                                                </span>
+                                                            ) : item.status === 'completed' ? (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-stone-100 text-stone-700">
+                                                                    Proběhlo
+                                                                </span>
+                                                            ) : (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-sky-100 text-sky-800">
+                                                                    {item.status}
+                                                                </span>
+                                                            )}
+                                                        </td>
+
+                                                        <td className="py-3 px-4 text-right font-bold text-stone-900">
+                                                            {item.price.toLocaleString()} Kč
+                                                        </td>
+
+                                                        <td className="py-3 px-4 text-center">
+                                                            <button
+                                                                onClick={() => toggleRescheduleRow(item.id)}
+                                                                className="p-1 rounded hover:bg-stone-200 text-stone-500 hover:text-stone-800 transition-colors"
+                                                                title="Rozbalit detail"
+                                                            >
+                                                                {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+
+                                                    {/* Expanded detail row */}
+                                                    {isExpanded && (
+                                                        <tr className="bg-stone-50/80">
+                                                            <td colSpan={7} className="p-4 border-b border-stone-200 text-xs">
+                                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                                    <div className="space-y-1">
+                                                                        <div className="font-bold text-stone-700">Informace o rezervaci:</div>
+                                                                        <div className="text-stone-600">ID: <code className="text-[11px] bg-white px-1 rounded border border-stone-200">{item.id}</code></div>
+                                                                        <div className="text-stone-600">Služba: {item.booking.serviceName || 'Pronájem prostor'}</div>
+                                                                        {item.booking.clientName && (
+                                                                            <div className="text-stone-600">Klient: <strong>{item.booking.clientName}</strong> ({item.booking.clientEmail || 'bez e-mailu'})</div>
+                                                                        )}
+                                                                        <div className="text-stone-600">Platební metoda: {item.booking.paymentMethod || 'GoPay online'}</div>
+                                                                    </div>
+
+                                                                    <div className="space-y-1">
+                                                                        <div className="font-bold text-stone-700">Důvod a poznámky k přesunu:</div>
+                                                                        <div className="p-2 bg-white rounded border border-stone-200 text-stone-700 whitespace-pre-wrap text-[11px]">
+                                                                            {item.rescheduleReason || item.booking.note || 'Nebyl uveden žádný specifický důvod.'}
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <div className="space-y-1">
+                                                                        <div className="font-bold text-stone-700">Auditní vyhodnocení:</div>
+                                                                        {item.isSuspicious ? (
+                                                                            <div className="p-2 bg-red-100/70 border border-red-200 rounded text-red-900 text-[11px] leading-relaxed">
+                                                                                <strong>🚨 Varování:</strong> Tato rezervace byla po předchozím přesunu stornována.
+                                                                                {item.cancellationReason && <div>Důvod storna: {item.cancellationReason}</div>}
+                                                                                {item.cancellationFee !== undefined && <div>Uplatněný storno poplatek: {item.cancellationFee} Kč</div>}
+                                                                            </div>
+                                                                        ) : item.isLate ? (
+                                                                            <div className="p-2 bg-amber-50 border border-amber-200 rounded text-amber-900 text-[11px] leading-relaxed">
+                                                                                <strong>⚠️ Pozdní přesun:</strong> Termín byl uvolněn méně než 24 h před začátkem. V původním termínu sál zůstal volný na poslední chvíli.
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div className="p-2 bg-emerald-50 border border-emerald-200 rounded text-emerald-900 text-[11px] leading-relaxed">
+                                                                                <strong>✅ Standardní přesun:</strong> Přeobjednáno s dostatečným předstihem, bez následných storen.
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    )}
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
+                </div>
             )}
 
             {/* === SCHEDULE TAB === */}
