@@ -75,6 +75,10 @@ export interface Booking {
   rescheduledBy?: 'admin' | 'practitioner'; // Kdo přesun provedl
 
   paymentId?: string; // Pro refundace testovacích nebo skutečných plateb před uplynutím termínu
+  manualRefundRequired?: boolean; // Nastaveno na true, pokud automatická refundace přes GoPay selhala (např. kód 330) a je nutné vrátit peníze ručně z banky
+  manualRefundSettled?: boolean;  // Nastaveno administrátorem, jakmile byly peníze odeslány z bankovního účtu
+  manualRefundSettledAt?: string; // Datum vyrovnání manuální refundace
+  gopayRefundError?: string;      // Detail chyby z GoPay pro technickou diagnostiku
 
   createdAt: string;
   paidAt?: string; // Kdy byla rezervace reálně zaplacena (pro finanční přehled a shodu s GoPay)

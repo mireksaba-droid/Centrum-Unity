@@ -3,11 +3,12 @@ import { Booking, BookingStatus, Practitioner, GroupEvent, Role } from '../types
 import { GENERATED_TIMES, BUFFER_SAME_USER, BUFFER_DIFF_USER, RENTAL_PRICING } from '../constants';
 import Button from '../components/Button';
 import { MiniCalendar } from '../components/MiniCalendar';
-import { Calendar, ChevronLeft, ChevronRight, Clock, User, Check, AlertCircle, AlertTriangle, Info, Lock, Zap, LogOut, Loader2, Bed, Layers, Sparkles, History, Monitor, Smartphone, Mail, Phone, X, LayoutDashboard } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, Clock, User, Check, AlertCircle, AlertTriangle, Info, Lock, Zap, LogOut, Loader2, Bed, Layers, Sparkles, History, Monitor, Smartphone, Mail, Phone, X, LayoutDashboard, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
 import { useStore } from '../store/useStore';
 import { checkBookingCollision, calculateRentalPrice, timeToMinutes } from '../utils/scheduler';
+import { calculateCancellationPolicy } from '../utils/cancellationPolicy';
 import { generateConfirmationEmail } from '../utils/emailTemplates';
 import { capitalizeName } from '../utils/vocative';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
@@ -377,17 +378,23 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                     throw new Error(data.error || 'Refund failed');
                 }
                 
-                if (data.message) {
+                if (data.manualRefundRequired) {
+                    addToast('info', 'Rezervace zrušena – manuální refundace', data.message || 'Termín byl uvolněn. Refundace proběhne administrátorem z bankovního účtu.');
+                } else if (data.message) {
                     addToast('success', 'Rezervace zrušena', data.message);
                 } else {
                     addToast('success', 'Refundace zadána', 'Platba byla úspěšně zrušena přes GoPay.');
                 }
-                onCancel(bookingToCancel.id);
+                await onCancel(bookingToCancel.id);
             } catch (err: any) {
-                addToast('error', 'Chyba storna', err.message || 'Nastala chyba při vracení platby přes GoPay. Obraťte se prosím na podporu.');
+                const isCode330 = typeof err.message === 'string' && (err.message.includes('330') || err.message.includes('PAYMENT_REFUND_FAILED'));
+                const friendlyMsg = isCode330
+                    ? 'Platební brána GoPay nemohla provést automatickou refundaci (chyba 330: nedostatek zůstatku po převodu do banky). Obraťte se na administrátora pro vyplacení z účtu.'
+                    : (err.message || 'Nastala chyba při vracení platby přes GoPay. Obraťte se prosím na podporu.');
+                addToast('error', 'Chyba storna', friendlyMsg);
             }
         } else {
-            onCancel(bookingToCancel.id);
+            await onCancel(bookingToCancel.id);
             addToast('success', 'Rezervace zrušena', 'Termín byl uvolněn.');
         }
         
@@ -1204,11 +1211,11 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
 
         {/* Cancellation / Management Modal */}
             {bookingToCancel && (() => {
-                const bookingStart = parseLocalDate(bookingToCancel.date, bookingToCancel.time);
-                const now = new Date();
-                const hoursDifference = (bookingStart.getTime() - now.getTime()) / (1000 * 60 * 60);
                 const isAdmin = currentUser.role === Role.ADMIN || bookingToCancel.bookedByUserId === 'admin' || currentUser.id === 'admin';
-                const isTooLate = !isAdmin && hoursDifference < 24;
+                const isOwner = bookingToCancel.bookedByUserId === currentUser.id;
+                const canReschedule = (isAdmin || isOwner) && (isAdmin || (bookingToCancel.rescheduleCount || 0) < 1) && !['cancelled', 'refunded'].includes(bookingToCancel.status);
+                const policy = calculateCancellationPolicy(bookingToCancel.date, bookingToCancel.time, bookingToCancel.price);
+                const isTooLate = !isAdmin && policy.tier === 'full_fee';
 
                 return (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
@@ -1220,22 +1227,59 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                             <h3 className="text-xl font-bold font-heading mb-2">
                                 {isAdmin ? 'Správa rezervace' : 'Zrušit rezervaci'}
                             </h3>
-                            <p className="text-stone-600 mb-6">
-                                {isTooLate && (
-                                    <span className="text-red-600 font-bold block mb-2">Pozor: Zbývá méně než 24 hodin!</span>
+                            <div className="text-stone-600 mb-5 text-sm">
+                                <div className="font-semibold text-stone-800">
+                                    {formatLocalDate(bookingToCancel.date)} v {bookingToCancel.time} – Místnost {bookingToCancel.room === 1 ? '1 (Malá)' : '2 (Velká)'}
+                                </div>
+                                <div className="text-xs text-stone-500 mt-0.5">
+                                    Cena pronájmu: {bookingToCancel.price} Kč
+                                </div>
+
+                                {bookingToCancel.paymentId && (
+                                    <div className="mt-3 p-3 bg-stone-50 border border-stone-200 rounded-xl text-left text-xs space-y-1.5">
+                                        <div className="font-bold text-stone-800 flex items-center justify-between">
+                                            <span>Storno podmínky:</span>
+                                            <span className={`px-2 py-0.5 rounded text-[11px] font-extrabold ${
+                                                policy.tier === 'full_refund' ? 'bg-green-100 text-green-800' :
+                                                policy.tier === 'half_fee' ? 'bg-amber-100 text-amber-900' :
+                                                'bg-red-100 text-red-800'
+                                            }`}>
+                                                {policy.tier === 'full_refund' ? '100 % vrácení' : policy.tier === 'half_fee' ? '50 % storno poplatek' : '100 % storno poplatek'}
+                                            </span>
+                                        </div>
+                                        <div className="text-stone-600 leading-relaxed">
+                                            {policy.tier === 'full_refund' && `Více než 7 dní předem: Na platební kartu bude vráceno celých ${policy.refundAmount} Kč (storno poplatek 0 Kč).`}
+                                            {policy.tier === 'half_fee' && `24 h až 7 dní předem: Storno poplatek činí 50 % (${policy.feeAmount} Kč). Na kartu bude vráceno ${policy.refundAmount} Kč.`}
+                                            {policy.tier === 'full_fee' && `Méně než 24 h předem: 100 % storno poplatek (${policy.feeAmount} Kč). Termín je příliš blízko, zaplacená částka propadá.`}
+                                        </div>
+                                    </div>
                                 )}
-                                Rezervace z {formatLocalDate(bookingToCancel.date)} v {bookingToCancel.time} (Místnost {bookingToCancel.room}).
-                                {!isTooLate && bookingToCancel.paymentId && (
-                                    <span className="block mt-2 font-medium text-stone-800">
-                                        Částka bude refundována na platební kartu.
-                                    </span>
-                                )}
-                                {isTooLate && (
-                                    <span className="block mt-2 font-medium text-red-600">
-                                        Termín je příliš blízko, nelze jej stornovat s nárokem na vrácení peněz online. Kontaktujte prosím manažera.
-                                    </span>
-                                )}
-                            </p>
+                            </div>
+
+                            {/* TIP: 1x Bezplatný přesun termínu místo storna s poplatkem */}
+                            {canReschedule && policy.tier !== 'full_refund' && (
+                                <div className="mb-4 p-3.5 bg-gradient-to-br from-amber-50 to-amber-100/70 border border-amber-300 rounded-xl text-left shadow-xs">
+                                    <div className="flex items-center gap-1.5 font-bold text-xs text-amber-950 mb-1">
+                                        <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+                                        <span>Tip: Nemusíte platit storno! Využijte 1× bezplatný přesun</span>
+                                    </div>
+                                    <p className="text-[11px] text-amber-900 leading-relaxed mb-2.5">
+                                        Při stornu méně než 7 dní předem propadá {policy.feePercentage} % ceny ({policy.feeAmount} Kč). Máte však nárok na <strong>1× bezplatný přesun termínu</strong> na jakýkoliv jiný volný den bez ztráty peněz!
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const target = bookingToCancel;
+                                            setBookingToCancel(null);
+                                            setReschedulingBooking(target);
+                                        }}
+                                        className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+                                    >
+                                        <RefreshCw className="w-3.5 h-3.5" />
+                                        Přeobjednat termín zdarma (ušetříte {policy.feeAmount} Kč)
+                                    </button>
+                                </div>
+                            )}
 
                             {/* Poznámka / klient u rezervace */}
                             {(bookingToCancel.clientName || bookingToCancel.note) && (
@@ -1339,8 +1383,8 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                 </div>
                             )}
 
-                            {/* Admin Quick Reschedule Option */}
-                            {currentUser.role === Role.ADMIN && (
+                            {/* Reschedule Option for Admin & Practitioner (1x free guarantee) */}
+                            {canReschedule && (
                                 <div className="mb-4">
                                     <Button
                                         variant="outline"
@@ -1351,7 +1395,8 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                             setReschedulingBooking(target);
                                         }}
                                     >
-                                        <Clock className="w-4 h-4" /> Přesunout termín / místnost
+                                        <RefreshCw className="w-4 h-4" /> 
+                                        {isAdmin ? 'Přesunout termín / místnost' : 'Bezplatně přesunout termín (1× garance)'}
                                     </Button>
                                 </div>
                             )}
@@ -1399,7 +1444,8 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                     onClose={() => setReschedulingBooking(null)}
                     onConfirm={async (date, time, reason, newRoom, newEquipment) => {
                         try {
-                            await adminRescheduleBooking(reschedulingBooking.id, date, time, reason, newRoom, newEquipment);
+                            const isPractitioner = currentUser.role !== Role.ADMIN;
+                            await adminRescheduleBooking(reschedulingBooking.id, date, time, reason, newRoom, newEquipment, isPractitioner);
                             setReschedulingBooking(null);
                             const roomName = (newRoom || reschedulingBooking.room) === 1 ? 'Místnost 1 (Malá)' : 'Místnost 2 (Velká)';
                             addToast('success', 'Rezervace přesunuta', `Rezervace byla úspěšně přesunuta na ${formatLocalDate(date)} v ${time} do ${roomName}.`);

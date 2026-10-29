@@ -49,9 +49,11 @@
 
 10. **Storno podmínky a 1× bezplatný přesun termínu:**
     - **Storno pásma a refundace přes GoPay:**
-      - Více než 7 dní (> 168 h) před začátkem rezervace: vrácení 100 % zaplacené částky (storno poplatek 0 %).
-      - 7 dní až 24 hodin (24 h – 168 h) před začátkem: storno poplatek 50 % (vrácení 50 % částky zpět na platební kartu).
-      - Méně než 24 hodin (< 24 h) před začátkem: storno poplatek 100 % (termín se uvolní pro ostatní, zaplacená částka propadá).
+      - **Účinnost od 1. 11. 2026:** Nová 3-pásmová pravidla se spouští dne 1. listopadu 2026 (`CANCELLATION_POLICY_EFFECTIVE_DATE = '2026-11-01'`). Do 31. 10. 2026 23:59:59 platí původní pravidlo (> 24 h = 100 % vrácení) pro všechna storna prováděná v říjnu, i kdyby šlo o termín v listopadu.
+      - **Pravidla platná od 1. 11. 2026:**
+        - Více než 7 dní (> 168 h) před začátkem rezervace: vrácení 100 % zaplacené částky (storno poplatek 0 %).
+        - 7 dní až 24 hodin (24 h – 168 h) před začátkem: storno poplatek 50 % (vrácení 50 % částky zpět na platební kartu).
+        - Méně než 24 hodin (< 24 h) před začátkem: storno poplatek 100 % (termín se uvolní pro ostatní, zaplacená částka propadá).
       - Logika výpočtu je centralizována v `utils/cancellationPolicy.ts` a uplatňuje se na backendu (`/api/refund`, `/api/guest-cancel`), v e-mailech i v lektorském dashboardu.
     - **Garance 1× bezplatného přesunu (přeobjednání při nemoci klienta):**
       - Lektor má u každé aktivní rezervace možnost **1× bezplatně přesunout** rezervaci na jiný volný termín v systému (`rescheduleCount`).
@@ -59,7 +61,7 @@
     - **Audit a monitoring přesunů v reálném čase:**
       - V `AdminDashboard.tsx` je dedikovaná záložka „Audit přesunů“ s přehledem KPI, časovým předstihem a automatickou detekcí podezřelých storen (`🚨 ZRUŠENO PO PŘESUNU`).
     - **Automatické testy:**
-      - Běh testovací sady: `npm test` (`scripts/test_cancellation_and_reschedule.ts` – 17 testů pokrývajících storno pásma, přesuny, kolize a e-maily).
+      - Běh testovací sady: `npm test` (`scripts/test_cancellation_and_reschedule.ts` – 18 testů pokrývajících storno pásma, spuštění od 1. 11., přesuny, kolize a e-maily).
 
 ## Stavy rezervace (`BookingStatus` v `types.ts`)
 `created` · `awaiting_payment` · `deferred_payment` · `paid` · `cancelled` · `completed` · `refunded`

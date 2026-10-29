@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Booking, Practitioner, Service, Role, GroupEvent, EventRegistration, ReferralStats } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, Bed, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronUp, ChevronRight, RefreshCw, Loader2, Smartphone, BarChart3, Globe, ArrowRight, ShieldCheck } from 'lucide-react';
+import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, Bed, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronUp, ChevronRight, RefreshCw, Loader2, Smartphone, BarChart3, Globe, ArrowRight, ShieldCheck, Check } from 'lucide-react';
 import Button from '../components/Button';
 import StudioSchedule from './StudioSchedule';
 import RescheduleModal from '../components/RescheduleModal';
@@ -1422,6 +1422,36 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         addToast('success', 'Výzvy odeslány', `Úspěšně odesláno ${count} výzev k platbě.`);
     };
 
+    // --- MANUÁLNÍ REFUNDACE (GOPAY KÓD 330 / SELHÁNÍ AUTOMATICKÉHO VRÁCENÍ) ---
+    const pendingManualRefunds = useMemo(() => {
+        return allBookings.filter(b => b.manualRefundRequired && !b.manualRefundSettled);
+    }, [allBookings]);
+
+    const [settlingRefundId, setSettlingRefundId] = useState<string | null>(null);
+    const handleSettleRefund = async (bookingId: string) => {
+        setSettlingRefundId(bookingId);
+        try {
+            const res = await fetch('/api/admin/settle-refund', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ bookingId })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Nepodařilo se potvrdit refundaci.');
+            addToast('success', 'Refundace vyřízena', 'Manuální refundace byla úspěšně označena jako vyplacená.');
+            useStore.setState((state) => ({
+                bookings: state.bookings.map(b => b.id === bookingId ? { ...b, manualRefundSettled: true, manualRefundSettledAt: new Date().toISOString() } : b)
+            }));
+        } catch (err: any) {
+            addToast('error', 'Chyba', err.message || 'Chyba při potvrzení refundace.');
+        } finally {
+            setSettlingRefundId(null);
+        }
+    };
+
     return (
         <div className="space-y-8 animate-in fade-in duration-500 pb-12">
 
@@ -1504,7 +1534,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     className={`px-6 py-3 font-medium text-sm flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === 'reschedules' ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-800'}`}
                 >
                     <RefreshCw className="w-4 h-4" /> Audit přesunů
-                    {rescheduleAuditData.suspiciousCount > 0 ? (
+                    {pendingManualRefunds.length > 0 ? (
+                        <span className="px-1.5 py-0.5 text-xs font-bold bg-amber-500 text-white rounded-full flex items-center gap-0.5 animate-pulse">
+                            ⚠️ {pendingManualRefunds.length} k vrácení
+                        </span>
+                    ) : rescheduleAuditData.suspiciousCount > 0 ? (
                         <span className="px-1.5 py-0.5 text-xs font-bold bg-red-100 text-red-700 rounded-full border border-red-200 flex items-center gap-0.5 animate-pulse">
                             🚨 {rescheduleAuditData.suspiciousCount}
                         </span>
@@ -1533,6 +1567,56 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <Megaphone className="w-4 h-4" /> Skupinové Události
                 </button>
             </div>
+
+            {/* Upozornění na manuální refundace (GoPay kód 330) */}
+            {pendingManualRefunds.length > 0 && (
+                <div className="bg-amber-50 border-2 border-amber-400 rounded-2xl p-5 shadow-sm space-y-3 animate-in fade-in">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                            <span className="p-2.5 bg-amber-500 text-white rounded-xl shadow-xs shrink-0">
+                                <AlertTriangle className="w-5 h-5" />
+                            </span>
+                            <div>
+                                <h3 className="text-base font-bold text-amber-950 font-heading">
+                                    {pendingManualRefunds.length === 1 ? '1 rezervace vyžaduje manuální refundaci z banky' : `${pendingManualRefunds.length} rezervace vyžadují manuální refundaci z banky`}
+                                </h3>
+                                <p className="text-xs text-amber-900 mt-0.5">
+                                    Automatické vrácení peněz na platební kartu přes GoPay selhalo (kód 330: nedostatek zůstatku na GoPay peněžence po denním bankovním převodu). Termín v sále byl uvolněn a lektorovi je třeba zaslat částku manuálně z bankovního účtu.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="divide-y divide-amber-200 bg-white rounded-xl border border-amber-200 overflow-hidden">
+                        {pendingManualRefunds.map(b => (
+                            <div key={b.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                                <div>
+                                    <div className="font-bold text-stone-900 text-sm flex items-center gap-2">
+                                        <span>{resolvePractitionerDisplayName(b, practitioners)}</span>
+                                        <span className="text-xs font-normal text-stone-500">#{b.id.slice(-6).toUpperCase()}</span>
+                                    </div>
+                                    <div className="text-stone-600 mt-0.5">
+                                        Termín: <strong>{formatLocalDate(b.date)} v {b.time}</strong> (Místnost {b.room === 1 ? '1 - Malá' : '2 - Velká'})
+                                    </div>
+                                    <div className="text-amber-900 font-medium mt-1">
+                                        Částka k vyplacení z banky: <strong className="text-sm font-extrabold text-red-600">{b.refundAmount ?? (b.price / 2)} Kč</strong>
+                                        {b.cancellationFee ? ` · storno poplatek studia: ${b.cancellationFee} Kč` : ''}
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    disabled={settlingRefundId === b.id}
+                                    onClick={() => handleSettleRefund(b.id)}
+                                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-xs disabled:opacity-50 self-start sm:self-center shrink-0"
+                                >
+                                    {settlingRefundId === b.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                                    Označit jako vráceno z banky
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             
             {/* === ANALYTICS TAB === */}

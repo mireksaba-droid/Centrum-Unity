@@ -29,10 +29,20 @@ console.log('--- 1. Testy storno pásem (calculateCancellationPolicy) ---');
 
 const baseDate = new Date('2026-11-05T10:00:00Z');
 
-runTest('Před 1. listopadem (např. 28. 10. pro 29. 10.) -> uplatňuje se přechodné pravidlo (> 24 h = 100 % refund)', () => {
+runTest('Před 1. listopadem (např. 28. 10. pro 29. 10.) -> uplatňuje se původní pravidlo (> 24 h = 100 % refund)', () => {
   const octDate = new Date('2026-10-28T10:00:00Z');
   const result = calculateCancellationPolicy('2026-10-29', '18:00', 875, octDate);
   assert.strictEqual(result.tier, 'full_refund');
+  assert.strictEqual(result.refundAmount, 875);
+  assert.strictEqual(result.feeAmount, 0);
+});
+
+runTest('Před 1. listopadem (např. 29. 10. pro 2. 11. Tobi) -> nová pravidla se spouští až 1. 11., takže Tobi má nárok na 100 % refundaci (0 Kč storno)', () => {
+  const octDate = new Date('2026-10-29T14:00:00');
+  const result = calculateCancellationPolicy('2026-11-02', '10:00', 875, octDate);
+  assert.strictEqual(result.tier, 'full_refund');
+  assert.strictEqual(result.feePercentage, 0);
+  assert.strictEqual(result.refundPercentage, 100);
   assert.strictEqual(result.refundAmount, 875);
   assert.strictEqual(result.feeAmount, 0);
 });

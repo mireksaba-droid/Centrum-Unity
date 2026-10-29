@@ -411,14 +411,20 @@ const PractitionerDashboard: React.FC<PractitionerDashboardProps> = ({
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'Refund failed');
                 
-                if (policy.refundAmount > 0) {
+                if (data.manualRefundRequired) {
+                    addToast('info', 'Rezervace zrušena – manuální refundace', data.message || 'Termín byl uvolněn. Refundace proběhne administrátorem z bankovního účtu.');
+                } else if (policy.refundAmount > 0) {
                     addToast('success', 'Platba refundována', `Na kartu bylo vráceno ${policy.refundAmount} Kč (storno poplatek ${policy.feePercentage} %).`);
                 } else {
                     addToast('info', 'Rezervace stornována', `Storno poplatek činí 100 % (${policy.feeAmount} Kč). Termín byl uvolněn.`);
                 }
                 await onCancelBooking(bookingToCancel.id);
             } catch (err: any) {
-                addToast('error', 'Chyba storna', err.message || 'Nastala chyba při vracení platby přes GoPay. Obraťte se prosím na podporu.');
+                const isCode330 = typeof err.message === 'string' && (err.message.includes('330') || err.message.includes('PAYMENT_REFUND_FAILED'));
+                const friendlyMsg = isCode330
+                    ? 'Platební brána GoPay nemohla provést automatickou refundaci (chyba 330: nedostatek zůstatku po převodu do banky). Obraťte se na administrátora pro vyplacení z účtu.'
+                    : (err.message || 'Nastala chyba při vracení platby přes GoPay. Obraťte se prosím na podporu.');
+                addToast('error', 'Chyba storna', friendlyMsg);
             }
         } else {
             await onCancelBooking(bookingToCancel.id);

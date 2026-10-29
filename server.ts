@@ -1638,6 +1638,9 @@ async function startServer() {
 
       // Refund platby přes GoPay (pokud refundAmount > 0)
       let result: any = { message: "No refund amount" };
+      let manualRefundFallback = false;
+      let gopayErrorDetail = "";
+
       if (refundAmount > 0) {
         const refundRes = await fetch(`${GOPAY_URL}/payments/payment/${encodeURIComponent(cleanPaymentId)}/refund`, {
           method: "POST",
@@ -1658,25 +1661,53 @@ async function startServer() {
         }
 
         if (!refundRes.ok) {
-          return res.status(400).json({ error: `Nelze refundovat platbu: ${JSON.stringify(result)}` });
+          console.warn(`GoPay refund failed for payment ${cleanPaymentId}:`, result);
+          manualRefundFallback = true;
+          gopayErrorDetail = JSON.stringify(result);
         }
       }
 
-      // Aktualizujeme rezervaci v databázi
+      // Aktualizujeme rezervaci v databázi - termín se uvolní v každém případě!
       const returnedCzk = refundAmount / 100;
       const feeCzk = (paidAmount - refundAmount) / 100;
       if (paymentBookingId) {
         const b = await loadBooking(paymentBookingId);
         if (b) {
-          await updateDoc(b.ref, {
-            status: refundAmount === paidAmount ? 'refunded' : 'cancelled',
+          const updateData: any = {
+            status: 'cancelled',
             cancelledAt: new Date().toISOString(),
-            cancellationReason: refundAmount === paidAmount ? 'cancelled_with_full_refund' : 'cancelled_with_half_refund',
             refundAmount: returnedCzk,
             cancellationFee: feeCzk,
-            note: (b.data.note ? b.data.note + '\n' : '') + `Storno: vráceno ${returnedCzk} Kč (${policyRefundPercentage} %), storno poplatek ${feeCzk} Kč (${policyFeePercentage} %).`
-          });
+          };
+
+          if (manualRefundFallback) {
+            updateData.cancellationReason = 'cancelled_manual_refund_required';
+            updateData.manualRefundRequired = true;
+            updateData.manualRefundSettled = false;
+            updateData.gopayRefundError = gopayErrorDetail;
+            updateData.note = (b.data.note ? b.data.note + '\n' : '') + 
+              `⚠️ GoPay automatická refundace selhala (kód 330 / chyba brány). Termín v sále byl uvolněn. Administrátor vrátí ${returnedCzk} Kč (${policyRefundPercentage} %) ručně z bankovního účtu. Storno poplatek: ${feeCzk} Kč (${policyFeePercentage} %).`;
+          } else {
+            updateData.status = refundAmount === paidAmount ? 'refunded' : 'cancelled';
+            updateData.cancellationReason = refundAmount === paidAmount ? 'cancelled_with_full_refund' : 'cancelled_with_half_refund';
+            updateData.manualRefundRequired = false;
+            updateData.note = (b.data.note ? b.data.note + '\n' : '') + 
+              `Storno: vráceno ${returnedCzk} Kč (${policyRefundPercentage} %), storno poplatek ${feeCzk} Kč (${policyFeePercentage} %).`;
+          }
+
+          await updateDoc(b.ref, updateData);
         }
+      }
+
+      if (manualRefundFallback) {
+        return res.json({ 
+          success: true, 
+          manualRefundRequired: true,
+          refundAmount: returnedCzk, 
+          cancellationFee: feeCzk, 
+          feePercentage: policyFeePercentage,
+          message: `Rezervace byla úspěšně zrušena a termín v sále je volný. Automatické vrácení peněz na kartu přes GoPay se nezdařilo (chyba brány 330: nedostatek prostředků na platebním účtu GoPay po denním převodu do banky). Částka ${returnedCzk} Kč (${policyRefundPercentage} %) vám bude administrátorem vyplacena přímo na bankovní účet.`
+        });
       }
 
       res.json({ 
@@ -2399,6 +2430,7 @@ async function startServer() {
           const totalPaidHalere = Number(paymentStatus.amount) || 0;
           const policy = calculateCancellationPolicy(data.date, data.time, totalPaidHalere / 100);
 
+          let guestManualRefund = false;
           if (policy.tier === 'full_refund') {
             const refundRes = await fetch(`${GOPAY_URL}/payments/payment/${data.paymentId}/refund`, {
               method: "POST",
@@ -2406,12 +2438,15 @@ async function startServer() {
               body: `amount=${totalPaidHalere}`
             });
             const rtext = await refundRes.text();
-            if (!refundRes.ok) {
-              return res.status(400).json({ error: `Platbu se nepodařilo vrátit: ${rtext}. Kontaktujte prosím studio.` });
-            }
             refundAmountCzk = totalPaidHalere / 100;
             cancellationFeeCzk = 0;
-            refundMessage = `Rezervace byla zrušena. Celá zaplacená částka (${refundAmountCzk} Kč) Vám bude vrácena na platební kartu.`;
+            if (!refundRes.ok) {
+              console.warn(`Guest cancel GoPay refund failed: ${rtext}`);
+              guestManualRefund = true;
+              refundMessage = `Rezervace byla zrušena a termín uvolněn. Automatické vrácení peněz na kartu se nezdařilo (nedostatek prostředků na platebním účtu studia). Administrátor vám celou částku (${refundAmountCzk} Kč) zašle na bankovní účet.`;
+            } else {
+              refundMessage = `Rezervace byla zrušena. Celá zaplacená částka (${refundAmountCzk} Kč) Vám bude vrácena na platební kartu.`;
+            }
           } else if (policy.tier === 'half_fee') {
             const refundHalere = Math.round(totalPaidHalere / 2);
             const refundRes = await fetch(`${GOPAY_URL}/payments/payment/${data.paymentId}/refund`, {
@@ -2420,27 +2455,38 @@ async function startServer() {
               body: `amount=${refundHalere}`
             });
             const rtext = await refundRes.text();
-            if (!refundRes.ok) {
-              return res.status(400).json({ error: `Platbu se nepodařilo vrátit: ${rtext}. Kontaktujte prosím studio.` });
-            }
             refundAmountCzk = refundHalere / 100;
             cancellationFeeCzk = (totalPaidHalere - refundHalere) / 100;
-            refundMessage = `Rezervace byla zrušena. V souladu se storno podmínkami (storno poplatek 50 %) Vám bude ${refundAmountCzk} Kč vráceno na kartu a ${cancellationFeeCzk} Kč činí storno poplatek.`;
+            if (!refundRes.ok) {
+              console.warn(`Guest cancel GoPay refund failed: ${rtext}`);
+              guestManualRefund = true;
+              refundMessage = `Rezervace byla zrušena a termín uvolněn. Automatické vrácení 50 % částky (${refundAmountCzk} Kč) na kartu selhalo (kód 330: platební brána). Administrátor vám částku vrátí na účet. Storno poplatek činí ${cancellationFeeCzk} Kč.`;
+            } else {
+              refundMessage = `Rezervace byla zrušena. V souladu se storno podmínkami (storno poplatek 50 %) Vám bude ${refundAmountCzk} Kč vráceno na kartu a ${cancellationFeeCzk} Kč činí storno poplatek.`;
+            }
           } else {
             // Méně než 24 h: 100% storno poplatek
             refundAmountCzk = 0;
             cancellationFeeCzk = totalPaidHalere / 100;
             refundMessage = `Rezervace byla zrušena. Do začátku zbývá méně než 24 hodin, storno poplatek činí 100 % (${cancellationFeeCzk} Kč) a zaplacená částka se nevrací.`;
           }
+
+          if (guestManualRefund) {
+            (data as any).manualRefundRequired = true;
+          }
         }
       }
 
       const updatedFields: any = {
-        status: refundAmountCzk > 0 && cancellationFeeCzk === 0 ? 'refunded' : 'cancelled',
+        status: refundAmountCzk > 0 && cancellationFeeCzk === 0 && !(data as any).manualRefundRequired ? 'refunded' : 'cancelled',
         cancelledAt: new Date().toISOString(),
-        cancellationReason: refundAmountCzk > 0 ? (cancellationFeeCzk > 0 ? 'cancelled_by_guest_half_refund' : 'cancelled_by_guest_full_refund') : 'cancelled_by_guest_no_refund',
+        cancellationReason: (data as any).manualRefundRequired 
+          ? 'cancelled_manual_refund_required'
+          : (refundAmountCzk > 0 ? (cancellationFeeCzk > 0 ? 'cancelled_by_guest_half_refund' : 'cancelled_by_guest_full_refund') : 'cancelled_by_guest_no_refund'),
         refundAmount: refundAmountCzk,
         cancellationFee: cancellationFeeCzk,
+        manualRefundRequired: !!(data as any).manualRefundRequired,
+        manualRefundSettled: false,
         note: (data.note ? data.note + '\n' : '') + `Zrušeno hostem (ověřeno e-mailem). ${refundMessage}`
       };
 
@@ -2459,6 +2505,32 @@ async function startServer() {
       res.json({ success: true, message: refundMessage || "Rezervace byla zrušena." });
     } catch (error: any) {
       console.error("Guest Cancel Error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Admin označí manuální refundaci z bankovního účtu jako vyřízenou
+  app.post("/api/admin/settle-refund", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      if (!isAdmin(req)) {
+        return res.status(403).json({ error: "Pouze administrátor může potvrdit manuální refundaci." });
+      }
+      const { bookingId } = req.body;
+      if (!bookingId) {
+        return res.status(400).json({ error: "Chybí bookingId" });
+      }
+      const b = await loadBooking(bookingId);
+      if (!b) {
+        return res.status(404).json({ error: "Rezervace nebyla nalezena." });
+      }
+      await updateDoc(b.ref, {
+        manualRefundSettled: true,
+        manualRefundSettledAt: new Date().toISOString(),
+        note: (b.data.note ? b.data.note + '\n' : '') + `Manuální refundace vyplacena z banky administrátorem (${req.user?.name || 'Eva'}) dne ${new Date().toLocaleDateString('cs-CZ')}.`
+      });
+      res.json({ success: true, message: "Manuální refundace byla označena jako vyřízená." });
+    } catch (error: any) {
+      console.error("Settle Refund Error:", error.message);
       res.status(500).json({ error: error.message });
     }
   });

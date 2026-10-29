@@ -36,9 +36,10 @@ export function calculateCancellationPolicy(
   const validPrice = Math.max(0, Number(price) || 0);
 
   // Kontrola data účinnosti (1. listopadu 2026):
-  // Pokud storno probíhá ještě v říjnu 2026 pro říjnový termín, uplatňuje se původní pravidlo
-  // (> 24 h = 100 % vrácení), aby nová pravidla neplatila zpětně před 1. 11. 2026.
-  const isBeforeEffective = now < new Date('2026-11-01T00:00:00') && (dateStr || '') < '2026-11-01';
+  // Pravidla se spouští až 1. 11. 2026 (podle data storna, tedy 'now').
+  // Do 31. 10. 2026 23:59:59 včetně platí stávající pravidlo (> 24 h = 100 % vrácení, poplatek 0 Kč)
+  // pro veškerá storna, i když je rezervace na listopad nebo později. Nová pravidla začínají platit až 1. 11. 2026.
+  const isBeforeEffective = now < new Date('2026-11-01T00:00:00');
 
   if (isBeforeEffective) {
     if (hoursDifference >= 24) {
@@ -50,8 +51,8 @@ export function calculateCancellationPolicy(
         refundPercentage: 100,
         feeAmount: 0,
         refundAmount: validPrice,
-        label: 'Více než 24 h předem (platnost do 31. 10.)',
-        description: 'V přechodném období do 31. 10. 2026 je při zrušení více než 24 h předem vráceno 100 % částky. Nové 3 storno pásma vstupují v účinnost od 1. 11. 2026.'
+        label: 'Více než 24 h předem (původní pravidlo platné do 31. 10.)',
+        description: 'Do 31. 10. 2026 platí původní pravidla: při zrušení více než 24 h předem se vrací 100 % částky (storno poplatek 0 Kč). Nová pravidla začínají platit až od 1. 11. 2026.'
       };
     } else {
       return {
