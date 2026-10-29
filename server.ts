@@ -88,6 +88,13 @@ async function startServer() {
 
   app.set("trust proxy", 1); // správná klientská IP za reverzní proxy (rate limiting)
 
+  // Ochrana soukromí: Zákaz indexace vyhledávači (Google, Bing, Seznam) a AI modely (GPTBot, ClaudeBot atd.)
+  // Aplikace je interní rezervační systém pro terapeuty a nesmí být indexována ani se objevovat v AI odpovědích.
+  app.use((_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet, noimageindex");
+    next();
+  });
+
   // Bezpečnostní rate limitery (ochrana proti DoS a brute-force útokům dle CodeQL doporučení)
   const globalLimiter = rateLimit({
     windowMs: 1 * 60 * 1000, // 1 minuta

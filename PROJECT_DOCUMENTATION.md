@@ -281,3 +281,10 @@ Cílem je kontejnerové prostředí (např. Google Cloud Run):
 - **Odebrání měřicího kódu hlavního webu:** V `index.html` byl dříve vložen měřicí kód Google Tag `GT-TWR86R5H` patřící hlavnímu prezentačnímu webu `centrumunity.cz`. Tím docházelo ke zkreslování marketingových statistik webu interním provozem terapeutů (přihlašování, rezervace, správa kalendáře).
 - **Stav po nápravě:** Měřicí kód hlavního webu byl kompletně z aplikace odstraněn. Aplikace již do GA4 webu neposílá žádné hity ani události.
 - **Volitelné dedikované měření:** Pokud bude studio v budoucnu chtít měřit rezervační systém samostatně, založí v Google Analytics samostatnou službu / datový stream (např. *Centrum Unity - Rezervace*) a její ID vloží do proměnné prostředí `VITE_GA4_MEASUREMENT_ID` v `.env`. Třída `Monitoring` v `services/monitoring.ts` tento kód načte dynamicky pouze tehdy, je-li proměnná nastavena.
+
+## 13. Ochrana soukromí: Zákaz indexace (noindex) a blokace AI botů
+Jelikož přihlašovací obrazovka zobrazuje jména a fotografie terapeutů a aplikace slouží výhradně jako interní rezervační systém pro terapeuty studia:
+- **Meta tagy (`index.html`):** Nastaveny direktivy `noindex, nofollow, noarchive, nosnippet, noimageindex` pro všechny roboty i specificky pro Googlebot, Bingbot, SeznamBot. Zahrnuty i explicitní direktivy pro AI roboty (`GPTBot`, `ChatGPT-User`, `Google-Extended`, `ClaudeBot`, `anthropic-ai`, `PerplexityBot`, `CCBot`, `Bytespider`, `FacebookBot`).
+- **HTTP Header (`server.ts`):** Každá odpověď serveru Express obsahuje hlavičku `X-Robots-Tag: noindex, nofollow, noarchive, nosnippet, noimageindex`, která vyhledávačům a AI modelům brání v indexaci jak HTML stránek, tak i statických souborů a obrázků.
+- **Robots.txt (`public/robots.txt`):** Vytvořen soubor zakazující procházení celého webu (`Disallow: /`) pro všechny obecné roboty i specifické AI crawly.
+
