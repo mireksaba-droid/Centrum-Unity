@@ -56,6 +56,10 @@
     - **Garance 1× bezplatného přesunu (přeobjednání při nemoci klienta):**
       - Lektor má u každé aktivní rezervace možnost **1× bezplatně přesunout** rezervaci na jiný volný termín v systému (`rescheduleCount`).
       - Po prvním přesunu se počítadlo zvedne na `1` a další samoobslužný přesun je uzamčen. Další nestandardní úpravy může provést pouze správce (Eva).
+    - **Audit a monitoring přesunů v reálném čase:**
+      - V `AdminDashboard.tsx` je dedikovaná záložka „Audit přesunů“ s přehledem KPI, časovým předstihem a automatickou detekcí podezřelých storen (`🚨 ZRUŠENO PO PŘESUNU`).
+    - **Automatické testy:**
+      - Běh testovací sady: `npm test` (`scripts/test_cancellation_and_reschedule.ts` – 17 testů pokrývajících storno pásma, přesuny, kolize a e-maily).
 
 ## Stavy rezervace (`BookingStatus` v `types.ts`)
 `created` · `awaiting_payment` · `deferred_payment` · `paid` · `cancelled` · `completed` · `refunded`

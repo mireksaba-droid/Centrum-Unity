@@ -31,6 +31,8 @@
 ├── pages/                # Login, StudioSchedule, AdminDashboard,
 │                         #   PractitionerDashboard, PaymentPage, PublicEventPage,
 │                         #   TermsPage, PrivacyPage, About, Team, Services, CalendarView, Dashboard
+├── scripts/
+│   └── test_cancellation_and_reschedule.ts # Automatická testovací sada (npm test)
 ├── services/
 │   ├── firebase.ts       # Klientský přístup k Firestore + wrapper na /api/send-email
 │   ├── geminiService.ts  # Volání AI přes /api/ai/chat
@@ -40,6 +42,7 @@
 │   └── useStore.ts       # Zustand store (uživatel, rezervace, lektoři, události)
 ├── utils/
 │   ├── scheduler.ts      # Kolize rezervací, buffery na úklid, výpočet ceny
+│   ├── cancellationPolicy.ts # 3-pásmová storno politika (od 1. 11. 2026) a výpočet refundace
 │   ├── dateUtils.ts      # Práce s lokálním datem/časem
 │   ├── emailTemplates.ts # HTML šablony e-mailů (potvrzení, výzva, storno)
 │   └── vocative.ts       # Skloňování jmen do 5. pádu (oslovení)
@@ -56,15 +59,15 @@
 ### A. Autentizace
 Uživatel vybere profil a zadá PIN. Po ověření (dnes na klientovi) zavolá `/api/login`, který vydá JWT. Podle role se přesměruje: `ADMIN` → `/admin`, ostatní → `/schedule`.
 
-### B. Rezervace, kolize a storno
+### B. Rezervace, kolize, storno podmínky a 1× bezplatný přesun
 1. Lektor/admin vybere volný slot v kalendáři (`StudioSchedule`).
 2. Vyplní údaje (klient, vybavení, doba trvání).
 3. **Kontrola kolizí & Pravidlo přednosti prvního (`utils/scheduler.ts` → `checkBookingCollision` + backend transakce `server.ts`):**
    - **Přednostní právo:** Kdo první vytvoří rezervaci (nebo zahájí platbu), má absolutní přednostní právo. Jakýkoliv následující pokus o překryv je odmítnut s chybou HTTP 409 (Conflict).
    - **Serverová validace celého časového intervalu:** Server i klient netestují pouze počáteční čas, ale celý časový úsek (od začátku do konce trvání) a vynucují povinné hygienické pauzy (30 min pro stejného lektora, 60 min při střídání různých lektorů).
-   - **Ochrana při přesunu (Reschedule):** Při změně termínu administrátorem (`RescheduleModal.tsx`) se živě vyhodnocují kolize s existujícími rezervacemi. Kolidující termín nelze potvrdit.
+   - **Ochrana při přesunu (Reschedule):** Při změně termínu administrátorem či lektorem (`RescheduleModal.tsx`) se živě vyhodnocují kolize s existujícími rezervacemi. Kolidující termín nelze potvrdit.
    - **Měkké varování (Paralelní rezervace):** Lektor může ve výjimečných situacích zarezervovat obě místnosti (M1 i M2) na stejný čas. V takovém případě kontrola kolizí nevyhodnotí stav jako nekompatibilní kolizi (`hasCollision = false`), nýbrž vrátí textové varování (`warning`).
-   - **State-driven potvrzení v UI:** Místo systémového dialogu prohlížeče (`window.confirm`), který bývá v sandboxovaných iframech blokován, se přímo v modálním okně rezervace (v `StudioSchedule` i v `AdminDashboard` pro skupinové akce) zobrazí designový varovný box s checkboxem *„Beru na vědomí a chci přesto pokračovat“*. Dokud není políčko zaškrtnuto, je potvrzovací tlačítko deaktivováno.
+   - **State-driven potvrzení v UI:** Místo systémového dialogu prohlížeče (`window.confirm`), který bývá v sandboxovaných iframech blokován, se přímo v modálním okně rezervace zobrazí designový varovný box s checkboxem *„Beru na vědomí a chci přesto pokračovat“*. Dokud není políčko zaškrtnuto, je potvrzovací tlačítko deaktivováno.
 4. Cena se počítá funkcí `calculateRentalPrice` (admin má **0 Kč zdarma**).
 5. Uložení: lokální store + Firestore (`saveBookingToFirestore`, transakce a kolizní zámek proti dvojité rezervaci).
 6. Platba podle scénáře (viz sekce 6).
@@ -74,24 +77,41 @@ Uživatel vybere profil a zadá PIN. Po ověření (dnes na klientovi) zavolá `
      - Pokud lektor prodlužuje rezervaci v ochranném pásmu (méně než 24 hodin před začátkem nebo přímo v průběhu lekce), je **minimální doba prodloužení 1 hodina (60 min)** a poté lze prodlužovat po **půlhodinách** (+60 min, +90 min, +120 min, +150 min, +180 min). Možnost +30 min je v tomto pásmu zakázána na klientovi i na backendovém API.
      - Pokud je do začátku rezervace více než 24 hodin, lze prodlužovat standardně od +30 min výše (+30, +60, +90, +120 min...).
    - Systém živě ověřuje kolize nového prodlouženého intervalu (včetně hygienických pauz 30/60 min a navazujících akcí) přes `checkBookingCollision`.
-   - Vypočítá se rozdíl v ceně (`calculateRentalPrice`), vytvoří se nová platba v GoPay na doplatek (`/api/create-extension-payment`), otevře se platební brána a po zaplacení (`reconcilePayment`) se v databázi upraví `durationMinutes`, `price`, `extendedAt` a odešle se potvrzovací e-mail `generateExtensionConfirmationEmail`.
-8. Storno/přesun přes `cancelBooking` a `adminRescheduleBooking` (zápis do Firestore s kontrolou kolizí).
+   - Vypočítá se rozdíl v ceně (`calculateRentalPrice`), vytvoří se nová platba v GoPay na doplatek (`/api/create-extension-payment`), otevře se platební brána a po zaplacení se v databázi upraví `durationMinutes`, `price`, `extendedAt` a odešle se potvrzovací e-mail `generateExtensionConfirmationEmail`.
+8. **Storno podmínky a refundace (platné od 1. listopadu 2026):**
+   - Logika je centralizována v `utils/cancellationPolicy.ts` (`calculateCancellationPolicy`) a striktně se aplikuje v klientském store (`cancelBooking`), v backendových endpointech (`/api/refund`, `/api/guest-cancel`), v e-mailech i ve všech dashboaradech:
+     - **Více než 7 dní (> 168 h) před začátkem:** vrácení 100 % zaplacené částky (storno poplatek 0 %).
+     - **7 dní až 24 hodin (24 h – 168 h) před začátkem:** storno poplatek 50 %, vrácení 50 % částky zpět na platební kartu klienta / lektora.
+     - **Méně než 24 hodin (< 24 h) před začátkem:** storno poplatek 100 % (termín se uvolní pro ostatní, zaplacená částka propadá).
+   - **Přechodné pravidlo před 1. 11. 2026:** Pro rezervace konané před 1. listopadem 2026 platí původní pravidlo (> 24 h = 100 % refund, < 24 h = 0 % refund).
+9. **Garance 1× bezplatného přeobjednání (přesunu termínu):**
+   - Pokud lektorovi náhle onemocní klient, má u každé aktivní rezervace garantovanou možnost **1× bezplatně přesunout** rezervaci na jiný volný termín v systému, aniž by mu propadly peníze.
+   - Rezervace eviduje pole `rescheduleCount` (po prvním přesunu lektorem se zvýší na `1`), `rescheduledBy` (`'practitioner' | 'admin'`), `rescheduledAt`, `originalDate`, `originalTime` a `rescheduleReason`.
+   - Po vyčerpání 1 samoobslužného přesunu se tlačítko v `PractitionerDashboard` uzamkne (`Přesunuto (1/1)`).
+   - Administrátor (Eva) má neomezené právo přesouvat rezervace kdykoliv bez uzamčení.
+   - Při přesunu se vždy striktně ověřuje dostupnost nového slotu včetně povinných hygienických pauz na úklid (30 min stejný lektor / 60 min střídání).
 
 ### C. Skupinové události (veřejné)
 Admin vytvoří `GroupEvent` pro Velkou místnost s kapacitou a cenou. Vygeneruje se veřejná URL `/event/:eventId`. Klient se registruje; Firestore **transakce** hlídá, že se nepřekročí kapacita.
-*   **Pravidlo počítání kapacity:** Do celkové obsazenosti akce se započítávají pouze aktivní registrace (ve stavu `paid`, `awaiting_payment` atd.). Registrace, které byly stornovány (`cancelled`), se do celkového počtu obsazených míst nezapočítávají, takže automaticky uvolňují kapacitu sálu zpět pro ostatní zájemce (opraveno a sjednoceno jak na veřejné stránce, tak v administrátorském přehledu).
+*   **Pravidlo počítání kapacity:** Do celkové obsazenosti akce se započítávají pouze aktivní registrace (ve stavu `paid`, `awaiting_payment` atd.). Registrace, které byly stornovány (`cancelled`), se do celkového počtu obsazených míst nezapočítávají, takže automaticky uvolňují kapacitu sálu zpět pro ostatní zájemce.
 *   **Notifikace pro správce (Eva):** Při každé nové registraci či změně stavu registrace na skupinovou akci je automaticky odesílán e-mail na adresu správkyně `kadlecova-eva@seznam.cz` (nebo dle env `ADMIN_NOTIFICATION_EMAIL` / profilu `admin`), viz sekce 6.
 
 ### D. Administrátorský tok
 Dashboard s metrikami (příjmy, vytíženost), master kalendář se jmény lektorů, správa profilů, rezervací a událostí. Při kolizi skupinové události s rezervací lektora se otevře modál pro přesun (Reschedule).
 
-### E. Business Intelligence & Analytika (BI)
-Administrátorský dashboard obsahuje dedikovanou záložku „Analytika“, která slouží jako hlavní business-intelligence modul centra.
-- **Sjednocení jmen lektorů a hostů:** Všechny rezervace vytvořené pod profilem `guest` nebo se jménem `mirek` / `host` / `externista` jsou v BI grafech (Tržby dle lektorů, Storna lektorů, Poslední aktivita, Seznam rezervací) automaticky sjednoceny a prezentovány pod jednotným označením **„Host / Externista“**.
-- **Naplněnost místností (% využití kapacity):** Počítá celkové procento blokovaného času místností (M1 a M2) z celkové provozní kapacity (08:00–24:00 = 16 h/den × počet dní v měsíci). Do celkového procenta jsou započteny **jak čisté hodiny rezervací, tak povinné sanitární pauzy** na úklid a větrání (30 min stejný lektor / 60 min střídání). Karta v dashboardu přehledně uvádí celkové % a rozpad: *„Čisté rezervace: X %, Sanitární pauzy: Y %“* spolu s vysvětlující poznámkou.
+### E. Business Intelligence, Analytika a Audit Přesunů
+Administrátorský dashboard obsahuje dedikované analytické a kontrolní moduly:
+- **Audit a monitoring přesunů (Záložka „Audit přesunů“):**
+  - Dedikovaný modul pro sledování využití garance 1× bezplatného přeobjednání.
+  - **Detekce podezřelých storen:** Automaticky detekuje a červeným štítkem `🚨 ZRUŠENO PO PŘESUNU` označuje rezervace, které byly lektorem přesunuty do budoucna a následně stornovány (prevence obcházení storno poplatků).
+  - **Sledování časového předstihu:** Kategorizuje přesuny na pozdní (< 24 h), rizikové v 6denním okně (24 h – 7 dní) a včasné (> 7 dní).
+  - **Přehled per lektor:** Sleduje četnost přesunů u jednotlivých lektorů při zachování striktního řazení lektorů dle `sortPractitioners`.
+  - **Kompletní auditní záznam:** Zobrazuje původní termín ➔ nový termín, posun v čase (+X dní), kdo a kdy změnu provedl, důvod přesunu a finanční vyčíslení.
+- **Sjednocení jmen lektorů a hostů:** Všechny rezervace vytvořené pod profilem `guest` nebo se jménem `mirek` / `host` / `externista` jsou v BI grafech automaticky sjednoceny a prezentovány pod jednotným označením **„Host / Externista“**.
+- **Naplněnost místností (% využití kapacity):** Počítá celkové procento blokovaného času místností (M1 a M2) z celkové provozní kapacity (08:00–24:00 = 16 h/den × počet dní v měsíci). Do celkového procenta jsou započteny **jak čisté hodiny rezervací, tak povinné sanitární pauzy** na úklid a větrání (30 min stejný lektor / 60 min střídání).
 - **Zrealizované & Proběhlé Rezervace:** Speciální podsekce počítá a vizualizuje počet a celkovou finanční hodnotu všech úspěšně proběhlých rezervací (stavy `paid` nebo `completed` s datem v minulosti).
-- **Zohlednění administrátora (Eva):** Jelikož má Eva (ID `admin`) pronájem místností zcela zdarma (0 Kč), systém v BI statistikách počítá její rezervace s nulovým obratem, což zajišťuje naprosto přesný přehled o reálných příjmech od externích lektorů.
-- **Vizualizace ušetřené částky pro Evu:** Pro zachování přehledu o tom, jakou hodnotu v pronájmech Eva pro své vlastní klienty využila, BI modul počítá a zobrazuje metriku „Ušetřeno za vlastní rezervace Evy“ (vypočítáno ze standardních hodinových sazeb za M1 a M2). Užitečný ukazatel pro interní účely a přehled o vytížení prostor.
+- **Zohlednění administrátora (Eva):** Jelikož má Eva (ID `admin`) pronájem místností zcela zdarma (0 Kč), systém v BI statistikách počítá její rezervace s nulovým obratem.
+- **Vizualizace ušetřené částky pro Evu:** BI modul počítá a zobrazuje metriku „Ušetřeno za vlastní rezervace Evy“ (vypočítáno ze standardních hodinových sazeb za M1 a M2).
 
 ## 5. Klíčové datové modely (`types.ts`)
 
@@ -110,6 +130,12 @@ Administrátorský dashboard obsahuje dedikovanou záložku „Analytika“, kte
 - `clientName` / `clientEmail` / `clientPhone` — kontakt na klienta (CRM).
 - `paymentId` — ID platby v GoPay (párování, refundace).
 - `extendedAt`, `extensionPaymentId`, `pendingExtension` — evidence a stav prodloužení rezervace a doplatku.
+- `rescheduleCount` — počet provedených přesunů (max 1 pro samoobslužný přesun lektorem).
+- `rescheduledBy` — `'practitioner' | 'admin'` (kdo změnu termínu autorizoval).
+- `rescheduledAt` — časové razítko provedení přesunu.
+- `originalDate`, `originalTime` — původní rezervovaný termín před změnou.
+- `rescheduleReason` — zaznamenaný důvod přesunu (např. nemoc klienta).
+- `refundAmount`, `cancellationFee` — přesně vyčíslená vrácená částka a storno poplatek v Kč dle storno politiky.
 - `createdAt` — čas vytvoření.
 - `paymentRequestedAt` — čas odeslání výzvy k platbě (od něj běží 24h okno).
 - `note`, `cancelledAt`, `recurringGroupId` — volitelné.
@@ -123,11 +149,11 @@ Administrátorský dashboard obsahuje dedikovanou záložku „Analytika“, kte
 
 ### Odesílání e-mailů (SMTP / Resend)
 E-maily posílá backend přes `nodemailer` / `Resend` (`sendEmail()` v `server.ts`). Endpoint `/api/send-email` (chráněný JWT) a interní volání v cronu/cleanupu a při registraci na události. Když e-mailové proměnné chybí, odeslání se jen zaloguje (mock). Šablony jsou v `utils/emailTemplates.ts`:
-- `generateConfirmationEmail(booking, isPaid)` — potvrzení individuální rezervace místnosti (řádek s vybavením, stav Zaplaceno/Faktura, oslovení ve 5. pádu).
+- `generateConfirmationEmail(booking, isPaid)` — potvrzení individuální rezervace místnosti (řádek s vybavením, stav Zaplaceno/Faktura, oslovení ve 5. pádu, detailní přehled storno podmínek i garance 1× bezplatného přesunu).
 - `generateExtensionConfirmationEmail(booking, extraMinutes, diffPrice)` — potvrzení úspěšného prodloužení rezervace s novou délkou a uhrazeným doplatkem.
 - `generatePaymentRequestEmail(booking, baseUrl)` — výzva k platbě s odkazem na `/#/pay/:id`.
 - `generatePaymentReminderEmail(booking, hoursLeft, baseUrl)` — připomínka platby před vypršením 24h lhůty.
-- `generateCancellationEmail(booking, reason)` — storno rezervace.
+- `generateCancellationEmail(booking, reason, refundAmount, cancellationFee)` — storno rezervace s detailním rozpisem: původní termín, cena pronájmu, uplatněný storno poplatek a částka vrácená zpět na platební kartu.
 - `generateEventRegistrationConfirmationEmail(registration, event, isPaid)` — potvrzení registrace na skupinovou akci pro klienta (včetně instrukcí, platebního stavu a storno podmínek).
 - `generateEventRegistrationCancellationEmail(registration, event, reason)` — storno registrace na akci pro klienta (např. při vypršení platebního limitu).
 - `generateAdminEventRegistrationNotificationEmail(registration, event, paymentState, baseUrl)` — okamžitá notifikace pro administrátorku Evu o nové registraci či platbě na skupinovou akci.
@@ -167,12 +193,17 @@ Konfigurace je v `firebase-applet-config.json`. Klient i server používají web
 - **Synchronizace a zpoždění Google Kalendáře:** Náš server generuje data z Firestore okamžitě a bez mezipaměti (`no-cache`). Nicméně externí platformy jako **Google Kalendář provádí automatickou aktualizaci odebíraných kalendářů ve vlastních cyklech (obvykle jednou za 4 až 24 hodin)**. Toto zpoždění je dáno architekturou Google Kalendáře a nelze jej zvenčí zrychlit.
 - **Doporučení pro lektory:** Pro okamžité ověření volné kapacity a objednávání je vždy závazná webová aplikace Centrum Unity napojená na živou databázi.
 
-### GoPay (platby)
+### GoPay (platby a refundace)
 - Vytváření plateb: `/api/create-payment` (auth) a `/api/public-payment` (veřejné, rate-limit).
 - Webhook: `/api/gopay/notify` asynchronně aktualizuje stav rezervace (`PAID` → `paid`, `CANCELED`/`TIMEOUTED` → `cancelled`, `REFUNDED` → `refunded`).
 - **Priorita úspěšné platby (`PAID`):** Pokud klient provedl opakovaný pokus a z brány dorazí stav `PAID`, systém tento stav bezpodmínečně aplikuje (i kdyby předchozí pokus byl stornován či vypršel), odstraní případné `cancelledAt`/`cancellationReason` a zapíše `paidAt`.
 - Ověření stavu po návratu: `/api/gopay/status`.
-- Refundace: `/api/refund` — jen vlastník nebo admin, a jen je-li do termínu **≥ 24 h**. Částky v haléřích.
+- **Automatické storno a refundace (`/api/refund` a `/api/guest-cancel`):**
+  - Refundace se řídí 3-pásmovou storno politikou (`utils/cancellationPolicy.ts`).
+  - Více než 7 dní předem: 100% částky vráceno na kartu přes GoPay REST API.
+  - 7 dní až 24 h předem: 50% částky vráceno na kartu (50 % storno poplatek centru).
+  - Méně než 24 h předem: storno poplatek 100 %, GoPay refundace neprobíhá (0 Kč), termín se pouze uvolní.
+  - Všechny částky pro GoPay API se striktně převádějí na haléře (`amount * 100`).
 
 ### SMTP (webkitty.eu)
 Viz sekce 6. Doporučeno založit samostatnou schránku pro odesílání; `FROM_EMAIL` musí být na vlastní doméně.
@@ -235,7 +266,13 @@ Cílem je kontejnerové prostředí (např. Google Cloud Run):
 - **Error Boundary:** `index.tsx` zachytává pády React stromu (v produkci skrýt stack trace).
 - **404 guard:** Express má catch-all `/api` 404 před SPA fallbackem, aby se nevracelo HTML místo JSON.
 
-## 11. Testování (QA)
-- **Unit (doporučeno):** `utils/scheduler.ts` (kolize, buffery, ceny) a `utils/vocative.ts` (skloňování).
-- **E2E (doporučeno):** happy-path booking flow.
-- **Manuální checklist:** přihlášení (platný/neplatný PIN), vytvoření rezervace (blokace slotu), skloňované oslovení v potvrzení, vybavení v e-mailu, test SMTP přes `/api/test-email`, storno po vypršení 24 h, admin rezervace zdarma, reset dat.
+## 11. Testování (QA a automatické testy)
+- **Automatická testovací sada (`npm test`):**
+  - Implementováno v `scripts/test_cancellation_and_reschedule.ts`.
+  - Spouští se příkazem `npm test`.
+  - Obsahuje 17 automatických unit a integračních testů:
+    1. *Storno pásma a přechodné pravidlo:* Testování chování před 1. 11. 2026 (> 24 h = 100 % refund) i po 1. 11. 2026 (> 7 dní = 100 % refund / 0 % poplatek, 24 h – 7 dní = 50 % refund / 50 % poplatek, < 24 h = 0 % refund / 100 % poplatek). Zaokrouhlování na celé koruny a nulové rezervace.
+    2. *Garance 1× bezplatného přesunu:* Povolení 1. přesunu lektorem (`rescheduleCount = 0`), uzamčení dalších samoobslužných přesunů (`rescheduleCount = 1`) a neomezené právo administrátorky Evy.
+    3. *Kolizní ochrana při přesunu:* Detekce kolizí s obsazeným slotem, dodržení 60minutové hygienické pauzy při střídání lektorů a povolení přesunu na bezpečný slot.
+    4. *E-mailové šablony:* Ověření textu nových storno podmínek i garance přesunu v potvrzovacím e-mailu a přesného finančního rozpisu v e-mailu o stornu.
+- **Manuální checklist:** přihlášení (platný/neplatný PIN), vytvoření rezervace (blokace slotu), skloňované oslovení v potvrzení, vybavení v e-mailu, test SMTP přes `/api/test-email`, storno po vypršení 24 h, audit přesunů a detekce podezřelých storen, admin rezervace zdarma, reset dat.

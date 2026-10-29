@@ -44,7 +44,15 @@ Aplikace definuje následující role s odlišnými oprávněními:
   - Zadání typu služby (1-1 terapie, skupinová lekce).
   - Volitelné údaje o klientovi (jméno, email, telefon).
   - Výběr vybavení (lehátko, stůl, futon).
-- **Validace:** Systém nesmí povolit překrývající se rezervace ve stejné místnosti.
+- **Validace a kolize:** Systém nesmí povolit překrývající se rezervace ve stejné místnosti a vynucuje povinné sanitární pauzy na úklid (30 min stejný lektor / 60 min střídání lektorů).
+- **Storno podmínky a refundace (platné od 1. 11. 2026):**
+  - *Více než 7 dní (> 168 h) před začátkem:* vrácení 100 % zaplacené částky (storno poplatek 0 %).
+  - *7 dní až 24 hodin (24 h – 168 h) před začátkem:* storno poplatek 50 %, vrácení 50 % částky zpět na platební kartu.
+  - *Méně než 24 hodin (< 24 h) před začátkem:* storno poplatek 100 %, částka propadá a termín se uvolní.
+  - *Před 1. 11. 2026:* uplatňuje se přechodné pravidlo (> 24 h = 100 % refund, < 24 h = 0 % refund).
+- **Garance 1× bezplatného přesunu rezervace:**
+  - Každý lektor má u své aktivní rezervace možnost 1× bezplatně přesunout termín na jiný volný slot v systému (např. při náhlém onemocnění klienta).
+  - Po prvním přesunu lektorem se počítadlo `rescheduleCount` zvýší na `1` a další samoobslužný přesun je uzamčen. Administrátor má možnost přesouvat termíny neomezeně.
 
 ### 3.3. Skupinové Události a Veřejné Přihlašování (Workshopy)
 - **Správa událostí (Admin/Manažer):** Možnost vytvořit, upravit a smazat skupinovou lekci s definovanou kapacitou a cenou za osobu. Aktuálně je tato funkce omezena pouze na Velkou místnost (Room 2).
@@ -53,38 +61,46 @@ Aplikace definuje následující role s odlišnými oprávněními:
 - **Veřejná přihlašovací stránka:** Klient přes odkaz vidí detaily akce (název, lektor, čas, cena, zbývající kapacita) a může se přihlásit zadáním jména a e-mailu.
 - **Ochrana proti overbookingu:** Systém hlídá kapacitu a nedovolí přihlášení, pokud je událost plná. Události také blokují sloty v kalendáři, takže lektor nemůže vytvořit rezervaci přes skupinovou událost.
 
-### 3.4. Administrační Dashboard
+### 3.4. Administrační Dashboard a Audit Přesunů
 - **Přehledy (KPIs):**
-  - Celkový počet rezervací.
-  - Celkové tržby (odhadované).
-  - Vytíženost jednotlivých místností.
+  - Celkový počet rezervací a reálné tržby.
+  - Vytíženost jednotlivých místností včetně započtení hygienických pauz.
+  - Sledování zrealizovaných a proběhlých rezervací v minulosti.
+- **Audit a monitoring přesunů (Reschedule Monitor):**
+  - Samostatná záložka pro dohled nad využitím 1× bezplatného přesunu.
+  - Detekce podezřelých storen po přesunu (ochrana před zneužitím refundací přesunutím do budoucna a následným zrušením).
+  - Sledování předstihu (pozdní < 24 h, rizikové 24 h – 7 dní, včasné > 7 dní).
+  - Přehled per lektor s dodržením striktního klíče řazení.
 - **Správa Týmu:**
   - Seznam všech aktivních praktiků.
   - Formulář pro přidání nového praktika.
   - Editace stávajících údajů (změna PINu, specializace).
 
 ### 3.5. Notifikace a Komunikace
-- **E-mailové potvrzení:** Automatické odeslání e-mailu klientovi/praktikovi po potvrzení rezervace (u online plateb až po zaplacení).
-- **Výzva k platbě a storno:** U odložených plateb (termín > 120 dní) se posílá výzva k platbě; při neuhrazení do 24 h automatické storno + e-mail o zrušení.
+- **E-mailové potvrzení:** Automatické odeslání e-mailu klientovi/praktikovi po potvrzení rezervace (u online plateb až po zaplacení), včetně informace o storno pásmech a garanci 1× přesunu.
+- **Výzva k platbě a storno:** U odložených plateb (termín > 120 dní) se posílá výzva k platbě; při neuhrazení do 24 h automatické storno + e-mail o zrušení s vyčíslením storno poplatku a případné vratky.
 - **Systém:** Odesílání přes SMTP (`nodemailer`) z vlastního poštovního serveru (webkitty.eu). Šablony v `utils/emailTemplates.ts`, oslovení skloňované do 5. pádu.
 
 ### 3.6. AI Asistent (Chatbot)
 - **Funkce:** Plovoucí chatovací okno dostupné na všech stránkách.
 - **Schopnosti:** Odpovídání na dotazy ohledně služeb centra, ceníku a otevírací doby pomocí modelu Google Gemini.
 
-### 3.6. Analytika a Monitoring
-- **Google Analytics:** Aplikace obsahuje wrapper (`monitoring.ts`) pro sledování návštěvnosti a chování uživatelů.
+### 3.7. Analytika a Monitoring
+- **Google Analytics & Sentry:** Sledování návštěvnosti a běhových chyb.
 - **Sledované události:** Zobrazení stránek, interakce s rezervačním formulářem, využití AI chatbota.
 
 ## 4. Datový Model (Entity)
 
 ### Rezervace (Booking)
 - ID, Datum, Čas, Délka trvání
-- ID Místnosti (Room)
-- ID Praktika (Kdo rezervoval)
-- Údaje o klientovi (Jméno, Email), Vybavení (lehátko/futon)
+- ID Místnosti (Room: 1 = Malá, 2 = Velká)
+- ID Praktika (Kdo rezervoval), Jméno praktika
+- Údaje o klientovi (Jméno, Email, Telefon), Vybavení (lehátko/futon)
 - Stav: `created`, `awaiting_payment`, `deferred_payment`, `paid`, `cancelled`, `completed`, `refunded`
 - Cena, způsob platby (`invoice`/`qr`/`online`), `paymentId`, `paymentRequestedAt`
+- `rescheduleCount` (počet přesunů, max 1 pro lektora), `rescheduledBy` (`practitioner` / `admin`), `rescheduledAt`
+- `originalDate`, `originalTime`, `rescheduleReason`
+- `refundAmount`, `cancellationFee` (vyčíslení storno poplatku a vrácené částky)
 
 ### Praktik (Practitioner)
 - ID, Jméno, Role

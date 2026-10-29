@@ -22,13 +22,13 @@
     "gopay": "^0.0.3",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.563.0",
-    "nodemailer": "^10.0.10",
+    "nodemailer": "^10.3.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-router": "^7.18.4",
     "react-router-dom": "^7.18.4",
     "recharts": "^3.7.0",
-    "resend": "^4.0.1",
+    "resend": "^6.35.0",
     "zustand": "^5.0.12"
   },
   "overrides": {
@@ -36,12 +36,16 @@
     "@grpc/grpc-js": "^1.14.6",
     "websocket-driver": "^0.7.5",
     "ws": "^8.21.3",
-    "vite": "^6.4.3",
+    "vite": "^6.4.5",
     "js-yaml": "^4.3.2",
     "esbuild": "^0.28.2",
     "browserslist": "^4.29.0",
     "nanoid": "^3.3.19",
-    "qs": "^6.16.0"
+    "qs": "^6.17.1",
+    "body-parser": "^2.4.0",
+    "launch-editor": "^2.14.2",
+    "ip-address": "^10.7.5",
+    "re2js": "^2.9.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.21.0",
@@ -62,6 +66,6 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "typescript-eslint": "^8.59.3",
-    "vite": "^6.4.3"
+    "vite": "^6.4.5"
   }
 }
