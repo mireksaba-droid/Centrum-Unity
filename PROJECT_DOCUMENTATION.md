@@ -276,3 +276,8 @@ Cílem je kontejnerové prostředí (např. Google Cloud Run):
     3. *Kolizní ochrana při přesunu:* Detekce kolizí s obsazeným slotem, dodržení 60minutové hygienické pauzy při střídání lektorů a povolení přesunu na bezpečný slot.
     4. *E-mailové šablony:* Ověření textu nových storno podmínek i garance přesunu v potvrzovacím e-mailu a přesného finančního rozpisu v e-mailu o stornu.
 - **Manuální checklist:** přihlášení (platný/neplatný PIN), vytvoření rezervace (blokace slotu), skloňované oslovení v potvrzení, vybavení v e-mailu, test SMTP přes `/api/test-email`, storno po vypršení 24 h, audit přesunů a detekce podezřelých storen, admin rezervace zdarma, reset dat.
+
+## 12. Analytika a oddělení Google Analytics (GA4)
+- **Odebrání měřicího kódu hlavního webu:** V `index.html` byl dříve vložen měřicí kód Google Tag `GT-TWR86R5H` patřící hlavnímu prezentačnímu webu `centrumunity.cz`. Tím docházelo ke zkreslování marketingových statistik webu interním provozem terapeutů (přihlašování, rezervace, správa kalendáře).
+- **Stav po nápravě:** Měřicí kód hlavního webu byl kompletně z aplikace odstraněn. Aplikace již do GA4 webu neposílá žádné hity ani události.
+- **Volitelné dedikované měření:** Pokud bude studio v budoucnu chtít měřit rezervační systém samostatně, založí v Google Analytics samostatnou službu / datový stream (např. *Centrum Unity - Rezervace*) a její ID vloží do proměnné prostředí `VITE_GA4_MEASUREMENT_ID` v `.env`. Třída `Monitoring` v `services/monitoring.ts` tento kód načte dynamicky pouze tehdy, je-li proměnná nastavena.
