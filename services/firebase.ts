@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, getDocs, query, where, doc, updateDoc, deleteDoc, runTransaction, initializeFirestore, setDoc } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, getDocs, query, where, doc, updateDoc, deleteDoc, runTransaction, initializeFirestore, setDoc, setLogLevel } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Booking, Practitioner } from '../types';
 import { sortGroupEvents } from '../constants';
@@ -13,6 +13,7 @@ let isFirebaseReady = false;
 let authInitPromise: Promise<void> | null = null;
 
 try {
+  setLogLevel('error');
   const app = initializeApp(firebaseConfig);
   const dbId = (firebaseConfig as any).firestoreDatabaseId;
   db = dbId ? getFirestore(app, dbId) : getFirestore(app);

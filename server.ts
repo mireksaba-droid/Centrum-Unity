@@ -18,6 +18,17 @@ import { calculateRentalPrice, checkBookingCollision } from "./utils/scheduler";
 import { calculateCancellationPolicy } from "./utils/cancellationPolicy";
 import { generatePaymentRequestEmail, generateConfirmationEmail, generateCancellationEmail, generateAdminDailySummaryEmail, generatePaymentReminderEmail, generateEventRegistrationConfirmationEmail, generateEventRegistrationCancellationEmail, generateAdminEventRegistrationNotificationEmail, generateAdminEventCancellationNotificationEmail, generateExtensionConfirmationEmail } from "./utils/emailTemplates";
 
+// Ošetření přechodných odpojení síťových soketů a gRPC streamů, aby nevedly k pádům procesu
+process.on("unhandledRejection", (reason: any) => {
+  const msg = reason?.message || String(reason || "");
+  if (msg.includes("UNAVAILABLE") || msg.includes("Connection dropped") || msg.includes("ECONNRESET") || msg.includes("EPIPE")) {
+    console.warn("Zachyceno přechodné odpojení spojení (bude automaticky znovu připojeno):", msg);
+    return;
+  }
+  console.error("Nezachycené odmítnutí příslibu (Unhandled Rejection):", reason);
+});
+
+
 async function safeJson(res: any) {
   const text = await res.text();
   try {
