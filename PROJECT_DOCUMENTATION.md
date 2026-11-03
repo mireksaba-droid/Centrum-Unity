@@ -84,6 +84,12 @@ Uživatel vybere profil a zadá PIN. Po ověření (dnes na klientovi) zavolá `
      - **7 dní až 24 hodin (24 h – 168 h) před začátkem:** storno poplatek 50 %, vrácení 50 % částky zpět na platební kartu klienta / lektora.
      - **Méně než 24 hodin (< 24 h) před začátkem:** storno poplatek 100 % (termín se uvolní pro ostatní, zaplacená částka propadá).
    - **Přechodné pravidlo před 1. 11. 2026:** Pro rezervace konané před 1. listopadem 2026 platí původní pravidlo (> 24 h = 100 % refund, < 24 h = 0 % refund).
+   - **Výjimka pro storno administrátorkou (Eva / zrušení ze strany studia):**
+     - Pokud rezervaci lektora zruší administrátorka Eva (např. havárie, sanitární den, provozní uzavření sálu, organizace studia), lektor za toto zrušení nenese vinu.
+     - **Garance 100% vrácení peněz:** Bez ohledu na čas (i kdyby to bylo 2 hodiny či 10 minut před začátkem) se lektorovi **vždy vrací 100 % zaplacené částky** zpět na platební kartu přes GoPay s nulovým storno poplatkem (`cancellationFee = 0 Kč`, `refundAmount = booking.price`).
+     - **Kompletní auditní stopa:** Každé zrušení administrátorkou je transparentně zaznamenáno v databázi (`cancelledBy: 'admin'`, `cancelledByName: 'Eva (Administrátor)'`, `adminCancellationOverride: true`, `cancellationReason: 'cancelled_by_admin_full_refund'`).
+     - **Transparentní komunikace:** Lektorovi je odeslán storno e-mail uvádějící, že lekci zrušila administrátorka studia a celá částka (100 %) byla vrácena na platební kartu bez jakéhokoliv storno poplatku.
+     - **Audit v AdminDashboard:** V modulu auditu je toto storno zřetelně označeno zeleným štítkem `🛡️ ZRUŠENO SPRÁVCEM (100 %)` a je vyloučeno z podezřelých manipulací.
 9. **Garance 1× bezplatného přeobjednání (přesunu termínu):**
    - Pokud lektorovi náhle onemocní klient, má u každé aktivní rezervace garantovanou možnost **1× bezplatně přesunout** rezervaci na jiný volný termín v systému, aniž by mu propadly peníze.
    - Rezervace eviduje pole `rescheduleCount` (po prvním přesunu lektorem se zvýší na `1`), `rescheduledBy` (`'practitioner' | 'admin'`), `rescheduledAt`, `originalDate`, `originalTime` a `rescheduleReason`.
@@ -138,7 +144,7 @@ Administrátorský dashboard obsahuje dedikované analytické a kontrolní modul
 - `refundAmount`, `cancellationFee` — přesně vyčíslená vrácená částka a storno poplatek v Kč dle storno politiky.
 - `createdAt` — čas vytvoření.
 - `paymentRequestedAt` — čas odeslání výzvy k platbě (od něj běží 24h okno).
-- `note`, `cancelledAt`, `recurringGroupId` — volitelné.
+- `note`, `cancelledAt`, `cancelledBy`, `cancelledByName`, `adminCancellationOverride`, `recurringGroupId` — volitelné (audit a metadata).
 
 ### Practitioner (Lektor)
 `id`, `name`, `title`, `category`, `role`, `pin`, `imageUrl`, `services`, `colorCode`, `isActive`.

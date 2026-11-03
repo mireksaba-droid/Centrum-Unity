@@ -1214,7 +1214,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                 const isAdmin = currentUser.role === Role.ADMIN || bookingToCancel.bookedByUserId === 'admin' || currentUser.id === 'admin';
                 const isOwner = bookingToCancel.bookedByUserId === currentUser.id;
                 const canReschedule = (isAdmin || isOwner) && (isAdmin || (bookingToCancel.rescheduleCount || 0) < 1) && !['cancelled', 'refunded'].includes(bookingToCancel.status);
-                const policy = calculateCancellationPolicy(bookingToCancel.date, bookingToCancel.time, bookingToCancel.price);
+                const policy = calculateCancellationPolicy(bookingToCancel.date, bookingToCancel.time, bookingToCancel.price, new Date(), isAdmin);
                 const isTooLate = !isAdmin && policy.tier === 'full_fee';
 
                 return (
@@ -1225,7 +1225,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                 <X className="w-6 h-6" />
                             </div>
                             <h3 className="text-xl font-bold font-heading mb-2">
-                                {isAdmin ? 'Správa rezervace' : 'Zrušit rezervaci'}
+                                {isAdmin ? 'Správa rezervace (Admin)' : 'Zrušit rezervaci'}
                             </h3>
                             <div className="text-stone-600 mb-5 text-sm">
                                 <div className="font-semibold text-stone-800">
@@ -1236,25 +1236,40 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                 </div>
 
                                 {bookingToCancel.paymentId && (
-                                    <div className="mt-3 p-3 bg-stone-50 border border-stone-200 rounded-xl text-left text-xs space-y-1.5">
-                                        <div className="font-bold text-stone-800 flex items-center justify-between">
-                                            <span>Storno podmínky:</span>
-                                            <span className={`px-2 py-0.5 rounded text-[11px] font-extrabold ${
-                                                policy.tier === 'full_refund' ? 'bg-green-100 text-green-800' :
-                                                policy.tier === 'half_fee' ? 'bg-amber-100 text-amber-900' :
-                                                'bg-red-100 text-red-800'
-                                            }`}>
-                                                {policy.tier === 'full_refund' ? '100 % vrácení' : policy.tier === 'half_fee' ? '50 % storno poplatek' : '100 % storno poplatek'}
-                                            </span>
+                                    isAdmin ? (
+                                        <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-xl text-left text-xs space-y-1.5">
+                                            <div className="font-bold text-blue-900 flex items-center justify-between">
+                                                <span>Zrušení správcem (Eva):</span>
+                                                <span className="px-2 py-0.5 rounded text-[11px] font-extrabold bg-blue-100 text-blue-800">
+                                                    100 % vrácení lektorovi
+                                                </span>
+                                            </div>
+                                            <div className="text-blue-700 leading-relaxed">
+                                                Zrušení ze strany studia: lektorovi bude vráceno celých <strong>{bookingToCancel.price} Kč (100 %)</strong> zpět na platební kartu (storno poplatek 0 Kč), a to i méně než 24 h předem. Zásah bude řádně zaznamenán v auditu.
+                                            </div>
                                         </div>
-                                        <div className="text-stone-600 leading-relaxed">
-                                            {policy.tier === 'full_refund' && `Více než 7 dní předem: Na platební kartu bude vráceno celých ${policy.refundAmount} Kč (storno poplatek 0 Kč).`}
-                                            {policy.tier === 'half_fee' && `24 h až 7 dní předem: Storno poplatek činí 50 % (${policy.feeAmount} Kč). Na kartu bude vráceno ${policy.refundAmount} Kč.`}
-                                            {policy.tier === 'full_fee' && `Méně než 24 h předem: 100 % storno poplatek (${policy.feeAmount} Kč). Termín je příliš blízko, zaplacená částka propadá.`}
+                                    ) : (
+                                        <div className="mt-3 p-3 bg-stone-50 border border-stone-200 rounded-xl text-left text-xs space-y-1.5">
+                                            <div className="font-bold text-stone-800 flex items-center justify-between">
+                                                <span>Storno podmínky:</span>
+                                                <span className={`px-2 py-0.5 rounded text-[11px] font-extrabold ${
+                                                    policy.tier === 'full_refund' ? 'bg-green-100 text-green-800' :
+                                                    policy.tier === 'half_fee' ? 'bg-amber-100 text-amber-900' :
+                                                    'bg-red-100 text-red-800'
+                                                }`}>
+                                                    {policy.tier === 'full_refund' ? '100 % vrácení' : policy.tier === 'half_fee' ? '50 % storno poplatek' : '100 % storno poplatek'}
+                                                </span>
+                                            </div>
+                                            <div className="text-stone-600 leading-relaxed">
+                                                {policy.tier === 'full_refund' && `Více než 7 dní předem: Na platební kartu bude vráceno celých ${policy.refundAmount} Kč (storno poplatek 0 Kč).`}
+                                                {policy.tier === 'half_fee' && `24 h až 7 dní předem: Storno poplatek činí 50 % (${policy.feeAmount} Kč). Na kartu bude vráceno ${policy.refundAmount} Kč.`}
+                                                {policy.tier === 'full_fee' && `Méně než 24 h předem: 100 % storno poplatek (${policy.feeAmount} Kč). Termín je příliš blízko, zaplacená částka propadá.`}
+                                            </div>
                                         </div>
-                                    </div>
+                                    )
                                 )}
                             </div>
+
 
                             {/* TIP: 1x Bezplatný přesun termínu místo storna s poplatkem */}
                             {canReschedule && policy.tier !== 'full_refund' && (
@@ -1415,7 +1430,7 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                     onClick={handleConfirmCancel}
                                     disabled={isProcessing || isTooLate}
                                 >
-                                    {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Zrušit termín'}
+                                    {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : (isAdmin && bookingToCancel.paymentId ? 'Zrušit a vrátit 100 %' : 'Zrušit termín')}
                                 </Button>
                             </div>
 

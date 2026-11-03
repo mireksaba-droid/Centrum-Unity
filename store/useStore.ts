@@ -256,26 +256,38 @@ export const useStore = create<AppState>()(
         }
 
         const cancelledAt = new Date().toISOString();
-        // Kdo ruší → důvod, aby to admin v přehledu poznal
+        const isPaid = booking.status === 'paid' || booking.status === 'completed';
+
+        // Pokud rezervaci ruší administrátorka Eva (ze strany studia),
+        // lektorovi se VŽDY vrací 100 % zaplacené částky (storno poplatek 0 Kč),
+        // a to i kdyby to bylo 2 hodiny nebo několik minut před začátkem lekce.
+        const { calculateCancellationPolicy } = await import('../utils/cancellationPolicy');
+        const policy = calculateCancellationPolicy(booking.date, booking.time, booking.price, new Date(), isAdmin);
+        const refundAmount = isPaid ? (isAdmin ? booking.price : policy.refundAmount) : 0;
+        const feeAmount = isPaid ? (isAdmin ? 0 : policy.feeAmount) : 0;
+        const newStatus = (isPaid && refundAmount > 0 && feeAmount === 0) ? 'refunded' : 'cancelled';
+
+        // Kdo ruší → přesný auditní důvod
         const cancellationReason = isAdmin
-            ? (booking.status === 'paid' ? 'cancelled_by_admin_paid' : 'cancelled_by_admin')
+            ? (isPaid ? 'cancelled_by_admin_full_refund' : 'cancelled_by_admin')
             : isGuestBooking
                 ? 'cancelled_by_guest'
                 : 'cancelled_by_practitioner';
 
-        const { calculateCancellationPolicy } = await import('../utils/cancellationPolicy');
-        const policy = calculateCancellationPolicy(booking.date, booking.time, booking.price);
-        const isPaid = booking.status === 'paid' || booking.status === 'completed';
-        const refundAmount = isPaid ? policy.refundAmount : 0;
-        const feeAmount = isPaid ? policy.feeAmount : 0;
-        const newStatus = (isPaid && refundAmount > 0 && feeAmount === 0) ? 'refunded' : 'cancelled';
+        const auditNote = isAdmin
+            ? `Rezervace zrušena administrátorkou Evou (ze strany studia). Lektorovi vrácena plná částka 100 % (${refundAmount} Kč), storno poplatek 0 Kč.`
+            : `Storno lektorem: vráceno ${refundAmount} Kč (${policy.refundPercentage} %), storno poplatek ${feeAmount} Kč (${policy.feePercentage} %).`;
 
         await updateBookingInFirestore(bookingId, { 
             status: newStatus, 
             cancelledAt, 
             cancellationReason,
+            cancelledBy: isAdmin ? 'admin' : (isGuestBooking ? 'guest' : 'practitioner'),
+            cancelledByName: isAdmin ? 'Eva (Administrátor)' : (state.currentUser?.name || booking.bookedByName),
+            adminCancellationOverride: isAdmin && isPaid,
             refundAmount,
-            cancellationFee: feeAmount
+            cancellationFee: feeAmount,
+            note: (booking.note ? booking.note + '\n' : '') + auditNote
         });
 
         // Odeslání storno e-mailu klientovi i lektorovi (pokud mají vyplněný e-mail).
@@ -288,13 +300,15 @@ export const useStore = create<AppState>()(
 
         if (recipientList) {
             let reason = isAdmin
-                ? "Rezervace byla zrušena administrátorem studia."
+                ? "Rezervace byla zrušena administrátorkou Evou (ze strany studia)."
                 : isGuestBooking
                     ? "Rezervace byla zrušena na Vaši žádost."
                     : "Rezervace byla zrušena lektorem.";
 
             if (isPaid) {
-                if (policy.tier === 'full_refund') {
+                if (isAdmin) {
+                    reason += ` Zrušení proběhlo ze strany studia – lektorovi se vrací celá zaplacená částka 100 % (${refundAmount} Kč) zpět na platební kartu (storno poplatek 0 Kč).`;
+                } else if (policy.tier === 'full_refund') {
                     reason += ` Zrušeno více než 7 dní před začátkem (storno poplatek 0 %). Celá zaplacená částka (${refundAmount} Kč) bude vrácena na platební kartu.`;
                 } else if (policy.tier === 'half_fee') {
                     reason += ` Zrušeno v pásmu 24 h až 7 dní před začátkem. V souladu se storno podmínkami činí storno poplatek 50 % (${feeAmount} Kč) a polovina zaplacené částky (${refundAmount} Kč) bude vrácena na platební kartu.`;

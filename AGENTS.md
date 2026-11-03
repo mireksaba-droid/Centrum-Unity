@@ -55,13 +55,14 @@
         - 7 dní až 24 hodin (24 h – 168 h) před začátkem: storno poplatek 50 % (vrácení 50 % částky zpět na platební kartu).
         - Méně než 24 hodin (< 24 h) před začátkem: storno poplatek 100 % (termín se uvolní pro ostatní, zaplacená částka propadá).
       - Logika výpočtu je centralizována v `utils/cancellationPolicy.ts` a uplatňuje se na backendu (`/api/refund`, `/api/guest-cancel`), v e-mailech i v lektorském dashboardu.
+      - **Výjimka pro zrušení správcem (Eva / admin override):** Pokud rezervaci lektora zruší administrátorka Eva (ze strany studia, např. havárie, údržba, provozní důvody), lektor za to nenese vinu. Bez ohledu na čas (i kdyby to bylo 2 hodiny či 10 minut před začátkem) se lektorovi **vždy vrací 100 % zaplacené částky** (storno poplatek 0 Kč). Vše se striktně audituje: `cancelledBy: 'admin'`, `cancelledByName: 'Eva (Administrátor)'`, `adminCancellationOverride: true`, `cancellationReason: 'cancelled_by_admin_full_refund'`, a lektorovi odejde vysvětlující e-mail o zrušení ze strany studia s nulovým storno poplatkem.
     - **Garance 1× bezplatného přesunu (přeobjednání při nemoci klienta):**
       - Lektor má u každé aktivní rezervace možnost **1× bezplatně přesunout** rezervaci na jiný volný termín v systému (`rescheduleCount`).
       - Po prvním přesunu se počítadlo zvedne na `1` a další samoobslužný přesun je uzamčen. Další nestandardní úpravy může provést pouze správce (Eva).
     - **Audit a monitoring přesunů v reálném čase:**
-      - V `AdminDashboard.tsx` je dedikovaná záložka „Audit přesunů“ s přehledem KPI, časovým předstihem a automatickou detekcí podezřelých storen (`🚨 ZRUŠENO PO PŘESUNU`).
+      - V `AdminDashboard.tsx` je dedikovaná záložka „Audit přesunů“ s přehledem KPI, časovým předstihem a automatickou detekcí podezřelých storen (`🚨 ZRUŠENO PO PŘESUNU`). Zrušení správcem jsou označena zeleným odznakem `🛡️ ZRUŠENO SPRÁVCEM (100 %)` a nepovažují se za podezřelá.
     - **Automatické testy:**
-      - Běh testovací sady: `npm test` (`scripts/test_cancellation_and_reschedule.ts` – 18 testů pokrývajících storno pásma, spuštění od 1. 11., přesuny, kolize a e-maily).
+      - Běh testovací sady: `npm test` (`scripts/test_cancellation_and_reschedule.ts` – 21 testů pokrývajících storno pásma, spuštění od 1. 11., admin výjimky pro 100% refund, přesuny, kolize a e-maily).
 
 ## Stavy rezervace (`BookingStatus` v `types.ts`)
 `created` · `awaiting_payment` · `deferred_payment` · `paid` · `cancelled` · `completed` · `refunded`

@@ -1028,7 +1028,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             const isSixDay = leadHours !== null && leadHours >= 24 && leadHours < 168;
             const isSafe = leadHours !== null && leadHours >= 168;
 
-            const isSuspicious = isCancelled;
+            const isSuspicious = isCancelled && !(b.cancellationReason === 'cancelled_by_admin_full_refund' || b.adminCancellationOverride);
 
             const practitionerDisplayName = resolvePractitionerDisplayName(b, practitioners);
 
@@ -1219,7 +1219,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             cancelled_by_guest_refunded: ['zrušil klient · vráceno', 'bg-sky-100 text-sky-700'],
             cancelled_by_practitioner: ['zrušil lektor', 'bg-stone-200 text-stone-600'],
             cancelled_by_admin: ['zrušil admin', 'bg-violet-100 text-violet-700'],
-            cancelled_by_admin_paid: ['zrušil admin (bylo zaplaceno)', 'bg-violet-100 text-violet-700'],
+            cancelled_by_admin_paid: ['zrušil admin (vráceno)', 'bg-violet-100 text-violet-700'],
+            cancelled_by_admin_full_refund: ['zrušil admin · vráceno 100 %', 'bg-indigo-100 text-indigo-800 font-bold border border-indigo-200'],
+            cancelled_by_admin_manual_refund: ['zrušil admin · k vrácení z banky 100 %', 'bg-amber-100 text-amber-900 font-bold border border-amber-300'],
             refunded: ['refundováno', 'bg-sky-100 text-sky-700'],
         };
         if (b.cancellationReason && map[b.cancellationReason]) return map[b.cancellationReason];
@@ -1233,7 +1235,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         if (b.paymentRequestedAt) ev.push({ label: 'Výzva k platbě', at: b.paymentRequestedAt, color: 'bg-indigo-500' });
         if (b.reminderSentAt) ev.push({ label: 'Připomínka', at: b.reminderSentAt, color: 'bg-amber-500' });
         if (b.status === 'paid' || b.status === 'completed') ev.push({ label: 'Zaplaceno', color: 'bg-emerald-600' });
-        if (b.cancelledAt) ev.push({ label: b.status === 'refunded' ? 'Zrušeno + refundace' : 'Zrušeno', at: b.cancelledAt, color: 'bg-red-500' });
+        if (b.cancelledAt) {
+            const isFullAdmin = b.cancellationReason === 'cancelled_by_admin_full_refund' || b.adminCancellationOverride;
+            ev.push({ 
+                label: isFullAdmin ? 'Zrušeno správcem (vráceno 100 %)' : (b.status === 'refunded' ? 'Zrušeno + refundace' : 'Zrušeno'), 
+                at: b.cancelledAt, 
+                color: isFullAdmin ? 'bg-indigo-600' : 'bg-red-500' 
+            });
+        }
         return ev;
     };
 
@@ -2986,15 +2995,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                                                         <td className="py-3 px-4">
                                                             {item.isCancelled ? (
-                                                                <div>
-                                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-600 text-white shadow-xs">
-                                                                        🚨 ZRUŠENO PO PŘESUNU
-                                                                    </span>
-                                                                    <div className="text-[10px] text-red-600 mt-1 font-medium">
-                                                                        Stornováno {formatCzechDateTime(item.cancelledAt)}
-                                                                        {item.refundAmount !== undefined && ` · Vráceno ${item.refundAmount} Kč`}
+                                                                (item.booking.cancellationReason === 'cancelled_by_admin_full_refund' || item.booking.adminCancellationOverride) ? (
+                                                                    <div>
+                                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200 shadow-xs">
+                                                                            🛡️ ZRUŠENO SPRÁVCEM (100 %)
+                                                                        </span>
+                                                                        <div className="text-[10px] text-indigo-700 mt-1 font-medium">
+                                                                            Stornováno {formatCzechDateTime(item.cancelledAt)} · Vráceno {item.refundAmount ?? item.price} Kč
+                                                                        </div>
                                                                     </div>
-                                                                </div>
+                                                                ) : (
+                                                                    <div>
+                                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-600 text-white shadow-xs">
+                                                                            🚨 ZRUŠENO PO PŘESUNU
+                                                                        </span>
+                                                                        <div className="text-[10px] text-red-600 mt-1 font-medium">
+                                                                            Stornováno {formatCzechDateTime(item.cancelledAt)}
+                                                                            {item.refundAmount !== undefined && ` · Vráceno ${item.refundAmount} Kč`}
+                                                                        </div>
+                                                                    </div>
+                                                                )
                                                             ) : item.status === 'paid' ? (
                                                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
                                                                     <CheckCircle className="w-3 h-3" /> Zaplaceno / Aktivní
@@ -3185,13 +3205,39 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                             className="text-xs border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300"
                                                             onClick={async () => {
                                                                 const isSelf = booking.bookedByUserId === 'admin';
+                                                                const practitionerName = resolvePractitionerDisplayName(booking, practitioners);
+                                                                const isPaid = (booking.status === 'paid' || booking.status === 'completed') && (booking.price > 0);
                                                                 const confirmMsg = isSelf 
                                                                     ? `Opravdu chcete zrušit Vaši rezervaci z ${formatLocalDate(booking.date)} v ${booking.time}?` 
-                                                                    : `Opravdu chcete zrušit rezervaci lektora (${resolvePractitionerDisplayName(booking, practitioners)}) z ${formatLocalDate(booking.date)} v ${booking.time}?`;
+                                                                    : isPaid
+                                                                        ? `Opravdu chcete zrušit rezervaci lektora (${practitionerName}) z ${formatLocalDate(booking.date)} v ${booking.time}?\n\nJde o zrušení ze strany studia (Eva): lektorovi bude vrácena celá částka 100 % (${booking.price} Kč) bez uplatnění storno poplatku.`
+                                                                        : `Opravdu chcete zrušit rezervaci lektora (${practitionerName}) z ${formatLocalDate(booking.date)} v ${booking.time}?`;
                                                                 if (!window.confirm(confirmMsg)) return;
+
                                                                 try {
+                                                                    if (booking.paymentId) {
+                                                                        const res = await fetch('/api/refund', {
+                                                                            method: 'POST',
+                                                                            headers: {
+                                                                                'Content-Type': 'application/json',
+                                                                                'Authorization': `Bearer ${token}`
+                                                                            },
+                                                                            body: JSON.stringify({
+                                                                                paymentId: booking.paymentId,
+                                                                                amount: booking.price * 100
+                                                                            })
+                                                                        });
+                                                                        const data = await res.json().catch(() => ({}));
+                                                                        if (!res.ok) throw new Error(data.error || 'Refundace platby selhala');
+                                                                        if (data.manualRefundRequired) {
+                                                                            addToast('info', 'Zrušeno – manuální refundace', `Plná částka ${booking.price} Kč byla zařazena k manuálnímu vyplacení z bankovního účtu.`);
+                                                                        } else {
+                                                                            addToast('success', 'Rezervace zrušena a refundována', `Lektorovi byla vrácena plná částka 100 % (${booking.price} Kč) bez storno poplatku.`);
+                                                                        }
+                                                                    } else {
+                                                                        addToast('success', 'Rezervace zrušena', 'Termín byl okamžitě uvolněn.');
+                                                                    }
                                                                     await onCancel(booking.id);
-                                                                    addToast('success', 'Rezervace zrušena', 'Termín byl okamžitě uvolněn.');
                                                                 } catch (err: any) {
                                                                     addToast('error', 'Chyba', err.message || 'Nepodařilo se zrušit rezervaci.');
                                                                 }

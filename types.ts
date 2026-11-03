@@ -63,7 +63,10 @@ export interface Booking {
   note?: string; 
   
   cancelledAt?: string; // ISO date string
-  cancellationReason?: string; // Proč byla rezervace zrušena (payment_expired, payment_cancelled, cancelled_by_guest, cancelled_by_admin, ...)
+  cancellationReason?: string; // Proč byla rezervace zrušena (payment_expired, payment_cancelled, cancelled_by_guest, cancelled_by_admin_full_refund, ...)
+  cancelledBy?: 'admin' | 'practitioner' | 'guest'; // Kdo storno provedl
+  cancelledByName?: string; // Jméno osoby, která storno provedla (např. 'Eva (Administrátor)')
+  adminCancellationOverride?: boolean; // True, pokud admin vrátil plnou částku (100 %) i v době platnosti storno poplatků
   refundAmount?: number; // Vrácená částka v Kč přes GoPay (např. 100 % nebo 50 %)
   cancellationFee?: number; // Storno poplatek v Kč (např. 0 %, 50 % nebo 100 %)
   

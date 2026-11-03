@@ -23,7 +23,8 @@ export function calculateCancellationPolicy(
   dateStr: string,
   timeStr: string,
   price: number,
-  now: Date = new Date()
+  now: Date = new Date(),
+  isAdminOverride: boolean = false
 ): CancellationPolicyResult {
   const [y, m, d] = (dateStr || '').split('-').map(Number);
   const [hh, mm] = (timeStr || '00:00').split(':').map(Number);
@@ -34,6 +35,23 @@ export function calculateCancellationPolicy(
   const daysDifference = hoursDifference / 24;
 
   const validPrice = Math.max(0, Number(price) || 0);
+
+  // Výjimka pro administrátora (Eva):
+  // Pokud rezervaci ruší administrátorka ze strany studia, lektorovi se VŽDY vrací 100 % zaplacené částky
+  // (storno poplatek 0 Kč), bez ohledu na to, jak blízko je termín do začátku (i kdyby to bylo 2 h předem).
+  if (isAdminOverride) {
+    return {
+      hoursDifference,
+      daysDifference,
+      tier: 'full_refund',
+      feePercentage: 0,
+      refundPercentage: 100,
+      feeAmount: 0,
+      refundAmount: validPrice,
+      label: 'Zrušeno administrátorkou Evou (100 % vrácení)',
+      description: 'Zrušení ze strany studia: lektorovi se vrací 100 % zaplacené částky (storno poplatek 0 Kč) bez ohledu na čas do začátku lekce.'
+    };
+  }
 
   // Kontrola data účinnosti (1. listopadu 2026):
   // Pravidla se spouští až 1. 11. 2026 (podle data storna, tedy 'now').

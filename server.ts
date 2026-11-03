@@ -1614,11 +1614,14 @@ async function startServer() {
       // • Více než 7 dní (> 168 h): vrácení 100 % částky (storno poplatek 0 %)
       // • 7 dní až 24 h (24 h – 168 h): vrácení 50 % částky (storno poplatek 50 %)
       // • Méně než 24 h (< 24 h): storno poplatek 100 % (žádná refundace, částka propadá)
+      // • VÝJIMKA PRO ADMINA (EVA): Pokud rezervaci ruší administrátorka ze strany studia,
+      //   lektorovi se VŽDY vrací 100 % částky bez storno poplatku (i kdyby to bylo 2 h předem).
       let policyMaxRefundHalere = paidAmount;
       let policyFeePercentage = 0;
       let policyRefundPercentage = 100;
+      const adminCancelling = isAdmin(req);
 
-      if (resDate && resTime && !isAdmin(req)) {
+      if (resDate && resTime && !adminCancelling) {
         const policy = calculateCancellationPolicy(resDate, resTime, paidAmount / 100);
         policyFeePercentage = policy.feePercentage;
         policyRefundPercentage = policy.refundPercentage;
@@ -1632,6 +1635,8 @@ async function startServer() {
               await updateDoc(b.ref, {
                 status: 'cancelled',
                 cancelledAt: new Date().toISOString(),
+                cancelledBy: 'practitioner',
+                cancelledByName: b.data.bookedByName || 'Lektor',
                 cancellationReason: 'cancelled_less_than_24h_full_fee',
                 refundAmount: 0,
                 cancellationFee: paidAmount / 100,
@@ -1694,23 +1699,32 @@ async function startServer() {
           const updateData: any = {
             status: 'cancelled',
             cancelledAt: new Date().toISOString(),
+            cancelledBy: adminCancelling ? 'admin' : 'practitioner',
+            cancelledByName: adminCancelling ? (req.user?.name || 'Eva (Administrátor)') : (b.data.bookedByName || 'Lektor'),
+            adminCancellationOverride: adminCancelling,
             refundAmount: returnedCzk,
             cancellationFee: feeCzk,
           };
 
           if (manualRefundFallback) {
-            updateData.cancellationReason = 'cancelled_manual_refund_required';
+            updateData.cancellationReason = adminCancelling ? 'cancelled_by_admin_manual_refund' : 'cancelled_manual_refund_required';
             updateData.manualRefundRequired = true;
             updateData.manualRefundSettled = false;
             updateData.gopayRefundError = gopayErrorDetail;
             updateData.note = (b.data.note ? b.data.note + '\n' : '') + 
-              `⚠️ GoPay automatická refundace selhala (kód 330 / chyba brány). Termín v sále byl uvolněn. Administrátor vrátí ${returnedCzk} Kč (${policyRefundPercentage} %) ručně z bankovního účtu. Storno poplatek: ${feeCzk} Kč (${policyFeePercentage} %).`;
+              (adminCancelling
+                ? `⚠️ Zrušeno administrátorkou Evou (ze strany studia). Automatická refundace přes GoPay selhala (kód 330 / zůstatek brány). Administrátor vrátí lektorovi celou částku ${returnedCzk} Kč (100 %) ručně z bankovního účtu (storno poplatek 0 Kč).`
+                : `⚠️ GoPay automatická refundace selhala (kód 330 / chyba brány). Termín v sále byl uvolněn. Administrátor vrátí ${returnedCzk} Kč (${policyRefundPercentage} %) ručně z bankovního účtu. Storno poplatek: ${feeCzk} Kč (${policyFeePercentage} %).`);
           } else {
             updateData.status = refundAmount === paidAmount ? 'refunded' : 'cancelled';
-            updateData.cancellationReason = refundAmount === paidAmount ? 'cancelled_with_full_refund' : 'cancelled_with_half_refund';
+            updateData.cancellationReason = adminCancelling 
+              ? 'cancelled_by_admin_full_refund' 
+              : (refundAmount === paidAmount ? 'cancelled_with_full_refund' : 'cancelled_with_half_refund');
             updateData.manualRefundRequired = false;
             updateData.note = (b.data.note ? b.data.note + '\n' : '') + 
-              `Storno: vráceno ${returnedCzk} Kč (${policyRefundPercentage} %), storno poplatek ${feeCzk} Kč (${policyFeePercentage} %).`;
+              (adminCancelling
+                ? `Rezervace zrušena administrátorkou Evou (ze strany studia). Lektorovi vrácena plná částka 100 % (${returnedCzk} Kč), storno poplatek 0 Kč.`
+                : `Storno: vráceno ${returnedCzk} Kč (${policyRefundPercentage} %), storno poplatek ${feeCzk} Kč (${policyFeePercentage} %).`);
           }
 
           await updateDoc(b.ref, updateData);
@@ -1724,7 +1738,9 @@ async function startServer() {
           refundAmount: returnedCzk, 
           cancellationFee: feeCzk, 
           feePercentage: policyFeePercentage,
-          message: `Rezervace byla úspěšně zrušena a termín v sále je volný. Automatické vrácení peněz na kartu přes GoPay se nezdařilo (chyba brány 330: nedostatek prostředků na platebním účtu GoPay po denním převodu do banky). Částka ${returnedCzk} Kč (${policyRefundPercentage} %) vám bude administrátorem vyplacena přímo na bankovní účet.`
+          message: adminCancelling
+            ? `Rezervace lektora byla zrušena administrátorkou Evou (ze strany studia) a termín je volný. Automatické vrácení peněz přes GoPay selhalo (chyba brány 330). Plná částka ${returnedCzk} Kč (100 %) byla zařazena k manuálnímu vyplacení z bankovního účtu.`
+            : `Rezervace byla úspěšně zrušena a termín v sále je volný. Automatické vrácení peněz na kartu přes GoPay se nezdařilo (chyba brány 330: nedostatek prostředků na platebním účtu GoPay po denním převodu do banky). Částka ${returnedCzk} Kč (${policyRefundPercentage} %) vám bude administrátorem vyplacena přímo na bankovní účet.`
         });
       }
 
@@ -1734,15 +1750,18 @@ async function startServer() {
         refundAmount: returnedCzk, 
         cancellationFee: feeCzk, 
         feePercentage: policyFeePercentage,
-        message: refundAmount === paidAmount 
-          ? "Rezervace byla zrušena a celá částka (100 %) byla refundována na kartu." 
-          : `Rezervace byla zrušena. V souladu se storno podmínkami bylo na kartu vráceno ${returnedCzk} Kč (50 %) a ${feeCzk} Kč činí storno poplatek.`
+        message: adminCancelling
+          ? `Rezervace byla zrušena administrátorkou Evou (ze strany studia). Lektorovi byla na kartu refundována plná částka 100 % (${returnedCzk} Kč), storno poplatek 0 Kč.`
+          : (refundAmount === paidAmount 
+            ? "Rezervace byla zrušena a celá částka (100 %) byla refundována na kartu." 
+            : `Rezervace byla zrušena. V souladu se storno podmínkami bylo na kartu vráceno ${returnedCzk} Kč (50 %) a ${feeCzk} Kč činí storno poplatek.`)
       });
     } catch (error: any) {
       console.error("GoPay Refund Error:", error.message);
       res.status(400).json({ error: error.message });
     }
   });
+
 
   // Capture endpoint pro GoPay - pokud by se používala preautorizace
   app.post("/api/capture-payment", requireAuth, async (req: AuthRequest, res: Response) => {

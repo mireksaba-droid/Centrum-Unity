@@ -119,6 +119,26 @@ runTest('Od 1. 11.: Rezervace s cenou 0 Kč (např. interní/admin) nevytváří
   assert.strictEqual(result.feeAmount, 0);
 });
 
+runTest('Admin výjimka: Eva zruší lekci lektora 2 hodiny předem -> lektorovi se VŽDY vrací 100 % (storno poplatek 0 Kč)', () => {
+  // Lekce je za 2 hodiny, cena 875 Kč, ruší administrátor (isAdminOverride = true)
+  const result = calculateCancellationPolicy('2026-11-05', '12:00', 875, baseDate, true);
+  assert.strictEqual(result.tier, 'full_refund');
+  assert.strictEqual(result.feePercentage, 0);
+  assert.strictEqual(result.refundPercentage, 100);
+  assert.strictEqual(result.refundAmount, 875);
+  assert.strictEqual(result.feeAmount, 0);
+  assert.ok(result.label.includes('100 % vrácení'));
+});
+
+runTest('Admin výjimka: Eva zruší lekci lektora 10 minut před začátkem -> lektorovi se vrací celá částka (storno poplatek 0 Kč)', () => {
+  const tenMinutesBefore = new Date('2026-11-05T09:50:00Z');
+  const result = calculateCancellationPolicy('2026-11-05', '10:00', 350, tenMinutesBefore, true);
+  assert.strictEqual(result.tier, 'full_refund');
+  assert.strictEqual(result.refundAmount, 350);
+  assert.strictEqual(result.feeAmount, 0);
+});
+
+
 // ==========================================
 // 2. TESTY PRAVIDLA 1× BEZPLATNÉHO PŘESUNU
 // ==========================================
@@ -323,6 +343,29 @@ runTest('Storno e-mail obsahuje vyčíslení storno poplatku a vrácené částk
   assert.ok(html.includes('175 Kč'), 'Musí obsahovat vyčíslenou částku 175 Kč.');
   assert.ok(html.includes('Storno poplatek'), 'Musí obsahovat řádek Storno poplatek.');
   assert.ok(html.includes('Vráceno na kartu'), 'Musí obsahovat řádek Vráceno na kartu.');
+});
+
+runTest('Storno e-mail při zrušení správcem (Eva) uvádí 100% refundaci a důvod administrátorského zrušení', () => {
+  const booking: Partial<Booking> = {
+    date: '2026-11-05',
+    time: '12:00',
+    room: 1,
+    durationMinutes: 60,
+    price: 350,
+    bookedByName: 'Filip',
+    cancellationFee: 0,
+    refundAmount: 350,
+    cancelledBy: 'admin',
+    cancelledByName: 'Eva (Administrátor)',
+    adminCancellationOverride: true
+  };
+
+  const reason = 'Rezervace byla zrušena administrátorkou (správce studia). Lektorovi se vrací 100 % zaplacené částky (350 Kč) zpět na platební kartu.';
+  const html = generateCancellationEmail(booking, reason);
+  assert.ok(html.includes('350 Kč'), 'Musí obsahovat celou částku 350 Kč.');
+  assert.ok(html.includes('Vráceno na kartu'), 'Musí obsahovat řádek Vráceno na kartu.');
+  assert.ok(!html.includes('Storno poplatek'), 'Nesmí obsahovat storno poplatek.');
+  assert.ok(html.includes('zrušena administrátorkou'), 'Musí obsahovat odůvodnění administrátorky.');
 });
 
 // ==========================================
