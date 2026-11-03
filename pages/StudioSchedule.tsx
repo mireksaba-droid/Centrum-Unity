@@ -1217,124 +1217,101 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                 const isAdmin = currentUser.role === Role.ADMIN || bookingToCancel.bookedByUserId === 'admin' || currentUser.id === 'admin';
                 const isOwner = bookingToCancel.bookedByUserId === currentUser.id;
                 const canReschedule = (isAdmin || isOwner) && (isAdmin || (bookingToCancel.rescheduleCount || 0) < 1) && !['cancelled', 'refunded'].includes(bookingToCancel.status);
+                const canShorten = isAdmin && bookingToCancel.durationMinutes > 30 && ['paid', 'awaiting_payment', 'deferred_payment'].includes(bookingToCancel.status);
+                const canExtend = bookingToCancel.status === 'paid';
                 const policy = calculateCancellationPolicy(bookingToCancel.date, bookingToCancel.time, bookingToCancel.price, new Date(), isAdmin);
                 const isTooLate = !isAdmin && policy.tier === 'full_fee';
 
                 return (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
-                    <div className="bg-white max-w-sm w-full rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
-                        <div className="p-6 text-center">
-                            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-600">
-                                <X className="w-6 h-6" />
-                            </div>
-                            <h3 className="text-xl font-bold font-heading mb-2">
-                                {isAdmin ? 'Správa rezervace (Admin)' : 'Zrušit rezervaci'}
-                            </h3>
-                            <div className="text-stone-600 mb-5 text-sm">
-                                <div className="font-semibold text-stone-800">
-                                    {formatLocalDate(bookingToCancel.date)} v {bookingToCancel.time} – Místnost {bookingToCancel.room === 1 ? '1 (Malá)' : '2 (Velká)'}
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+                    <div className="bg-white max-w-lg w-full rounded-2xl shadow-2xl border border-stone-200 overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95">
+                        
+                        {/* 1. Modal Header (Fixed) */}
+                        <div className="p-4 sm:p-5 border-b border-stone-100 flex items-center justify-between bg-stone-50/80 shrink-0">
+                            <div className="flex items-center gap-3">
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-xs shrink-0 ${
+                                    isAdmin ? 'bg-indigo-100 text-indigo-700' : 'bg-red-100 text-red-600'
+                                }`}>
+                                    {isAdmin ? <LayoutDashboard className="w-5 h-5" /> : <Clock className="w-5 h-5" />}
                                 </div>
-                                <div className="text-xs text-stone-500 mt-0.5">
-                                    Cena pronájmu: {bookingToCancel.price} Kč
+                                <div className="text-left">
+                                    <div className="flex items-center gap-2">
+                                        <h3 className="text-base font-bold text-stone-900 leading-tight">
+                                            {isAdmin ? 'Správa rezervace lektora' : 'Detail rezervace'}
+                                        </h3>
+                                        {isAdmin && (
+                                            <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full">
+                                                Eva (Správce)
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="text-xs text-stone-500 mt-0.5 font-medium truncate max-w-[240px] sm:max-w-none">
+                                        {bookingToCancel.bookedByName} · Místnost {bookingToCancel.room === 1 ? '1 (Malá)' : '2 (Velká)'}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setBookingToCancel(null)}
+                                disabled={isProcessing}
+                                className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-200/60 transition-colors"
+                                title="Zavřít okno"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {/* 2. Scrollable Modal Body */}
+                        <div className="p-4 sm:p-5 overflow-y-auto space-y-4 text-left text-sm text-stone-800">
+                            
+                            {/* Summary Card */}
+                            <div className="bg-stone-50 border border-stone-200 rounded-xl p-3.5 space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2 font-bold text-stone-900">
+                                        <Calendar className="w-4 h-4 text-stone-500 shrink-0" />
+                                        <span>{formatLocalDate(bookingToCancel.date)} v {bookingToCancel.time}</span>
+                                    </div>
+                                    <span className="text-xs font-bold text-stone-600 bg-white px-2 py-0.5 rounded border border-stone-200">
+                                        {bookingToCancel.durationMinutes} min
+                                    </span>
                                 </div>
 
-                                {bookingToCancel.paymentId && (
-                                    isAdmin ? (
-                                        <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-xl text-left text-xs space-y-1.5">
-                                            <div className="font-bold text-blue-900 flex items-center justify-between">
-                                                <span>Zrušení správcem (Eva):</span>
-                                                <span className="px-2 py-0.5 rounded text-[11px] font-extrabold bg-blue-100 text-blue-800">
-                                                    100 % vrácení lektorovi
-                                                </span>
+                                <div className="flex items-center justify-between text-xs text-stone-600 pt-1.5 border-t border-stone-200/60">
+                                    <span>Cena pronájmu: <strong className="text-stone-900 font-bold">{bookingToCancel.price} Kč</strong></span>
+                                    <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
+                                        bookingToCancel.status === 'paid' ? 'bg-emerald-100 text-emerald-800' :
+                                        bookingToCancel.status === 'awaiting_payment' ? 'bg-amber-100 text-amber-800' :
+                                        'bg-stone-200 text-stone-700'
+                                    }`}>
+                                        {bookingToCancel.status === 'paid' ? '✓ Zaplaceno' :
+                                         bookingToCancel.status === 'awaiting_payment' ? 'Čeká na platbu' :
+                                         bookingToCancel.status}
+                                    </span>
+                                </div>
+
+                                {(bookingToCancel.clientName || bookingToCancel.note) && (
+                                    <div className="pt-2 border-t border-stone-200/60 space-y-1 text-xs">
+                                        {bookingToCancel.clientName && (
+                                            <div className="flex items-center gap-1.5 text-stone-700">
+                                                <User className="w-3.5 h-3.5 text-stone-400 shrink-0" />
+                                                <span>Klient: <strong>{bookingToCancel.clientName}</strong></span>
                                             </div>
-                                            <div className="text-blue-700 leading-relaxed">
-                                                Zrušení ze strany studia: lektorovi bude vráceno celých <strong>{bookingToCancel.price} Kč (100 %)</strong> zpět na platební kartu (storno poplatek 0 Kč), a to i méně než 24 h předem. Zásah bude řádně zaznamenán v auditu.
+                                        )}
+                                        {bookingToCancel.note && (
+                                            <div className="flex items-start gap-1.5 text-stone-500 italic">
+                                                <Info className="w-3.5 h-3.5 text-stone-400 shrink-0 mt-0.5" />
+                                                <span>„{bookingToCancel.note}“</span>
                                             </div>
-                                        </div>
-                                    ) : (
-                                        <div className="mt-3 p-3 bg-stone-50 border border-stone-200 rounded-xl text-left text-xs space-y-1.5">
-                                            <div className="font-bold text-stone-800 flex items-center justify-between">
-                                                <span>Storno podmínky:</span>
-                                                <span className={`px-2 py-0.5 rounded text-[11px] font-extrabold ${
-                                                    policy.tier === 'full_refund' ? 'bg-green-100 text-green-800' :
-                                                    policy.tier === 'half_fee' ? 'bg-amber-100 text-amber-900' :
-                                                    'bg-red-100 text-red-800'
-                                                }`}>
-                                                    {policy.tier === 'full_refund' ? '100 % vrácení' : policy.tier === 'half_fee' ? '50 % storno poplatek' : '100 % storno poplatek'}
-                                                </span>
-                                            </div>
-                                            <div className="text-stone-600 leading-relaxed">
-                                                {policy.tier === 'full_refund' && `Více než 7 dní předem: Na platební kartu bude vráceno celých ${policy.refundAmount} Kč (storno poplatek 0 Kč).`}
-                                                {policy.tier === 'half_fee' && `24 h až 7 dní předem: Storno poplatek činí 50 % (${policy.feeAmount} Kč). Na kartu bude vráceno ${policy.refundAmount} Kč.`}
-                                                {policy.tier === 'full_fee' && `Méně než 24 h předem: 100 % storno poplatek (${policy.feeAmount} Kč). Termín je příliš blízko, zaplacená částka propadá.`}
-                                            </div>
-                                        </div>
-                                    )
+                                        )}
+                                    </div>
                                 )}
                             </div>
 
-
-                            {/* TIP: 1x Bezplatný přesun termínu místo storna s poplatkem */}
-                            {canReschedule && policy.tier !== 'full_refund' && (
-                                <div className="mb-4 p-3.5 bg-gradient-to-br from-amber-50 to-amber-100/70 border border-amber-300 rounded-xl text-left shadow-xs">
-                                    <div className="flex items-center gap-1.5 font-bold text-xs text-amber-950 mb-1">
-                                        <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
-                                        <span>Tip: Nemusíte platit storno! Využijte 1× bezplatný přesun</span>
-                                    </div>
-                                    <p className="text-[11px] text-amber-900 leading-relaxed mb-2.5">
-                                        Při stornu méně než 7 dní předem propadá {policy.feePercentage} % ceny ({policy.feeAmount} Kč). Máte však nárok na <strong>1× bezplatný přesun termínu</strong> na jakýkoliv jiný volný den bez ztráty peněz!
-                                    </p>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            const target = bookingToCancel;
-                                            setBookingToCancel(null);
-                                            setReschedulingBooking(target);
-                                        }}
-                                        className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-xs"
-                                    >
-                                        <RefreshCw className="w-3.5 h-3.5" />
-                                        Přeobjednat termín zdarma (ušetříte {policy.feeAmount} Kč)
-                                    </button>
-                                </div>
-                            )}
-
-                            {/* Poznámka / klient u rezervace */}
-                            {(bookingToCancel.clientName || bookingToCancel.note) && (
-                                <div className="mb-4 text-left bg-stone-50 border border-stone-200 rounded-lg p-3 text-sm">
-                                    {bookingToCancel.clientName && (
-                                        <div className="flex items-center gap-2 text-stone-800 font-semibold">
-                                            <User className="w-4 h-4 text-stone-400 shrink-0" /> {bookingToCancel.clientName}
-                                        </div>
-                                    )}
-                                    {bookingToCancel.note && (
-                                        <div className="flex items-start gap-2 text-stone-600 italic mt-1">
-                                            <Info className="w-4 h-4 text-stone-400 mt-0.5 shrink-0" /> "{bookingToCancel.note}"
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {/* Host musí ověřit vlastnictví zadáním e-mailu z rezervace */}
-                            {isGuest && bookingToCancel.bookedByUserId === 'guest' && (
-                                <div className="mb-4 text-left">
-                                    <label className="block text-xs font-bold text-stone-600 mb-1">Pro zrušení zadejte e-mail z rezervace</label>
-                                    <input
-                                        type="email"
-                                        value={guestCancelEmail}
-                                        onChange={e => setGuestCancelEmail(e.target.value)}
-                                        className="w-full p-2 border border-stone-300 rounded-lg text-sm"
-                                        placeholder="vas@email.cz"
-                                    />
-                                    <p className="text-[10px] text-stone-500 mt-1">Ověříme, že rušíte skutečně svoji rezervaci.</p>
-                                </div>
-                            )}
-
                             {/* Změna vybavení (Lehátko / Futon / Bez) */}
                             {(isAdmin || bookingToCancel.bookedByUserId === currentUser.id) && !['cancelled', 'refunded'].includes(bookingToCancel.status) && (
-                                <div className="mb-4 text-left bg-stone-50 border border-stone-200 rounded-xl p-3">
+                                <div className="bg-white border border-stone-200 rounded-xl p-3">
                                     <div className="flex items-center justify-between mb-2">
-                                        <span className="text-xs font-bold text-stone-700 uppercase">Vybavení sálu</span>
+                                        <span className="text-xs font-bold text-stone-700 uppercase tracking-wider">Vybavení sálu</span>
                                         <span className="text-[11px] font-semibold text-stone-500">
                                             {(bookingToCancel.equipment || 'table') === 'futon' ? 'Aktuálně: Futon' : (bookingToCancel.equipment || 'table') === 'table' ? 'Aktuálně: Lehátko' : 'Aktuálně: Bez'}
                                         </span>
@@ -1383,90 +1360,200 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                 </div>
                             )}
 
-                            {/* Prodloužit rezervaci */}
-                            {bookingToCancel.status === 'paid' && (
-                                <div className="mb-3">
-                                    <Button
-                                        variant="outline"
-                                        className="w-full border-emerald-300 text-emerald-800 hover:bg-emerald-50 hover:border-emerald-400 flex items-center justify-center gap-2 py-2.5 font-bold"
-                                        onClick={() => {
-                                            const target = bookingToCancel;
-                                            setBookingToCancel(null);
-                                            setBookingToExtend(target);
-                                        }}
-                                        id="schedule-extend-booking-btn"
-                                    >
-                                        <Clock className="w-4 h-4 text-emerald-600" /> Prodloužit rezervaci (+30 / +60 min)
-                                    </Button>
+                            {/* Možnosti úpravy termínu a délky (Grid akcí) */}
+                            {(canReschedule || canShorten || canExtend) && (
+                                <div className="space-y-2">
+                                    <div className="text-xs font-bold text-stone-600 uppercase tracking-wider">
+                                        {isAdmin ? 'Možnosti úpravy lekce:' : 'Správa termínu:'}
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {/* Přesunout termín */}
+                                        {canReschedule && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const target = bookingToCancel;
+                                                    setBookingToCancel(null);
+                                                    setReschedulingBooking(target);
+                                                }}
+                                                className="p-3 rounded-xl border border-indigo-200 bg-indigo-50/50 hover:bg-indigo-100/70 text-indigo-950 text-left transition-all flex items-center gap-2.5 shadow-xs"
+                                            >
+                                                <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                                                    <RefreshCw className="w-4 h-4" />
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs font-bold">Přesunout termín</div>
+                                                    <div className="text-[10px] text-indigo-700">{isAdmin ? 'Datum, čas nebo sál' : '1× bezplatný přesun'}</div>
+                                                </div>
+                                            </button>
+                                        )}
+
+                                        {/* Zkrátit lekci (Eva / Admin) */}
+                                        {canShorten && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const target = bookingToCancel;
+                                                    setBookingToCancel(null);
+                                                    setBookingToShorten(target);
+                                                }}
+                                                className="p-3 rounded-xl border border-amber-300 bg-amber-50/60 hover:bg-amber-100 text-amber-950 text-left transition-all flex items-center gap-2.5 shadow-xs"
+                                                id="schedule-shorten-booking-btn"
+                                            >
+                                                <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+                                                    <Scissors className="w-4 h-4" />
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs font-bold">Zkrátit lekci</div>
+                                                    <div className="text-[10px] text-amber-800">Uvolnit čas a vrátit rozdíl</div>
+                                                </div>
+                                            </button>
+                                        )}
+
+                                        {/* Prodloužit rezervaci */}
+                                        {canExtend && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const target = bookingToCancel;
+                                                    setBookingToCancel(null);
+                                                    setBookingToExtend(target);
+                                                }}
+                                                className={`p-3 rounded-xl border border-emerald-300 bg-emerald-50/60 hover:bg-emerald-100 text-emerald-950 text-left transition-all flex items-center gap-2.5 shadow-xs ${
+                                                    canReschedule && canShorten ? 'sm:col-span-2' : ''
+                                                }`}
+                                                id="schedule-extend-booking-btn"
+                                            >
+                                                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                                                    <Clock className="w-4 h-4" />
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs font-bold">Prodloužit rezervaci (+30 / +60 min)</div>
+                                                    <div className="text-[10px] text-emerald-700">Přidat čas na navazující lekci</div>
+                                                </div>
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                             )}
 
-                            {/* Zkrátit rezervaci (Eva / správce studia, u lekcí delších než 30 min) */}
-                            {isAdmin && bookingToCancel.durationMinutes > 30 && ['paid', 'awaiting_payment', 'deferred_payment'].includes(bookingToCancel.status) && (
-                                <div className="mb-3">
-                                    <Button
-                                        variant="outline"
-                                        className="w-full border-amber-300 text-amber-900 bg-amber-50/50 hover:bg-amber-100/70 hover:border-amber-400 flex items-center justify-center gap-2 py-2.5 font-bold shadow-xs"
-                                        onClick={() => {
-                                            const target = bookingToCancel;
-                                            setBookingToCancel(null);
-                                            setBookingToShorten(target);
-                                        }}
-                                        id="schedule-shorten-booking-btn"
-                                    >
-                                        <Scissors className="w-4 h-4 text-amber-700" /> Zkrátit lekci a vrátit rozdíl ceny
-                                    </Button>
-                                </div>
-                            )}
+                            {/* Informace o stornu a refundaci */}
+                            {bookingToCancel.paymentId ? (
+                                isAdmin ? (
+                                    <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-xl text-xs space-y-1">
+                                        <div className="font-bold text-blue-900 flex items-center justify-between">
+                                            <span>🛡️ Zrušení správcem (Eva):</span>
+                                            <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-blue-100 text-blue-800">
+                                                100 % vrácení lektorovi
+                                            </span>
+                                        </div>
+                                        <p className="text-blue-800 text-[11px] leading-relaxed">
+                                            Jde o zrušení ze strany studia: lektorovi bude vráceno celých <strong>{bookingToCancel.price} Kč (100 %)</strong> zpět na platební kartu (storno poplatek 0 Kč), i kdyby do začátku zbývaly jen 2 hodiny.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl text-xs space-y-1">
+                                        <div className="font-bold text-stone-800 flex items-center justify-between">
+                                            <span>Storno podmínky:</span>
+                                            <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold ${
+                                                policy.tier === 'full_refund' ? 'bg-green-100 text-green-800' :
+                                                policy.tier === 'half_fee' ? 'bg-amber-100 text-amber-900' :
+                                                'bg-red-100 text-red-800'
+                                            }`}>
+                                                {policy.tier === 'full_refund' ? '100 % vrácení' : policy.tier === 'half_fee' ? '50 % storno poplatek' : '100 % storno poplatek'}
+                                            </span>
+                                        </div>
+                                        <div className="text-stone-600 text-[11px] leading-relaxed">
+                                            {policy.tier === 'full_refund' && `Více než 7 dní předem: Na platební kartu bude vráceno celých ${policy.refundAmount} Kč (storno poplatek 0 Kč).`}
+                                            {policy.tier === 'half_fee' && `24 h až 7 dní předem: Storno poplatek činí 50 % (${policy.feeAmount} Kč). Na kartu bude vráceno ${policy.refundAmount} Kč.`}
+                                            {policy.tier === 'full_fee' && `Méně než 24 h předem: 100 % storno poplatek (${policy.feeAmount} Kč). Termín je příliš blízko, zaplacená částka propadá.`}
+                                        </div>
+                                    </div>
+                                )
+                            ) : null}
 
-                            {/* Reschedule Option for Admin & Practitioner (1x free guarantee) */}
-                            {canReschedule && (
-                                <div className="mb-4">
-                                    <Button
-                                        variant="outline"
-                                        className="w-full border-indigo-200 text-indigo-700 hover:bg-indigo-50 flex items-center justify-center gap-2 py-2.5 font-bold"
+                            {/* TIP pro lektora: 1x Bezplatný přesun termínu místo storna s poplatkem */}
+                            {!isAdmin && canReschedule && policy.tier !== 'full_refund' && (
+                                <div className="p-3 bg-gradient-to-br from-amber-50 to-amber-100/70 border border-amber-300 rounded-xl text-left shadow-xs">
+                                    <div className="flex items-center gap-1.5 font-bold text-xs text-amber-950 mb-1">
+                                        <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                        <span>Tip: Nemusíte platit storno! Využijte 1× bezplatný přesun</span>
+                                    </div>
+                                    <p className="text-[11px] text-amber-900 leading-relaxed mb-2">
+                                        Při stornu propadá {policy.feePercentage} % ceny ({policy.feeAmount} Kč). Máte nárok na <strong>1× bezplatný přesun termínu</strong> na jiný volný den bez ztráty peněz!
+                                    </p>
+                                    <button
+                                        type="button"
                                         onClick={() => {
                                             const target = bookingToCancel;
                                             setBookingToCancel(null);
                                             setReschedulingBooking(target);
                                         }}
+                                        className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-xs"
                                     >
-                                        <RefreshCw className="w-4 h-4" /> 
-                                        {isAdmin ? 'Přesunout termín / místnost' : 'Bezplatně přesunout termín (1× garance)'}
-                                    </Button>
+                                        <RefreshCw className="w-3.5 h-3.5" />
+                                        Přeobjednat termín zdarma (ušetříte {policy.feeAmount} Kč)
+                                    </button>
                                 </div>
                             )}
 
-                            <div className="flex gap-2">
+                            {/* Host musí ověřit vlastnictví zadáním e-mailu z rezervace */}
+                            {isGuest && bookingToCancel.bookedByUserId === 'guest' && (
+                                <div className="space-y-1">
+                                    <label className="block text-xs font-bold text-stone-600">Pro zrušení zadejte e-mail z rezervace</label>
+                                    <input
+                                        type="email"
+                                        value={guestCancelEmail}
+                                        onChange={e => setGuestCancelEmail(e.target.value)}
+                                        className="w-full p-2 border border-stone-300 rounded-lg text-sm"
+                                        placeholder="vas@email.cz"
+                                    />
+                                    <p className="text-[10px] text-stone-500">Ověříme, že rušíte skutečně svoji rezervaci.</p>
+                                </div>
+                            )}
+
+                        </div>
+
+                        {/* 3. Modal Footer (Fixed at bottom - always visible) */}
+                        <div className="p-4 bg-stone-50 border-t border-stone-200 shrink-0 space-y-2">
+                            <div className="flex items-center gap-2.5">
                                 <Button 
                                     variant="outline" 
-                                    className="flex-1" 
+                                    className="flex-1 text-stone-600 hover:bg-stone-100" 
                                     onClick={() => setBookingToCancel(null)}
                                     disabled={isProcessing}
                                 >
-                                    Zpět
+                                    Zavřít
                                 </Button>
                                 <Button
-                                    className={`flex-1 text-white ${isTooLate ? 'bg-stone-300 hover:bg-stone-300 cursor-not-allowed opacity-50' : 'bg-red-600 hover:bg-red-700'}`}
+                                    className={`flex-1 text-white font-bold shadow-xs ${
+                                        isTooLate ? 'bg-stone-300 hover:bg-stone-300 cursor-not-allowed opacity-50' : 'bg-red-600 hover:bg-red-700'
+                                    }`}
                                     onClick={handleConfirmCancel}
                                     disabled={isProcessing || isTooLate}
                                 >
-                                    {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : (isAdmin && bookingToCancel.paymentId ? 'Zrušit a vrátit 100 %' : 'Zrušit termín')}
+                                    {isProcessing ? (
+                                        <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                                    ) : (
+                                        isAdmin && bookingToCancel.paymentId ? 'Zrušit a vrátit 100 %' : 'Zrušit termín'
+                                    )}
                                 </Button>
                             </div>
 
                             {currentUser.role === Role.ADMIN && (
-                                <div className="mt-3 pt-3 border-t border-stone-200">
+                                <div className="text-center pt-1">
                                     <button
+                                        type="button"
                                         onClick={handleForceCancelNoRefund}
                                         disabled={isProcessing}
-                                        className="w-full text-xs text-stone-500 hover:text-red-600 font-medium underline disabled:opacity-50"
+                                        className="text-[11px] text-stone-400 hover:text-red-600 font-medium underline transition-colors disabled:opacity-50"
                                     >
                                         Uvolnit termín bez refundace (peníze už vráceny přímo v GoPay)
                                     </button>
                                 </div>
                             )}
                         </div>
+
                     </div>
                 </div>
                 );
