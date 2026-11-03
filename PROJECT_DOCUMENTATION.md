@@ -96,6 +96,11 @@ Uživatel vybere profil a zadá PIN. Po ověření (dnes na klientovi) zavolá `
    - Po vyčerpání 1 samoobslužného přesunu se tlačítko v `PractitionerDashboard` uzamkne (`Přesunuto (1/1)`).
    - Administrátor (Eva) má neomezené právo přesouvat rezervace kdykoliv bez uzamčení.
    - Při přesunu se vždy striktně ověřuje dostupnost nového slotu včetně povinných hygienických pauz na úklid (30 min stejný lektor / 60 min střídání).
+10. **Zkracování rezervací správcem (Eva) a vrácení rozdílu ceny:**
+    - Administrátorka Eva může v rozvrhu (`StudioSchedule.tsx`) i v tabulce rezervací (`AdminDashboard.tsx`) zkrátit rezervaci lektora (minimální délka 30 min, po půlhodinách).
+    - **Vrácení ceny lektorovi:** Systém automaticky spočítá rozdíl ceny pronájmu (`refundAmount = oldPrice - newPrice`) a vrátí jej lektorovi na platební kartu přes platební bránu GoPay s nulovým storno poplatkem.
+    - **Auditní záznam:** Zkrácení eviduje pole `shortenedAt`, `shortenedBy: 'admin'`, `shortenedByName: 'Eva (Administrátor)'`, `originalDurationMinutes`, `originalPrice`, `shortenRefundAmount` a `shortenReason`.
+    - **Notifikace:** Lektorovi je odeslán e-mail `generateShortenEmail` s informací o zkrácení o X minut a částce vrácené na kartu. Uvolněný čas je ihned k dispozici pro ostatní rezervace.
 
 ### C. Skupinové události (veřejné)
 Admin vytvoří `GroupEvent` pro Velkou místnost s kapacitou a cenou. Vygeneruje se veřejná URL `/event/:eventId`. Klient se registruje; Firestore **transakce** hlídá, že se nepřekročí kapacita.

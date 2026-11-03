@@ -3,7 +3,7 @@ import { Booking, BookingStatus, Practitioner, GroupEvent, Role } from '../types
 import { GENERATED_TIMES, BUFFER_SAME_USER, BUFFER_DIFF_USER, RENTAL_PRICING } from '../constants';
 import Button from '../components/Button';
 import { MiniCalendar } from '../components/MiniCalendar';
-import { Calendar, ChevronLeft, ChevronRight, Clock, User, Check, AlertCircle, AlertTriangle, Info, Lock, Zap, LogOut, Loader2, Bed, Layers, Sparkles, History, Monitor, Smartphone, Mail, Phone, X, LayoutDashboard, RefreshCw } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, Clock, User, Check, AlertCircle, AlertTriangle, Info, Lock, Zap, LogOut, Loader2, Bed, Layers, Sparkles, History, Monitor, Smartphone, Mail, Phone, X, LayoutDashboard, RefreshCw, Scissors } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
 import { useStore } from '../store/useStore';
@@ -14,6 +14,7 @@ import { capitalizeName } from '../utils/vocative';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 import RescheduleModal from '../components/RescheduleModal';
 import ExtendBookingModal from '../components/ExtendBookingModal';
+import ShortenBookingModal from '../components/ShortenBookingModal';
 
 declare global {
   interface Window {
@@ -173,6 +174,8 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
 
     // Prodloužení rezervace
     const [bookingToExtend, setBookingToExtend] = useState<Booking | null>(null);
+    // Zkrácení rezervace (Eva / Admin)
+    const [bookingToShorten, setBookingToShorten] = useState<Booking | null>(null);
 
     // Reset fields when modal opens/closes
     useEffect(() => {
@@ -1398,6 +1401,24 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                 </div>
                             )}
 
+                            {/* Zkrátit rezervaci (Eva / správce studia, u lekcí delších než 30 min) */}
+                            {isAdmin && bookingToCancel.durationMinutes > 30 && ['paid', 'awaiting_payment', 'deferred_payment'].includes(bookingToCancel.status) && (
+                                <div className="mb-3">
+                                    <Button
+                                        variant="outline"
+                                        className="w-full border-amber-300 text-amber-900 bg-amber-50/50 hover:bg-amber-100/70 hover:border-amber-400 flex items-center justify-center gap-2 py-2.5 font-bold shadow-xs"
+                                        onClick={() => {
+                                            const target = bookingToCancel;
+                                            setBookingToCancel(null);
+                                            setBookingToShorten(target);
+                                        }}
+                                        id="schedule-shorten-booking-btn"
+                                    >
+                                        <Scissors className="w-4 h-4 text-amber-700" /> Zkrátit lekci a vrátit rozdíl ceny
+                                    </Button>
+                                </div>
+                            )}
+
                             {/* Reschedule Option for Admin & Practitioner (1x free guarantee) */}
                             {canReschedule && (
                                 <div className="mb-4">
@@ -1481,6 +1502,22 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                     onSuccess={(newDur, newPrice) => {
                         addToast('success', 'Rezervace prodloužena', `Rezervace byla úspěšně prodloužena na ${newDur} minut.`);
                         setBookingToExtend(null);
+                    }}
+                />
+            )}
+
+            {/* Shorten Booking Modal (Eva / Admin) */}
+            {bookingToShorten && (
+                <ShortenBookingModal
+                    booking={bookingToShorten}
+                    onClose={() => setBookingToShorten(null)}
+                    onSuccess={(newDur, refundAmt) => {
+                        if (refundAmt > 0) {
+                            addToast('success', 'Rezervace zkrácena', `Rezervace byla úspěšně zkrácena na ${newDur} minut a částka ${refundAmt} Kč byla vrácena na platební kartu.`);
+                        } else {
+                            addToast('success', 'Rezervace zkrácena', `Rezervace byla úspěšně zkrácena na ${newDur} minut.`);
+                        }
+                        setBookingToShorten(null);
                     }}
                 />
             )}

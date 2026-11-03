@@ -225,6 +225,61 @@ export const generateCancellationEmail = (
     `;
 };
 
+// Potvrzení o zkrácení rezervace administrátorkou a vrácení rozdílu ceny na kartu
+export const generateShortenEmail = (
+    booking: Partial<Booking>,
+    oldDuration: number,
+    newDuration: number,
+    refundAmount: number,
+    reason: string = 'Zkrácení rezervace administrátorkou studia'
+) => {
+    const dateParts = booking.date?.split('-') || [];
+    const formattedDate = dateParts.length === 3 ? `${dateParts[2]}. ${dateParts[1]}. ${dateParts[0]}` : booking.date;
+    const roomLabel = booking.room === 1 ? 'M1 – Malá místnost' : 'M2 – Velká místnost';
+    const greetName = booking.bookedByName || '';
+    const shortenedMinutes = oldDuration - newDuration;
+    const newPrice = typeof booking.price === 'number' ? booking.price : (booking.price || 0);
+    const oldPrice = newPrice + refundAmount;
+
+    return `
+    <div style="background-color:#f1e9dc;padding:32px 16px;font-family:Helvetica,Arial,sans-serif;">
+      <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06);">
+        ${emailHeader()}
+        <div style="padding:32px;">
+          <div style="display:inline-block;background:#fef3c7;color:#92400e;font-size:13px;font-weight:700;padding:6px 14px;border-radius:999px;margin-bottom:16px;">Rezervace upravena</div>
+
+          <h1 style="margin:0 0 8px;font-size:22px;color:#1c1917;">Vaše rezervace byla zkrácena</h1>
+          <p style="margin:0 0 20px;color:#57534e;font-size:15px;line-height:1.6;">
+            ${greetName ? `Dobrý den, ${toVocative(greetName)},` : 'Dobrý den,'}<br/>
+            Vaše rezervace v Centru Unity byla administrátorkou (Evou) zkrácena o <strong>${shortenedMinutes} minut</strong>. Částka za uvolněný čas${refundAmount > 0 ? ` (<strong>${refundAmount} Kč</strong>) byla odeslána zpět na Vaši platební kartu` : ''}.
+          </p>
+
+          <div style="background:#faf7f2;border:1px solid #ece3d6;border-radius:12px;padding:20px 24px;margin-bottom:24px;">
+            <table style="width:100%;border-collapse:collapse;">
+              <tr><td style="padding:8px 0;color:#78716c;font-size:14px;">Termín</td><td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;">${formattedDate} v ${booking.time}</td></tr>
+              <tr><td style="padding:8px 0;color:#78716c;font-size:14px;">Místnost</td><td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;">${roomLabel}</td></tr>
+              <tr><td style="padding:8px 0;color:#78716c;font-size:14px;">Původní délka</td><td style="padding:8px 0;color:#1c1917;font-size:14px;font-weight:600;text-align:right;">${oldDuration} min (${oldPrice} Kč)</td></tr>
+              <tr><td style="padding:8px 0;color:#78716c;font-size:14px;">Nová délka</td><td style="padding:8px 0;color:#166534;font-size:14px;font-weight:700;text-align:right;">${newDuration} min (${newPrice} Kč)</td></tr>
+              ${refundAmount > 0 ? `<tr><td style="padding:8px 0;color:#78716c;font-size:14px;">Vráceno na kartu</td><td style="padding:8px 0;color:#15803d;font-size:14px;font-weight:700;text-align:right;">${refundAmount} Kč</td></tr>` : ''}
+              <tr><td style="padding:8px 0;color:#78716c;font-size:14px;">Storno poplatek</td><td style="padding:8px 0;color:#166534;font-size:14px;font-weight:600;text-align:right;">0 Kč (zrušení/úprava správcem)</td></tr>
+            </table>
+          </div>
+
+          <div style="background:#fefce8;border:1px solid #fef08a;border-radius:12px;padding:14px 18px;margin-bottom:24px;">
+            <div style="color:#854d0e;font-size:13px;font-weight:700;margin-bottom:4px;">Důvod úpravy</div>
+            <div style="color:#713f12;font-size:14px;line-height:1.6;">${reason}</div>
+          </div>
+
+          <p style="margin:0 0 20px;color:#57534e;font-size:15px;line-height:1.6;">
+            Zbývající čas v místnosti je pro Vás plně rezervován a garantován.
+          </p>
+        </div>
+        ${emailFooter()}
+      </div>
+    </div>
+    `;
+};
+
 // Denní souhrn pro admina: nové a zrušené rezervace za dané období
 export const generateAdminDailySummaryEmail = (
     newBookings: Partial<Booking>[],

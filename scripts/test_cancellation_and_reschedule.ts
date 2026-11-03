@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { calculateCancellationPolicy } from '../utils/cancellationPolicy';
-import { checkBookingCollision } from '../utils/scheduler';
-import { generateConfirmationEmail, generateCancellationEmail } from '../utils/emailTemplates';
+import { checkBookingCollision, calculateRentalPrice } from '../utils/scheduler';
+import { generateConfirmationEmail, generateCancellationEmail, generateShortenEmail } from '../utils/emailTemplates';
 import { Booking } from '../types';
 
 console.log('🧪 SPUŠTĚNÍ AUTOMATICKÝCH TESTŮ STORNO PODMÍNEK A 1× PŘESUNU...\n');
@@ -366,6 +366,59 @@ runTest('Storno e-mail při zrušení správcem (Eva) uvádí 100% refundaci a d
   assert.ok(html.includes('Vráceno na kartu'), 'Musí obsahovat řádek Vráceno na kartu.');
   assert.ok(!html.includes('Storno poplatek'), 'Nesmí obsahovat storno poplatek.');
   assert.ok(html.includes('zrušena administrátorkou'), 'Musí obsahovat odůvodnění administrátorky.');
+});
+
+// ==========================================
+// 5. TESTY ZKRÁCENÍ REZERVACE ADMINISTRÁTORKOU (EVA)
+// ==========================================
+console.log('\n--- 5. Testy zkrácení rezervace administrátorkou a vrácení rozdílu ceny ---');
+
+runTest('Zkrácení lekce ze 120 min na 60 min v M1: lektorovi se vrací přesně 350 Kč (700 -> 350 Kč)', () => {
+  const oldPrice = calculateRentalPrice('filip', 120, 1);
+  const newPrice = calculateRentalPrice('filip', 60, 1);
+  const refundAmount = oldPrice - newPrice;
+
+  assert.strictEqual(oldPrice, 700);
+  assert.strictEqual(newPrice, 350);
+  assert.strictEqual(refundAmount, 350, 'Rozdíl ceny 350 Kč musí být refundován lektorovi.');
+});
+
+runTest('Zkrácení lekce z 90 min na 60 min v M1: lektorovi se vrací 175 Kč (525 -> 350 Kč)', () => {
+  const oldPrice = calculateRentalPrice('filip', 90, 1);
+  const newPrice = calculateRentalPrice('filip', 60, 1);
+  const refundAmount = oldPrice - newPrice;
+
+  assert.strictEqual(oldPrice, 525);
+  assert.strictEqual(newPrice, 350);
+  assert.strictEqual(refundAmount, 175, 'Rozdíl ceny 175 Kč musí být refundován lektorovi.');
+});
+
+runTest('Zkrácení lekce s nulovou cenou (např. admin Eva): refundace je 0 Kč', () => {
+  const oldPrice = calculateRentalPrice('admin', 120, 1);
+  const newPrice = calculateRentalPrice('admin', 60, 1);
+  const refundAmount = Math.max(0, oldPrice - newPrice);
+
+  assert.strictEqual(oldPrice, 0);
+  assert.strictEqual(newPrice, 0);
+  assert.strictEqual(refundAmount, 0, 'U bezplatné rezervace je refundace 0 Kč.');
+});
+
+runTest('Šablona e-mailu pro zkrácení rezervace obsahuje vrácenou částku a uvolněný čas', () => {
+  const booking: Partial<Booking> = {
+    date: '2026-11-10',
+    time: '14:00',
+    room: 1,
+    durationMinutes: 60,
+    price: 350,
+    bookedByName: 'Jana P.'
+  };
+
+  const html = generateShortenEmail(booking, 120, 60, 350, 'Úprava rozvrhu studia.');
+  assert.ok(html.includes('zkrácena o <strong>60 minut</strong>'), 'Musí obsahovat zkrácený počet minut.');
+  assert.ok(html.includes('350 Kč'), 'Musí obsahovat vrácenou částku 350 Kč.');
+  assert.ok(html.includes('Vráceno na kartu'), 'Musí obsahovat řádek Vráceno na kartu.');
+  assert.ok(html.includes('0 Kč (zrušení/úprava správcem)'), 'Storno poplatek musí být 0 Kč.');
+  assert.ok(html.includes('Úprava rozvrhu studia.'), 'Musí obsahovat uvedený důvod.');
 });
 
 // ==========================================

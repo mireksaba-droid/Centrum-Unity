@@ -62,7 +62,13 @@
     - **Audit a monitoring přesunů v reálném čase:**
       - V `AdminDashboard.tsx` je dedikovaná záložka „Audit přesunů“ s přehledem KPI, časovým předstihem a automatickou detekcí podezřelých storen (`🚨 ZRUŠENO PO PŘESUNU`). Zrušení správcem jsou označena zeleným odznakem `🛡️ ZRUŠENO SPRÁVCEM (100 %)` a nepovažují se za podezřelá.
     - **Automatické testy:**
-      - Běh testovací sady: `npm test` (`scripts/test_cancellation_and_reschedule.ts` – 21 testů pokrývajících storno pásma, spuštění od 1. 11., admin výjimky pro 100% refund, přesuny, kolize a e-maily).
+      - Běh testovací sady: `npm test` (`scripts/test_cancellation_and_reschedule.ts` – 25 testů pokrývajících storno pásma, spuštění od 1. 11., admin výjimky pro 100% refund, přesuny, zkrácení termínů s refundací rozdílu, kolize a e-maily).
+
+11. **Zkracování rezervací správcem (Eva) a vrácení rozdílu ceny:**
+    - Administrátorka Eva má v kalendáři (`StudioSchedule.tsx`) i v tabulce rezervací (`AdminDashboard.tsx`) možnost zkrátit lekci lektora (minimální délka 30 min, po 30 min krocích).
+    - **Vrácení rozdílu ceny:** Systém přepočítá cenu pronájmu dle sazebníku (`calculateRentalPrice`) a rozdíl (`refundAmount = oldPrice - newPrice`) automaticky vrátí lektorovi na platební kartu přes platební bránu GoPay (částečná refundace).
+    - **Plná auditní stopa:** Na rezervaci se zaznamená `shortenedAt`, `shortenedBy: 'admin'`, `shortenedByName: 'Eva (Administrátor)'`, `originalDurationMinutes`, `originalPrice`, `shortenRefundAmount` a `shortenReason`.
+    - **Transparentní komunikace:** Lektorovi se odešle e-mail (`generateShortenEmail`) s přehledem zkráceného času (o X minut), novou délkou, vrácenou částkou a nulovým storno poplatkem. Uvolněný čas v sále je ihned k dispozici pro ostatní.
 
 ## Stavy rezervace (`BookingStatus` v `types.ts`)
 `created` · `awaiting_payment` · `deferred_payment` · `paid` · `cancelled` · `completed` · `refunded`

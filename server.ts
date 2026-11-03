@@ -16,7 +16,7 @@ import { Booking } from "./types";
 import { PRACTITIONERS } from "./constants";
 import { calculateRentalPrice, checkBookingCollision } from "./utils/scheduler";
 import { calculateCancellationPolicy } from "./utils/cancellationPolicy";
-import { generatePaymentRequestEmail, generateConfirmationEmail, generateCancellationEmail, generateAdminDailySummaryEmail, generatePaymentReminderEmail, generateEventRegistrationConfirmationEmail, generateEventRegistrationCancellationEmail, generateAdminEventRegistrationNotificationEmail, generateAdminEventCancellationNotificationEmail, generateExtensionConfirmationEmail } from "./utils/emailTemplates";
+import { generatePaymentRequestEmail, generateConfirmationEmail, generateCancellationEmail, generateAdminDailySummaryEmail, generatePaymentReminderEmail, generateEventRegistrationConfirmationEmail, generateEventRegistrationCancellationEmail, generateAdminEventRegistrationNotificationEmail, generateAdminEventCancellationNotificationEmail, generateExtensionConfirmationEmail, generateShortenEmail } from "./utils/emailTemplates";
 
 // Ošetření přechodných odpojení síťových soketů a gRPC streamů, aby nevedly k pádům procesu
 process.on("unhandledRejection", (reason: any) => {
@@ -1759,6 +1759,156 @@ async function startServer() {
     } catch (error: any) {
       console.error("GoPay Refund Error:", error.message);
       res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Zkrácení existující rezervace administrátorkou (Eva) a vrácení rozdílu ceny lektorovi na kartu
+  app.post("/api/shorten-booking", requireAuth, async (req: AuthRequest, res: Response) => {
+    try {
+      if (!isAdmin(req)) {
+        return res.status(403).json({ error: "Pouze administrátorka (Eva) má oprávnění zkracovat rezervace." });
+      }
+
+      const { bookingId, newDurationMinutes, reason } = req.body;
+      if (!bookingId || !newDurationMinutes || typeof newDurationMinutes !== "number") {
+        return res.status(400).json({ error: "Chybí platné parametry (bookingId, newDurationMinutes)." });
+      }
+
+      const booking = await loadBooking(bookingId);
+      if (!booking) {
+        return res.status(404).json({ error: "Rezervace nebyla nalezena." });
+      }
+
+      const bData = booking.data;
+      if (bData.status === 'cancelled' || bData.status === 'refunded') {
+        return res.status(400).json({ error: "Zrušenou nebo refundovanou rezervaci nelze zkrátit." });
+      }
+
+      const currentDuration = Number(bData.durationMinutes) || 60;
+      if (newDurationMinutes >= currentDuration) {
+        return res.status(400).json({ 
+          error: `Nová délka (${newDurationMinutes} min) musí být kratší než stávající délka (${currentDuration} min). Pro prodloužení použijte funkci prodloužení.` 
+        });
+      }
+
+      if (newDurationMinutes < 30 || newDurationMinutes % 30 !== 0) {
+        return res.status(400).json({ error: "Délka lekce musí být minimálně 30 minut a v násobcích 30 minut." });
+      }
+
+      const room = Number(bData.room) as 1 | 2;
+      const userId = bData.bookedByUserId || 'guest';
+      const oldPrice = Number(bData.price) || 0;
+      const newPrice = calculateRentalPrice(userId, newDurationMinutes, room);
+      const refundCzk = Math.max(0, oldPrice - newPrice);
+      const shortenMinutes = currentDuration - newDurationMinutes;
+
+      let refundSuccess = false;
+      let manualRefundFallback = false;
+      let gopayErrorDetail = "";
+
+      // Pokud byla rezervace online uhrazena a vzniká nárok na vrácení peněz
+      if (refundCzk > 0 && bData.paymentId && (bData.status === 'paid' || bData.status === 'completed')) {
+        try {
+          const cleanPaymentId = sanitizePaymentId(bData.paymentId);
+          const token = await getGoPayToken();
+          const refundAmountHalere = Math.round(refundCzk * 100);
+
+          const refundRes = await fetch(`${GOPAY_URL}/payments/payment/${encodeURIComponent(cleanPaymentId)}/refund`, {
+            method: "POST",
+            headers: {
+              "Accept": "application/json",
+              "Content-Type": "application/x-www-form-urlencoded",
+              "Authorization": `Bearer ${token}`
+            },
+            body: `amount=${refundAmountHalere}`
+          });
+
+          const textResult = await refundRes.text();
+          let parsedResult: any = {};
+          try {
+            parsedResult = textResult ? JSON.parse(textResult) : {};
+          } catch {
+            parsedResult = { error: textResult };
+          }
+
+          if (refundRes.ok) {
+            refundSuccess = true;
+          } else {
+            console.warn(`GoPay partial refund failed for payment ${cleanPaymentId}:`, parsedResult);
+            manualRefundFallback = true;
+            gopayErrorDetail = JSON.stringify(parsedResult);
+          }
+        } catch (e: any) {
+          console.error("GoPay partial refund error:", e);
+          manualRefundFallback = true;
+          gopayErrorDetail = e.message;
+        }
+      }
+
+      const shortenReasonText = (reason && String(reason).trim()) 
+        ? String(reason).trim() 
+        : 'Zkrácení rezervace administrátorkou (Eva)';
+
+      const updateData: any = {
+        durationMinutes: newDurationMinutes,
+        price: newPrice,
+        shortenedAt: new Date().toISOString(),
+        shortenedBy: 'admin',
+        shortenedByName: req.user?.name || 'Eva (Administrátor)',
+        originalDurationMinutes: currentDuration,
+        originalPrice: oldPrice,
+        shortenRefundAmount: refundCzk,
+        shortenReason: shortenReasonText,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (manualRefundFallback) {
+        updateData.manualRefundRequired = true;
+        updateData.manualRefundSettled = false;
+        updateData.gopayRefundError = gopayErrorDetail;
+        updateData.note = (bData.note ? bData.note + '\n' : '') +
+          `⚠️ Zkráceno administrátorkou Evou z ${currentDuration} na ${newDurationMinutes} min (uvolněno ${shortenMinutes} min). Automatické vrácení ${refundCzk} Kč na kartu přes GoPay selhalo (kód 330 / chyba zůstatku brány). Administrátorka vrátí ${refundCzk} Kč ručně z bankovního účtu.`;
+      } else if (refundCzk > 0) {
+        updateData.note = (bData.note ? bData.note + '\n' : '') +
+          `Rezervace zkrácena administrátorkou Evou z ${currentDuration} na ${newDurationMinutes} min (uvolněno ${shortenMinutes} min). Lektorovi vráceno ${refundCzk} Kč na platební kartu. Důvod: ${shortenReasonText}`;
+      } else {
+        updateData.note = (bData.note ? bData.note + '\n' : '') +
+          `Rezervace zkrácena administrátorkou Evou z ${currentDuration} na ${newDurationMinutes} min (uvolněno ${shortenMinutes} min). Důvod: ${shortenReasonText}`;
+      }
+
+      await updateDoc(booking.ref, updateData);
+
+      // Odeslání e-mailu lektorovi
+      if (emailConfigured()) {
+        try {
+          const recipients = await recipientsFor(bData);
+          if (recipients.length) {
+            await sendEmail({
+              to: recipients,
+              subject: 'Zkrácení rezervace – Centrum Unity',
+              html: generateShortenEmail({ ...bData, durationMinutes: newDurationMinutes, price: newPrice }, currentDuration, newDurationMinutes, refundCzk, shortenReasonText)
+            });
+          }
+        } catch (e: any) {
+          console.warn("E-mail notification for shortened booking failed:", e);
+        }
+      }
+
+      res.json({
+        success: true,
+        refundAmount: refundCzk,
+        manualRefundRequired: manualRefundFallback,
+        newDurationMinutes,
+        newPrice,
+        message: manualRefundFallback
+          ? `Rezervace byla zkrácena na ${newDurationMinutes} minut. Automatická refundace ${refundCzk} Kč přes platební bránu selhala (kód 330) a byla zařazena k manuálnímu vyplacení z účtu.`
+          : refundCzk > 0
+            ? `Rezervace byla zkrácena na ${newDurationMinutes} minut a částka ${refundCzk} Kč byla odeslána zpět na platební kartu lektora.`
+            : `Rezervace byla zkrácena na ${newDurationMinutes} minut.`
+      });
+    } catch (error: any) {
+      console.error("Shorten Booking Error:", error.message);
+      res.status(500).json({ error: error.message });
     }
   });
 

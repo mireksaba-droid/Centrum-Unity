@@ -89,6 +89,13 @@ export interface Booking {
   reminderSentAt?: string; // Kdy byla odeslána připomínka platby (aby se poslala jen jednou)
   extendedAt?: string; // Kdy byla rezervace prodloužena
   extensionPaymentId?: string; // ID platby doplatku v GoPay
+  shortenedAt?: string; // Kdy byla rezervace zkrácena administrátorkou (Eva)
+  shortenedBy?: 'admin'; // Kdo zkrácení provedl
+  shortenedByName?: string; // Jméno osoby, která zkrácení provedla ('Eva (Administrátor)')
+  originalDurationMinutes?: number; // Původní délka před zkrácením v minutách
+  originalPrice?: number; // Původní cena pronájmu před zkrácením v Kč
+  shortenRefundAmount?: number; // Částka vrácená lektorovi za uvolněný čas na platební kartu v Kč
+  shortenReason?: string; // Zaznamenaný důvod zkrácení termínu
   pendingExtension?: {
     extraMinutes: number;
     newTotalMinutes: number;

@@ -40,6 +40,7 @@ interface AppState {
   attachPaymentId: (bookingId: string, paymentId: string) => void;
   removeBooking: (bookingId: string) => Promise<void>;
   cancelBooking: (bookingId: string) => Promise<void>;
+  shortenBooking: (bookingId: string, newDurationMinutes: number, reason?: string) => Promise<{ refundAmount: number; manualRefundRequired: boolean; message: string }>;
   adminRescheduleBooking: (bookingId: string, newDate: string, newTime: string, reason?: string, newRoom?: 1 | 2, newEquipment?: 'table' | 'futon' | 'none', isPractitionerSelfService?: boolean) => Promise<void>;
   
   // Practitioners
@@ -361,6 +362,46 @@ export const useStore = create<AppState>()(
             } : b
           )
         }));
+      },
+
+      shortenBooking: async (bookingId, newDurationMinutes, reason) => {
+        const state = get();
+        const token = state.token;
+        const res = await fetch('/api/shorten-booking', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({ bookingId, newDurationMinutes, reason })
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || 'Nepodařilo se zkrátit rezervaci.');
+        }
+
+        // Aktualizujeme stav v lokálním store
+        set((state) => ({
+          bookings: state.bookings.map(b => {
+            if (b.id !== bookingId) return b;
+            return {
+              ...b,
+              durationMinutes: data.newDurationMinutes ?? newDurationMinutes,
+              price: data.newPrice ?? b.price,
+              shortenedAt: new Date().toISOString(),
+              shortenedBy: 'admin',
+              shortenedByName: state.currentUser?.name || 'Eva (Administrátor)',
+              originalDurationMinutes: b.durationMinutes,
+              originalPrice: b.price,
+              shortenRefundAmount: data.refundAmount,
+              shortenReason: reason,
+              manualRefundRequired: data.manualRefundRequired ?? b.manualRefundRequired
+            };
+          })
+        }));
+
+        return data;
       },
 
       adminRescheduleBooking: async (bookingId, newDate, newTime, reason, newRoom, newEquipment, isPractitionerSelfService) => {

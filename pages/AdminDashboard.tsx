@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Booking, Practitioner, Service, Role, GroupEvent, EventRegistration, ReferralStats } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, Bed, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronUp, ChevronRight, RefreshCw, Loader2, Smartphone, BarChart3, Globe, ArrowRight, ShieldCheck, Check } from 'lucide-react';
+import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, Bed, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronUp, ChevronRight, RefreshCw, Loader2, Smartphone, BarChart3, Globe, ArrowRight, ShieldCheck, Check, Scissors } from 'lucide-react';
 import Button from '../components/Button';
 import StudioSchedule from './StudioSchedule';
 import RescheduleModal from '../components/RescheduleModal';
+import ShortenBookingModal from '../components/ShortenBookingModal';
 import { useToast } from '../contexts/ToastContext';
 import { checkBookingCollision, timeToMinutes, calculateRentalPrice } from '../utils/scheduler';
 import { BUFFER_SAME_USER, BUFFER_DIFF_USER, sortGroupEvents, sortPractitioners } from '../constants';
@@ -91,8 +92,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const [expandedActivity, setExpandedActivity] = useState<Record<string, boolean>>({});
     const [expandedActivityRow, setExpandedActivityRow] = useState<Record<string, boolean>>({});
     
-    // Reschedule Modal State
+    // Reschedule & Shorten Modal State
     const [reschedulingBooking, setReschedulingBooking] = useState<Booking | null>(null);
+    const [bookingToShorten, setBookingToShorten] = useState<Booking | null>(null);
     const [show6DayWindowDetails, setShow6DayWindowDetails] = useState(false);
 
     // Referral Stats State (Příchody z centrumunity.cz)
@@ -3058,6 +3060,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                                             <div className="text-stone-600">Klient: <strong>{item.booking.clientName}</strong> ({item.booking.clientEmail || 'bez e-mailu'})</div>
                                                                         )}
                                                                         <div className="text-stone-600">Platební metoda: {item.booking.paymentMethod || 'GoPay online'}</div>
+                                                                        {item.booking.shortenedAt && (
+                                                                            <div className="mt-1.5 p-1.5 bg-amber-50 border border-amber-200 rounded text-amber-900 text-[11px] leading-relaxed">
+                                                                                <strong>✂️ Zkráceno administrátorkou:</strong> z {item.booking.originalDurationMinutes} min na {item.booking.durationMinutes} min. Vráceno lektorovi: <strong>{item.booking.shortenRefundAmount || 0} Kč</strong> na kartu.
+                                                                                {item.booking.shortenReason && <div className="mt-0.5 text-stone-600">Důvod: {item.booking.shortenReason}</div>}
+                                                                            </div>
+                                                                        )}
                                                                     </div>
 
                                                                     <div className="space-y-1">
@@ -3160,6 +3168,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                             <td className="px-6 py-4">
                                                 <div className="font-bold text-stone-900">{formatLocalDate(booking.date)}</div>
                                                 <div className="text-stone-500">{booking.time} ({booking.durationMinutes} min)</div>
+                                                {booking.shortenedAt && (
+                                                    <div className="mt-1">
+                                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200" title={`Zkráceno administrátorkou z ${booking.originalDurationMinutes} min. Vráceno ${booking.shortenRefundAmount || 0} Kč na kartu.`}>
+                                                            <Scissors className="w-2.5 h-2.5 text-amber-700" /> Zkráceno ({booking.originalDurationMinutes} ➔ {booking.durationMinutes} min)
+                                                        </span>
+                                                    </div>
+                                                )}
                                             </td>
                                             <td className="px-6 py-4">
                                                 <div className="font-bold text-stone-900">{resolvePractitionerDisplayName(booking, practitioners)}</div>
@@ -3191,6 +3206,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                             <td className="px-6 py-4 text-right">
                                                 {!isPast && !isCancelled && (
                                                     <div className="flex items-center justify-end gap-2">
+                                                        {booking.durationMinutes > 30 && (
+                                                            <Button 
+                                                                size="sm" 
+                                                                variant="outline" 
+                                                                className="text-xs border-amber-300 text-amber-800 bg-amber-50/50 hover:bg-amber-100 hover:border-amber-400 font-semibold"
+                                                                onClick={() => setBookingToShorten(booking)}
+                                                                title="Zkrátit lekci lektora a vrátit rozdíl ceny na kartu"
+                                                            >
+                                                                <Scissors className="w-3 h-3 mr-1 text-amber-700" /> Zkrátit
+                                                            </Button>
+                                                        )}
                                                         <Button 
                                                             size="sm" 
                                                             variant="outline" 
@@ -3926,6 +3952,22 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             addToast('error', 'Chyba přesunu', err.message || 'Nepodařilo se přesunout rezervaci.');
                         }
                     }} 
+                />
+            )}
+
+            {/* Shorten Booking Modal (Eva / Admin) */}
+            {bookingToShorten && (
+                <ShortenBookingModal 
+                    booking={bookingToShorten}
+                    onClose={() => setBookingToShorten(null)}
+                    onSuccess={(newDur, refundAmt) => {
+                        if (refundAmt > 0) {
+                            addToast('success', 'Rezervace zkrácena', `Rezervace byla zkrácena na ${newDur} minut a částka ${refundAmt} Kč byla vrácena lektorovi na kartu.`);
+                        } else {
+                            addToast('success', 'Rezervace zkrácena', `Rezervace byla úspěšně zkrácena na ${newDur} minut.`);
+                        }
+                        setBookingToShorten(null);
+                    }}
                 />
             )}
 
