@@ -72,11 +72,18 @@ const RescheduleModal: React.FC<RescheduleModalProps> = ({
       onConfirm(newDate, newTime, reason.trim() || undefined, newRoom, newEquipment);
   };
 
-  const dates = Array.from({length: 30}, (_, i) => {
-      const d = new Date();
-      d.setDate(d.getDate() + i);
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  });
+  const dates = useMemo(() => {
+      const list = Array.from({length: 60}, (_, i) => {
+          const d = new Date();
+          d.setDate(d.getDate() + i);
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      });
+      if (booking.date && !list.includes(booking.date)) {
+          list.push(booking.date);
+          list.sort();
+      }
+      return list;
+  }, [booking.date]);
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">

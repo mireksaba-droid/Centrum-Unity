@@ -95,6 +95,7 @@ Uživatel vybere profil a zadá PIN. Po ověření (dnes na klientovi) zavolá `
    - Rezervace eviduje pole `rescheduleCount` (po prvním přesunu lektorem se zvýší na `1`), `rescheduledBy` (`'practitioner' | 'admin'`), `rescheduledAt`, `originalDate`, `originalTime` a `rescheduleReason`.
    - Po vyčerpání 1 samoobslužného přesunu se tlačítko v `PractitionerDashboard` uzamkne (`Přesunuto (1/1)`).
    - Administrátor (Eva) má neomezené právo přesouvat rezervace kdykoliv bez uzamčení.
+   - **Časový horizont přesunu:** Výběr nového data v modálu přesunu nabízí termíny na následujících **60 dní (cca 2 měsíce)** dopředu ode dneška.
    - Při přesunu se vždy striktně ověřuje dostupnost nového slotu včetně povinných hygienických pauz na úklid (30 min stejný lektor / 60 min střídání).
 10. **Zkracování rezervací správcem (Eva) a vrácení rozdílu ceny:**
     - Administrátorka Eva může v rozvrhu (`StudioSchedule.tsx`) i v tabulce rezervací (`AdminDashboard.tsx`) zkrátit rezervaci lektora (minimální délka 30 min, po půlhodinách).
