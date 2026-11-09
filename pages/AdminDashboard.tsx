@@ -110,7 +110,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const [biSelectedMonth, setBiSelectedMonth] = useState<string>('current');
     const [biExpandedLecturer, setBiExpandedLecturer] = useState<string | null>(null);
     const [biFilterOnlyActive, setBiFilterOnlyActive] = useState<boolean>(true);
-    const [biSortBy, setBiSortBy] = useState<'default' | 'revenue' | 'hours' | 'occupancy'>('default');
+    const [biSortBy, setBiSortBy] = useState<'revenue' | 'hours' | 'occupancy' | 'default'>('revenue');
 
     // === AUDIT A MONITORING PŘESUNŮ (RESCHEDULE AUDIT) ===
     const [rescheduleFilterType, setRescheduleFilterType] = useState<'all' | 'suspicious' | 'late' | 'sixDay' | 'safe' | 'active'>('all');
@@ -1148,11 +1148,22 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             list = list.filter(p => p.bookingCount > 0 || p.reservedHours > 0 || p.totalRevenue > 0);
         }
         if (biSortBy === 'revenue') {
-            list.sort((a, b) => b.totalRevenue - a.totalRevenue);
+            list.sort((a, b) => {
+                if (b.totalRevenue !== a.totalRevenue) return b.totalRevenue - a.totalRevenue;
+                if (b.reservedHours !== a.reservedHours) return b.reservedHours - a.reservedHours;
+                return a.name.localeCompare(b.name);
+            });
         } else if (biSortBy === 'hours') {
-            list.sort((a, b) => b.reservedHours - a.reservedHours);
+            list.sort((a, b) => {
+                if (b.reservedHours !== a.reservedHours) return b.reservedHours - a.reservedHours;
+                if (b.totalRevenue !== a.totalRevenue) return b.totalRevenue - a.totalRevenue;
+                return a.name.localeCompare(b.name);
+            });
         } else if (biSortBy === 'occupancy') {
-            list.sort((a, b) => b.hoursSharePercent - a.hoursSharePercent);
+            list.sort((a, b) => {
+                if (b.hoursSharePercent !== a.hoursSharePercent) return b.hoursSharePercent - a.hoursSharePercent;
+                return b.totalRevenue - a.totalRevenue;
+            });
         }
         return list;
     }, [selectedBIReport, biFilterOnlyActive, biSortBy]);
@@ -1178,7 +1189,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             "Hodiny v M2 Velká (h)"
         ];
         
-        const rows = report.practitioners.map(p => [
+        const practitionersToExport = displayBIPractitioners.length > 0 ? displayBIPractitioners : report.practitioners;
+        const rows = practitionersToExport.map(p => [
             `"${report.label}"`,
             `"${p.name.replace(/"/g, '""')}"`,
             `"${(p.role || '').replace(/"/g, '""')}"`,
@@ -2420,12 +2432,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                             <select
                                                 value={biSortBy}
                                                 onChange={(e) => setBiSortBy(e.target.value as any)}
-                                                className="bg-transparent text-stone-800 text-xs font-medium focus:outline-none cursor-pointer"
+                                                className="bg-transparent text-stone-800 text-xs font-semibold focus:outline-none cursor-pointer"
                                             >
-                                                <option value="default">Výchozí řazení (Pravidlo 1)</option>
-                                                <option value="revenue">Dle tržby (nejvyšší)</option>
-                                                <option value="hours">Dle hodin (nejvíce)</option>
+                                                <option value="revenue">Dle tržby (od největší)</option>
+                                                <option value="hours">Dle hodin (od nejvíce)</option>
                                                 <option value="occupancy">Dle obsazenosti (%)</option>
+                                                <option value="default">Dle profilů studia (Pravidlo 1)</option>
                                             </select>
                                         </div>
 
@@ -2514,7 +2526,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                             <div className="h-48">
                                                 <ResponsiveContainer width="100%" height="100%">
                                                     <BarChart
-                                                        data={selectedBIReport.practitioners.filter(p => p.totalRevenue > 0).slice(0, 8)}
+                                                        data={[...selectedBIReport.practitioners].filter(p => p.totalRevenue > 0).sort((a, b) => b.totalRevenue - a.totalRevenue).slice(0, 8)}
                                                         layout="vertical"
                                                         margin={{ top: 0, right: 30, left: 10, bottom: 0 }}
                                                     >
@@ -2529,7 +2541,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                             ]}
                                                         />
                                                         <Bar dataKey="totalRevenue" fill="#4f46e5" radius={[0, 4, 4, 0]} barSize={16}>
-                                                            {selectedBIReport.practitioners.filter(p => p.totalRevenue > 0).slice(0, 8).map((_, index) => (
+                                                            {[...selectedBIReport.practitioners].filter(p => p.totalRevenue > 0).sort((a, b) => b.totalRevenue - a.totalRevenue).slice(0, 8).map((_, index) => (
                                                                 <Cell key={`bar-${index}`} fill={index === 0 ? '#f59e0b' : '#6366f1'} />
                                                             ))}
                                                         </Bar>
@@ -2547,7 +2559,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                             <div className="h-48">
                                                 <ResponsiveContainer width="100%" height="100%">
                                                     <BarChart
-                                                        data={selectedBIReport.practitioners.filter(p => p.reservedHours > 0).slice(0, 8)}
+                                                        data={[...selectedBIReport.practitioners].filter(p => p.reservedHours > 0).sort((a, b) => b.reservedHours - a.reservedHours).slice(0, 8)}
                                                         layout="vertical"
                                                         margin={{ top: 0, right: 30, left: 10, bottom: 0 }}
                                                     >
@@ -2562,7 +2574,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                             ]}
                                                         />
                                                         <Bar dataKey="reservedHours" fill="#10b981" radius={[0, 4, 4, 0]} barSize={16}>
-                                                            {selectedBIReport.practitioners.filter(p => p.reservedHours > 0).slice(0, 8).map((_, index) => (
+                                                            {[...selectedBIReport.practitioners].filter(p => p.reservedHours > 0).sort((a, b) => b.reservedHours - a.reservedHours).slice(0, 8).map((_, index) => (
                                                                 <Cell key={`bar-hours-${index}`} fill={index === 0 ? '#10b981' : '#14b8a6'} />
                                                             ))}
                                                         </Bar>
@@ -2578,10 +2590,48 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     <table className="w-full text-left text-xs border-collapse">
                                         <thead>
                                             <tr className="bg-stone-100/80 text-stone-600 uppercase tracking-wider font-bold border-b border-stone-200 text-[11px]">
-                                                <th className="py-3 px-3.5">Lektor</th>
-                                                <th className="py-3 px-3.5 text-right">Tržba studia</th>
-                                                <th className="py-3 px-3.5 text-right">Rezervováno hodin</th>
-                                                <th className="py-3 px-3.5">Podíl na vytížení studia</th>
+                                                <th 
+                                                    onClick={() => setBiSortBy('default')}
+                                                    className="py-3 px-3.5 cursor-pointer hover:text-stone-900 transition-colors select-none"
+                                                    title="Seřadit dle výchozích profilů studia (Pravidlo 1)"
+                                                >
+                                                    <span className="inline-flex items-center gap-1">
+                                                        Lektor {biSortBy === 'default' && <span className="text-indigo-600 font-extrabold text-xs">▼</span>}
+                                                    </span>
+                                                </th>
+                                                <th 
+                                                    onClick={() => setBiSortBy('revenue')}
+                                                    className={`py-3 px-3.5 text-right cursor-pointer hover:text-stone-900 transition-colors select-none ${
+                                                        biSortBy === 'revenue' ? 'text-indigo-950 bg-indigo-50/70 font-black' : ''
+                                                    }`}
+                                                    title="Kliknutím seřadit dle tržby od největší po nejmenší"
+                                                >
+                                                    <span className="inline-flex items-center gap-1 justify-end w-full">
+                                                        Tržba studia {biSortBy === 'revenue' && <span className="text-indigo-600 font-extrabold text-xs">▼</span>}
+                                                    </span>
+                                                </th>
+                                                <th 
+                                                    onClick={() => setBiSortBy('hours')}
+                                                    className={`py-3 px-3.5 text-right cursor-pointer hover:text-stone-900 transition-colors select-none ${
+                                                        biSortBy === 'hours' ? 'text-emerald-950 bg-emerald-50/70 font-black' : ''
+                                                    }`}
+                                                    title="Kliknutím seřadit dle hodin od nejvíce po nejméně"
+                                                >
+                                                    <span className="inline-flex items-center gap-1 justify-end w-full">
+                                                        Rezervováno hodin {biSortBy === 'hours' && <span className="text-emerald-600 font-extrabold text-xs">▼</span>}
+                                                    </span>
+                                                </th>
+                                                <th 
+                                                    onClick={() => setBiSortBy('occupancy')}
+                                                    className={`py-3 px-3.5 cursor-pointer hover:text-stone-900 transition-colors select-none ${
+                                                        biSortBy === 'occupancy' ? 'text-indigo-950 bg-indigo-50/70 font-black' : ''
+                                                    }`}
+                                                    title="Kliknutím seřadit dle podílu na obsazenosti"
+                                                >
+                                                    <span className="inline-flex items-center gap-1">
+                                                        Podíl na vytížení studia {biSortBy === 'occupancy' && <span className="text-indigo-600 font-extrabold text-xs">▼</span>}
+                                                    </span>
+                                                </th>
                                                 <th className="py-3 px-3.5 text-right">Rezervace</th>
                                                 <th className="py-3 px-3.5 text-right">Průměr / h</th>
                                                 <th className="py-3 px-3.5 text-center">Detail</th>
