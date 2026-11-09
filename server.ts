@@ -95,7 +95,11 @@ function requireAuth(req: AuthRequest, res: Response, next: NextFunction) {
 
 async function startServer() {
   const app = express();
-  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+  // Support --port CLI argument or PORT env var (in production only).
+  // In development, the dev server must always run on port 3000 behind the Nginx reverse proxy (which listens on 8080).
+  const portArgIndex = process.argv.indexOf("--port");
+  const cliPort = portArgIndex !== -1 && process.argv[portArgIndex + 1] ? parseInt(process.argv[portArgIndex + 1], 10) : undefined;
+  const port = cliPort || (process.env.NODE_ENV === "production" && process.env.PORT ? parseInt(process.env.PORT, 10) : 3000);
 
   app.set("trust proxy", 1); // správná klientská IP za reverzní proxy (rate limiting)
 

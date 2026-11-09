@@ -1,14 +1,14 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Booking, Practitioner, Service, Role, GroupEvent, EventRegistration, ReferralStats } from '../types';
+import { Booking, Practitioner, Service, Role, GroupEvent, EventRegistration, ReferralStats, PractitionerBIMetrics, MonthlyBIReport } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, Bed, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronUp, ChevronRight, RefreshCw, Loader2, Smartphone, BarChart3, Globe, ArrowRight, ShieldCheck, Check, Scissors } from 'lucide-react';
+import { Users, Calendar, DollarSign, TrendingUp, Search, MoreHorizontal, Settings, ShieldAlert, Edit, Trash2, CheckCircle, XCircle, Clock, Filter, Eye, EyeOff, Activity, Layers, Bed, BoxSelect, AlertTriangle, Trophy, LogOut, Plus, X, Save, Lock, Megaphone, Link, ChevronDown, ChevronUp, ChevronRight, RefreshCw, Loader2, Smartphone, BarChart3, Globe, ArrowRight, ShieldCheck, Check, Scissors, Download, FileSpreadsheet, ArrowUpDown, Percent } from 'lucide-react';
 import Button from '../components/Button';
 import StudioSchedule from './StudioSchedule';
 import RescheduleModal from '../components/RescheduleModal';
 import ShortenBookingModal from '../components/ShortenBookingModal';
 import { useToast } from '../contexts/ToastContext';
 import { checkBookingCollision, timeToMinutes, calculateRentalPrice } from '../utils/scheduler';
-import { BUFFER_SAME_USER, BUFFER_DIFF_USER, sortGroupEvents, sortPractitioners } from '../constants';
+import { BUFFER_SAME_USER, BUFFER_DIFF_USER, sortGroupEvents, sortPractitioners, isCustomPractitionerImage } from '../constants';
 import { formatLocalDate, parseLocalDate } from '../utils/dateUtils';
 import { useStore } from '../store/useStore';
 import { isDemoMode } from '../services/firebase';
@@ -105,6 +105,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     // Storno po měsících a lektorech
     const [stornoSelectedMonth, setStornoSelectedMonth] = useState<string>('current');
     const [expandedStornoLecturer, setExpandedStornoLecturer] = useState<string | null>(null);
+
+    // === MĚSÍČNÍ BI PŘEHLED LEKTORŮ ===
+    const [biSelectedMonth, setBiSelectedMonth] = useState<string>('current');
+    const [biExpandedLecturer, setBiExpandedLecturer] = useState<string | null>(null);
+    const [biFilterOnlyActive, setBiFilterOnlyActive] = useState<boolean>(true);
+    const [biSortBy, setBiSortBy] = useState<'default' | 'revenue' | 'hours' | 'occupancy'>('default');
 
     // === AUDIT A MONITORING PŘESUNŮ (RESCHEDULE AUDIT) ===
     const [rescheduleFilterType, setRescheduleFilterType] = useState<'all' | 'suspicious' | 'late' | 'sixDay' | 'safe' | 'active'>('all');
@@ -932,6 +938,160 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             realizationRate: 0
         };
 
+        // 11. MĚSÍČNÍ BI ANALÝZA LEKTORŮ (TRŽBY, HODINY A PODÍL NA OBSAZENOSTI)
+        const sortedBIMonths = [...trendMonths].sort((a, b) => b.getTime() - a.getTime());
+        const sortedPractitionersList = sortPractitioners(practitioners);
+
+        const computeBIReportForFilter = (
+            key: string,
+            label: string,
+            isCurrent: boolean,
+            year: number,
+            month: number,
+            daysCount: number,
+            filterFn: (b: Booking) => boolean
+        ): MonthlyBIReport => {
+            const monthBookings = confirmedBookings.filter(filterFn);
+            
+            // Provozní doba studia: 08:00 - 24:00 = 16 hodin denně per místnost. 2 místnosti (M1 a M2) = 32 hodin denně celkem.
+            const totalTheoreticalCapacityHours = Math.max(1, daysCount * 32);
+
+            // Zpracujeme jednotlivé lektory dle striktního pořadí (sortPractitioners)
+            const practitionerMetricsList: PractitionerBIMetrics[] = sortedPractitionersList.map(p => {
+                const pBookings = monthBookings.filter(b => {
+                    if (p.id === 'guest') {
+                        return b.bookedByUserId === 'guest' ||
+                               normalizeName(b.bookedByName) === 'mirek' ||
+                               normalizeName(b.bookedByName) === 'host' ||
+                               normalizeName(b.bookedByName) === 'externista' ||
+                               resolvePractitionerDisplayName(b, practitioners) === 'Host / Externista';
+                    }
+                    if (b.bookedByUserId) {
+                        return b.bookedByUserId === p.id;
+                    }
+                    return resolvePractitionerDisplayName(b, practitioners) === p.name;
+                });
+
+                const realizedRevenue = pBookings
+                    .filter(b => ['paid', 'completed'].includes(b.status))
+                    .reduce((sum, b) => sum + (b.price || 0), 0);
+                    
+                const pendingRevenue = pBookings
+                    .filter(b => ['awaiting_payment', 'deferred_payment'].includes(b.status))
+                    .reduce((sum, b) => sum + (b.price || 0), 0);
+
+                const totalRevenue = pBookings.reduce((sum, b) => sum + (b.price || 0), 0);
+
+                const durationMinutes = pBookings.reduce((sum, b) => sum + (b.durationMinutes || 60), 0);
+                const reservedHours = Number((durationMinutes / 60).toFixed(1));
+
+                const room1Minutes = pBookings.filter(b => (b.room || 1) === 1).reduce((sum, b) => sum + (b.durationMinutes || 60), 0);
+                const room2Minutes = pBookings.filter(b => b.room === 2).reduce((sum, b) => sum + (b.durationMinutes || 60), 0);
+                const room1Hours = Number((room1Minutes / 60).toFixed(1));
+                const room2Hours = Number((room2Minutes / 60).toFixed(1));
+
+                const bookingCount = pBookings.length;
+                const averagePricePerHour = reservedHours > 0 ? Math.round(totalRevenue / (durationMinutes / 60)) : 0;
+                const averageDurationMinutes = bookingCount > 0 ? Math.round(durationMinutes / bookingCount) : 0;
+
+                return {
+                    practitionerId: p.id,
+                    name: p.name,
+                    avatarUrl: p.imageUrl,
+                    role: p.title || (p.role === Role.ADMIN ? 'Administrátor' : 'Lektor'),
+                    colorCode: p.colorCode,
+                    isCustomPhoto: isCustomPractitionerImage(p.imageUrl),
+                    realizedRevenue,
+                    pendingRevenue,
+                    totalRevenue,
+                    revenueSharePercent: 0,
+                    durationMinutes,
+                    reservedHours,
+                    hoursSharePercent: 0,
+                    absoluteStudioOccupancyPercent: Number(((reservedHours / totalTheoreticalCapacityHours) * 100).toFixed(1)),
+                    bookingCount,
+                    averagePricePerHour,
+                    averageDurationMinutes,
+                    room1Hours,
+                    room2Hours,
+                    bookings: [...pBookings].sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time))
+                };
+            });
+
+            // Sečteme celkové hodnoty studia za vybrané období
+            const totalRealizedRevenue = practitionerMetricsList.reduce((sum, p) => sum + p.realizedRevenue, 0);
+            const totalPendingRevenue = practitionerMetricsList.reduce((sum, p) => sum + p.pendingRevenue, 0);
+            const totalRevenue = practitionerMetricsList.reduce((sum, p) => sum + p.totalRevenue, 0);
+            const totalReservedHours = Number(practitionerMetricsList.reduce((sum, p) => sum + p.reservedHours, 0).toFixed(1));
+            const totalBookingCount = practitionerMetricsList.reduce((sum, p) => sum + p.bookingCount, 0);
+            const activePractitionersCount = practitionerMetricsList.filter(p => p.bookingCount > 0 || p.reservedHours > 0).length;
+
+            const averagePricePerHour = totalReservedHours > 0 ? Math.round(totalRevenue / totalReservedHours) : 0;
+            const overallStudioOccupancyPercent = Number(((totalReservedHours / totalTheoreticalCapacityHours) * 100).toFixed(1));
+
+            // Doplníme procentuální podíly na tržbách a odpracovaných hodinách
+            practitionerMetricsList.forEach(p => {
+                p.revenueSharePercent = totalRevenue > 0 ? Number(((p.totalRevenue / totalRevenue) * 100).toFixed(1)) : 0;
+                p.hoursSharePercent = totalReservedHours > 0 ? Number(((p.reservedHours / totalReservedHours) * 100).toFixed(1)) : 0;
+            });
+
+            return {
+                key,
+                label,
+                year,
+                month,
+                isCurrent,
+                daysInMonth: daysCount,
+                totalTheoreticalCapacityHours,
+                totalRealizedRevenue,
+                totalPendingRevenue,
+                totalRevenue,
+                totalReservedHours,
+                totalBookingCount,
+                overallStudioOccupancyPercent,
+                averagePricePerHour,
+                activePractitionersCount,
+                practitioners: practitionerMetricsList
+            };
+        };
+
+        const monthlyBIReports: MonthlyBIReport[] = [];
+
+        sortedBIMonths.forEach(mDate => {
+            const mm = mDate.getMonth();
+            const yy = mDate.getFullYear();
+            const isCurrent = mm === today.getMonth() && yy === today.getFullYear();
+            const nm = mDate.toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' });
+            const capName = nm.charAt(0).toUpperCase() + nm.slice(1);
+            const key = `${yy}-${String(mm + 1).padStart(2, '0')}`;
+            const daysInMonth = new Date(yy, mm + 1, 0).getDate();
+
+            monthlyBIReports.push(
+                computeBIReportForFilter(
+                    key,
+                    isCurrent ? `${capName} (Tento měsíc)` : capName,
+                    isCurrent,
+                    yy,
+                    mm,
+                    daysInMonth,
+                    b => inMonth(parseLocalDate(b.date), mm, yy)
+                )
+            );
+        });
+
+        // Celé období (All-time report)
+        const totalAllDays = sortedBIMonths.reduce((sum, m) => sum + new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate(), 0) || 30;
+        const allTimeBIReport = computeBIReportForFilter(
+            'all',
+            'Celé období (Vše)',
+            false,
+            today.getFullYear(),
+            -1,
+            totalAllDays,
+            () => true
+        );
+        monthlyBIReports.unshift(allTimeBIReport);
+
         return {
             totalRevenue,
             realRevenue,
@@ -960,7 +1120,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             evaAllConfirmedCount: evaAllConfirmedBookings.length,
             monthlyRealizationData,
             currentMonthRealization,
-            monthlyStornoReports
+            monthlyStornoReports,
+            monthlyBIReports
         };
     }, [allBookings, practitioners]);
 
@@ -971,6 +1132,99 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         }
         return stats.monthlyStornoReports.find(r => r.key === stornoSelectedMonth) || stats.monthlyStornoReports[0];
     }, [stats.monthlyStornoReports, stornoSelectedMonth]);
+
+    const selectedBIReport = useMemo(() => {
+        if (!stats.monthlyBIReports || stats.monthlyBIReports.length === 0) return null;
+        if (biSelectedMonth === 'current') {
+            return stats.monthlyBIReports.find(r => r.isCurrent) || stats.monthlyBIReports[0];
+        }
+        return stats.monthlyBIReports.find(r => r.key === biSelectedMonth) || stats.monthlyBIReports[0];
+    }, [stats.monthlyBIReports, biSelectedMonth]);
+
+    const displayBIPractitioners = useMemo(() => {
+        if (!selectedBIReport) return [];
+        let list = [...selectedBIReport.practitioners];
+        if (biFilterOnlyActive) {
+            list = list.filter(p => p.bookingCount > 0 || p.reservedHours > 0 || p.totalRevenue > 0);
+        }
+        if (biSortBy === 'revenue') {
+            list.sort((a, b) => b.totalRevenue - a.totalRevenue);
+        } else if (biSortBy === 'hours') {
+            list.sort((a, b) => b.reservedHours - a.reservedHours);
+        } else if (biSortBy === 'occupancy') {
+            list.sort((a, b) => b.hoursSharePercent - a.hoursSharePercent);
+        }
+        return list;
+    }, [selectedBIReport, biFilterOnlyActive, biSortBy]);
+
+    const handleExportBICSV = () => {
+        if (!selectedBIReport) return;
+        const report = selectedBIReport;
+        const delimiter = ";";
+        const headers = [
+            "Měsíc",
+            "Lektor",
+            "Role",
+            "Celková tržba (Kč)",
+            "Zaplacená tržba (Kč)",
+            "Čekající tržba (Kč)",
+            "Podíl na tržbách (%)",
+            "Rezervované hodiny (h)",
+            "Podíl na vytížení studia (%)",
+            "Podíl na celkové kapacitě (%)",
+            "Počet rezervací",
+            "Průměrná cena za hodinu (Kč/h)",
+            "Hodiny v M1 Malá (h)",
+            "Hodiny v M2 Velká (h)"
+        ];
+        
+        const rows = report.practitioners.map(p => [
+            `"${report.label}"`,
+            `"${p.name.replace(/"/g, '""')}"`,
+            `"${(p.role || '').replace(/"/g, '""')}"`,
+            p.totalRevenue,
+            p.realizedRevenue,
+            p.pendingRevenue,
+            p.revenueSharePercent.toString().replace('.', ','),
+            p.reservedHours.toString().replace('.', ','),
+            p.hoursSharePercent.toString().replace('.', ','),
+            p.absoluteStudioOccupancyPercent.toString().replace('.', ','),
+            p.bookingCount,
+            p.averagePricePerHour,
+            p.room1Hours.toString().replace('.', ','),
+            p.room2Hours.toString().replace('.', ',')
+        ]);
+
+        // Souhrnný řádek CELKEM STUDIO
+        rows.push([
+            `"${report.label} - CELKEM"`,
+            `"CELKEM STUDIO"`,
+            `"Centrum Unity"`,
+            report.totalRevenue,
+            report.totalRealizedRevenue,
+            report.totalPendingRevenue,
+            "100,0",
+            report.totalReservedHours.toString().replace('.', ','),
+            "100,0",
+            report.overallStudioOccupancyPercent.toString().replace('.', ','),
+            report.totalBookingCount,
+            report.averagePricePerHour,
+            "",
+            ""
+        ]);
+
+        const csvContent = "\uFEFF" + [headers.join(delimiter), ...rows.map(r => r.join(delimiter))].join("\r\n");
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.setAttribute("download", `unity-bi-lektori-${report.key}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        addToast('success', 'Export hotov', `Data pro ${report.label} byla stažena ve formátu CSV.`);
+    };
 
     const sortedPractitionersForFilter = useMemo(() => {
         return sortPractitioners(practitioners);
@@ -2098,6 +2352,465 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                             </BarChart>
                                         </ResponsiveContainer>
                                     </div>
+                                </div>
+                            </div>
+
+                            {/* SECTION: MĚSÍČNÍ BI PŘEHLED LEKTORŮ (TRŽBY, HODINY A OBSAZENOST) */}
+                            <div className="bg-white p-6 sm:p-7 rounded-2xl border border-stone-200 shadow-sm space-y-6">
+                                {/* 1. Header: Titulek + Výběr měsíce + Přepínač aktivních + Export CSV */}
+                                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-stone-100">
+                                    <div>
+                                        <div className="flex items-center gap-2.5">
+                                            <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                                                <BarChart3 className="w-5 h-5" />
+                                            </div>
+                                            <div>
+                                                <h3 className="text-xl font-bold text-stone-900 leading-tight flex items-center gap-2">
+                                                    Měsíční BI přehled lektorů
+                                                    <span className="text-[11px] font-bold uppercase tracking-wider bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-200/60">
+                                                        BI Studio Analytics
+                                                    </span>
+                                                </h3>
+                                                <p className="text-xs text-stone-500 mt-0.5">
+                                                    Tržby v Kč, počet rezervovaných hodin a přesný podíl na obsazenosti studia pro jednotlivé lektory.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Ovládací prvky */}
+                                    <div className="flex flex-wrap items-center gap-2.5">
+                                        {/* Výběr měsíce */}
+                                        <div className="flex items-center gap-1.5 bg-stone-50 border border-stone-300 rounded-lg px-2.5 py-1.5">
+                                            <Calendar className="w-3.5 h-3.5 text-stone-500 shrink-0" />
+                                            <select
+                                                value={biSelectedMonth}
+                                                onChange={(e) => {
+                                                    setBiSelectedMonth(e.target.value);
+                                                    setBiExpandedLecturer(null);
+                                                }}
+                                                className="bg-transparent text-stone-800 text-xs font-bold focus:outline-none cursor-pointer"
+                                            >
+                                                {(stats.monthlyBIReports || []).map(rep => (
+                                                    <option key={rep.key} value={rep.key}>
+                                                        {rep.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+
+                                        {/* Filtr: Jen aktivní / Všichni */}
+                                        <button
+                                            type="button"
+                                            onClick={() => setBiFilterOnlyActive(prev => !prev)}
+                                            className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5 ${
+                                                biFilterOnlyActive
+                                                    ? 'bg-indigo-50 border-indigo-200 text-indigo-800'
+                                                    : 'bg-white border-stone-300 text-stone-600 hover:bg-stone-50'
+                                            }`}
+                                            title="Přepnout zobrazení lektorů"
+                                        >
+                                            <Filter className="w-3.5 h-3.5" />
+                                            <span>{biFilterOnlyActive ? 'Jen aktivní' : 'Všichni lektoři'}</span>
+                                        </button>
+
+                                        {/* Řazení */}
+                                        <div className="flex items-center gap-1 bg-stone-50 border border-stone-300 rounded-lg px-2.5 py-1.5">
+                                            <ArrowUpDown className="w-3.5 h-3.5 text-stone-500 shrink-0" />
+                                            <select
+                                                value={biSortBy}
+                                                onChange={(e) => setBiSortBy(e.target.value as any)}
+                                                className="bg-transparent text-stone-800 text-xs font-medium focus:outline-none cursor-pointer"
+                                            >
+                                                <option value="default">Výchozí řazení (Pravidlo 1)</option>
+                                                <option value="revenue">Dle tržby (nejvyšší)</option>
+                                                <option value="hours">Dle hodin (nejvíce)</option>
+                                                <option value="occupancy">Dle obsazenosti (%)</option>
+                                            </select>
+                                        </div>
+
+                                        {/* Export do CSV */}
+                                        <button
+                                            type="button"
+                                            onClick={handleExportBICSV}
+                                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
+                                            title="Exportovat data do CSV pro Google Sheets nebo Excel"
+                                        >
+                                            <Download className="w-3.5 h-3.5" />
+                                            <span>Export CSV</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* 2. KPI Banner za vybraný měsíc (4 karty) */}
+                                {selectedBIReport && (
+                                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+                                        <div className="bg-gradient-to-br from-indigo-50/70 to-indigo-100/40 border border-indigo-200/80 rounded-xl p-3.5">
+                                            <div className="flex items-center justify-between text-indigo-900 text-xs font-bold uppercase tracking-wider mb-1">
+                                                <span>Tržby lektorů</span>
+                                                <DollarSign className="w-4 h-4 text-indigo-600" />
+                                            </div>
+                                            <div className="text-2xl font-black text-indigo-950">
+                                                {selectedBIReport.totalRevenue.toLocaleString()} Kč
+                                            </div>
+                                            <div className="text-[11px] text-indigo-800/80 mt-1 flex items-center justify-between">
+                                                <span>Zaplaceno: <strong>{selectedBIReport.totalRealizedRevenue.toLocaleString()} Kč</strong></span>
+                                                {selectedBIReport.totalPendingRevenue > 0 && (
+                                                    <span className="text-amber-800 font-semibold">Čeká: {selectedBIReport.totalPendingRevenue.toLocaleString()} Kč</span>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-gradient-to-br from-emerald-50/70 to-emerald-100/40 border border-emerald-200/80 rounded-xl p-3.5">
+                                            <div className="flex items-center justify-between text-emerald-900 text-xs font-bold uppercase tracking-wider mb-1">
+                                                <span>Rezervované hodiny</span>
+                                                <Clock className="w-4 h-4 text-emerald-600" />
+                                            </div>
+                                            <div className="text-2xl font-black text-emerald-950">
+                                                {selectedBIReport.totalReservedHours.toLocaleString('cs-CZ')} h
+                                            </div>
+                                            <div className="text-[11px] text-emerald-800/80 mt-1">
+                                                Celkem <strong>{selectedBIReport.totalBookingCount}</strong> potvrzených lekcí v sálech
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-gradient-to-br from-amber-50/70 to-amber-100/40 border border-amber-200/80 rounded-xl p-3.5">
+                                            <div className="flex items-center justify-between text-amber-900 text-xs font-bold uppercase tracking-wider mb-1">
+                                                <span>Vytíženost studia</span>
+                                                <Percent className="w-4 h-4 text-amber-600" />
+                                            </div>
+                                            <div className="text-2xl font-black text-amber-950">
+                                                {selectedBIReport.overallStudioOccupancyPercent}%
+                                            </div>
+                                            <div className="text-[11px] text-amber-800/80 mt-1 truncate" title={`Z ${selectedBIReport.totalTheoreticalCapacityHours} h teoretické kapacity 2 sálů (16 h/den)`}>
+                                                Z kapacity {selectedBIReport.totalTheoreticalCapacityHours} h (2 sály × 16h/den)
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-gradient-to-br from-stone-50 to-stone-100/60 border border-stone-200 rounded-xl p-3.5">
+                                            <div className="flex items-center justify-between text-stone-700 text-xs font-bold uppercase tracking-wider mb-1">
+                                                <span>Aktivní lektoři</span>
+                                                <Users className="w-4 h-4 text-stone-600" />
+                                            </div>
+                                            <div className="text-2xl font-black text-stone-900">
+                                                {selectedBIReport.activePractitionersCount} <span className="text-sm font-normal text-stone-500">/ {selectedBIReport.practitioners.length}</span>
+                                            </div>
+                                            <div className="text-[11px] text-stone-600 mt-1">
+                                                Průměr: <strong>{selectedBIReport.averagePricePerHour} Kč / h</strong>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* 3. Vizuální mini grafy: Podíl na tržbách & Podíl na hodinách */}
+                                {selectedBIReport && selectedBIReport.totalReservedHours > 0 && (
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-1">
+                                        {/* Graf 1: Podíl na tržbách studia */}
+                                        <div className="p-4 bg-stone-50/70 border border-stone-200 rounded-xl">
+                                            <h4 className="text-xs font-bold text-stone-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                                                <Trophy className="w-3.5 h-3.5 text-amber-500" /> Podíl na tržbách studia ({selectedBIReport.label})
+                                            </h4>
+                                            <p className="text-[11px] text-stone-500 mb-3">Kolik % z celkové tržby vygeneroval který lektor.</p>
+                                            <div className="h-48">
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <BarChart
+                                                        data={selectedBIReport.practitioners.filter(p => p.totalRevenue > 0).slice(0, 8)}
+                                                        layout="vertical"
+                                                        margin={{ top: 0, right: 30, left: 10, bottom: 0 }}
+                                                    >
+                                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                                                        <XAxis type="number" unit=" Kč" tick={{ fontSize: 10 }} />
+                                                        <YAxis dataKey="name" type="category" width={95} tick={{ fontSize: 11, fontWeight: 600 }} />
+                                                        <Tooltip
+                                                            contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px' }}
+                                                            formatter={(val: any, _name: any, item: any) => [
+                                                                `${Number(val).toLocaleString()} Kč (${item?.payload?.revenueSharePercent} % tržeb studia)`,
+                                                                'Tržba'
+                                                            ]}
+                                                        />
+                                                        <Bar dataKey="totalRevenue" fill="#4f46e5" radius={[0, 4, 4, 0]} barSize={16}>
+                                                            {selectedBIReport.practitioners.filter(p => p.totalRevenue > 0).slice(0, 8).map((_, index) => (
+                                                                <Cell key={`bar-${index}`} fill={index === 0 ? '#f59e0b' : '#6366f1'} />
+                                                            ))}
+                                                        </Bar>
+                                                    </BarChart>
+                                                </ResponsiveContainer>
+                                            </div>
+                                        </div>
+
+                                        {/* Graf 2: Rezervované hodiny per lektor */}
+                                        <div className="p-4 bg-stone-50/70 border border-stone-200 rounded-xl">
+                                            <h4 className="text-xs font-bold text-stone-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                                                <Clock className="w-3.5 h-3.5 text-emerald-600" /> Rezervované hodiny v sálech ({selectedBIReport.label})
+                                            </h4>
+                                            <p className="text-[11px] text-stone-500 mb-3">Kolik hodin strávil lektor v sálech a podíl na vytížení.</p>
+                                            <div className="h-48">
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <BarChart
+                                                        data={selectedBIReport.practitioners.filter(p => p.reservedHours > 0).slice(0, 8)}
+                                                        layout="vertical"
+                                                        margin={{ top: 0, right: 30, left: 10, bottom: 0 }}
+                                                    >
+                                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                                                        <XAxis type="number" unit=" h" tick={{ fontSize: 10 }} />
+                                                        <YAxis dataKey="name" type="category" width={95} tick={{ fontSize: 11, fontWeight: 600 }} />
+                                                        <Tooltip
+                                                            contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px' }}
+                                                            formatter={(val: any, _name: any, item: any) => [
+                                                                `${Number(val).toLocaleString('cs-CZ')} h (${item?.payload?.hoursSharePercent} % z rezervovaného času studia)`,
+                                                                'Rezervováno'
+                                                            ]}
+                                                        />
+                                                        <Bar dataKey="reservedHours" fill="#10b981" radius={[0, 4, 4, 0]} barSize={16}>
+                                                            {selectedBIReport.practitioners.filter(p => p.reservedHours > 0).slice(0, 8).map((_, index) => (
+                                                                <Cell key={`bar-hours-${index}`} fill={index === 0 ? '#10b981' : '#14b8a6'} />
+                                                            ))}
+                                                        </Bar>
+                                                    </BarChart>
+                                                </ResponsiveContainer>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* 4. Tabulka lektorů */}
+                                <div className="overflow-x-auto rounded-xl border border-stone-200">
+                                    <table className="w-full text-left text-xs border-collapse">
+                                        <thead>
+                                            <tr className="bg-stone-100/80 text-stone-600 uppercase tracking-wider font-bold border-b border-stone-200 text-[11px]">
+                                                <th className="py-3 px-3.5">Lektor</th>
+                                                <th className="py-3 px-3.5 text-right">Tržba studia</th>
+                                                <th className="py-3 px-3.5 text-right">Rezervováno hodin</th>
+                                                <th className="py-3 px-3.5">Podíl na vytížení studia</th>
+                                                <th className="py-3 px-3.5 text-right">Rezervace</th>
+                                                <th className="py-3 px-3.5 text-right">Průměr / h</th>
+                                                <th className="py-3 px-3.5 text-center">Detail</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-stone-200/70 bg-white">
+                                            {displayBIPractitioners.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={7} className="py-8 text-center text-stone-400">
+                                                        Pro vybraný měsíc a filtr nejsou evidovány žádné rezervace.
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                displayBIPractitioners.map((p, idx) => {
+                                                    const isExpanded = biExpandedLecturer === p.practitionerId;
+                                                    return (
+                                                        <React.Fragment key={p.practitionerId || idx}>
+                                                            <tr 
+                                                                onClick={() => setBiExpandedLecturer(isExpanded ? null : p.practitionerId)}
+                                                                className={`hover:bg-stone-50/90 cursor-pointer transition-colors ${
+                                                                    p.practitionerId === 'admin' ? 'bg-indigo-50/30' : ''
+                                                                }`}
+                                                            >
+                                                                {/* Lektor info */}
+                                                                <td className="py-3 px-3.5">
+                                                                    <div className="flex items-center gap-2.5">
+                                                                        <div className="relative w-8 h-8 rounded-full overflow-hidden shrink-0 border border-stone-200 bg-stone-100">
+                                                                            {p.avatarUrl ? (
+                                                                                <img src={p.avatarUrl} alt={p.name} className="w-full h-full object-cover" />
+                                                                            ) : (
+                                                                                <div className="w-full h-full flex items-center justify-center text-stone-500 font-bold text-xs">
+                                                                                    {p.name.charAt(0)}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                        <div className="min-w-0">
+                                                                            <div className="flex items-center gap-1.5">
+                                                                                <span className="font-bold text-stone-900 text-sm truncate">
+                                                                                    {p.name}
+                                                                                </span>
+                                                                                {p.practitionerId === 'admin' && (
+                                                                                    <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-800">
+                                                                                        Eva
+                                                                                    </span>
+                                                                                )}
+                                                                                {p.practitionerId === 'guest' && (
+                                                                                    <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-stone-100 text-stone-700">
+                                                                                        Host
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+                                                                            <div className="text-[11px] text-stone-500 truncate">
+                                                                                {p.role}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </td>
+
+                                                                {/* Tržba */}
+                                                                <td className="py-3 px-3.5 text-right">
+                                                                    <div className="font-bold text-stone-900 text-sm">
+                                                                        {p.totalRevenue.toLocaleString()} Kč
+                                                                    </div>
+                                                                    <div className="text-[10px] text-stone-500">
+                                                                        {p.revenueSharePercent}% tržeb studia
+                                                                    </div>
+                                                                </td>
+
+                                                                {/* Hodiny */}
+                                                                <td className="py-3 px-3.5 text-right">
+                                                                    <div className="font-bold text-emerald-700 text-sm">
+                                                                        {p.reservedHours.toLocaleString('cs-CZ')} h
+                                                                    </div>
+                                                                    <div className="text-[10px] text-stone-400">
+                                                                        M1: {p.room1Hours}h · M2: {p.room2Hours}h
+                                                                    </div>
+                                                                </td>
+
+                                                                {/* Podíl na vytížení (Progress bar) */}
+                                                                <td className="py-3 px-3.5">
+                                                                    <div className="w-36 sm:w-44 space-y-1">
+                                                                        <div className="flex justify-between items-center text-[11px]">
+                                                                            <span className="font-bold text-stone-800">
+                                                                                {p.hoursSharePercent}%
+                                                                            </span>
+                                                                            <span className="text-[10px] text-stone-400">
+                                                                                kapacita: {p.absoluteStudioOccupancyPercent}%
+                                                                            </span>
+                                                                        </div>
+                                                                        <div className="w-full h-2 bg-stone-200 rounded-full overflow-hidden">
+                                                                            <div 
+                                                                                className="h-full bg-indigo-600 rounded-full transition-all duration-500"
+                                                                                style={{ width: `${Math.min(100, p.hoursSharePercent)}%` }}
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                </td>
+
+                                                                {/* Počet rezervací */}
+                                                                <td className="py-3 px-3.5 text-right font-medium text-stone-700">
+                                                                    <span className="px-2 py-0.5 rounded-full bg-stone-100 font-bold">
+                                                                        {p.bookingCount}×
+                                                                    </span>
+                                                                </td>
+
+                                                                {/* Průměr Kč/h */}
+                                                                <td className="py-3 px-3.5 text-right font-semibold text-stone-800">
+                                                                    {p.averagePricePerHour > 0 ? `${p.averagePricePerHour} Kč/h` : '—'}
+                                                                </td>
+
+                                                                {/* Šipka pro rozbalení */}
+                                                                <td className="py-3 px-3.5 text-center text-stone-400">
+                                                                    {isExpanded ? (
+                                                                        <ChevronUp className="w-4 h-4 mx-auto text-indigo-600" />
+                                                                    ) : (
+                                                                        <ChevronDown className="w-4 h-4 mx-auto text-stone-400" />
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+
+                                                            {/* Rozbalený drill-down detail rezervací lektora */}
+                                                            {isExpanded && (
+                                                                <tr>
+                                                                    <td colSpan={7} className="p-0 bg-stone-50 border-y border-stone-200">
+                                                                        <div className="p-4 space-y-2.5">
+                                                                            <div className="flex items-center justify-between">
+                                                                                <span className="font-bold text-xs text-stone-800">
+                                                                                    Konkrétní rezervace lektora {p.name} ({p.bookings.length} lekcí):
+                                                                                </span>
+                                                                                <span className="text-[11px] text-stone-500">
+                                                                                    Celkový čas: <strong>{p.reservedHours} h</strong> · Tržba: <strong>{p.totalRevenue.toLocaleString()} Kč</strong>
+                                                                                </span>
+                                                                            </div>
+
+                                                                            {p.bookings.length === 0 ? (
+                                                                                <p className="text-stone-400 text-xs italic">V tomto měsíci žádné rezervace.</p>
+                                                                            ) : (
+                                                                                <div className="overflow-x-auto rounded-lg border border-stone-200 bg-white">
+                                                                                    <table className="w-full text-left text-[11px]">
+                                                                                        <thead>
+                                                                                            <tr className="bg-stone-50 text-stone-500 border-b border-stone-200 font-semibold">
+                                                                                                <th className="py-2 px-3">Datum & Čas</th>
+                                                                                                <th className="py-2 px-3">Místnost</th>
+                                                                                                <th className="py-2 px-3">Vybavení</th>
+                                                                                                <th className="py-2 px-3">Délka</th>
+                                                                                                <th className="py-2 px-3 text-right">Cena</th>
+                                                                                                <th className="py-2 px-3">Stav</th>
+                                                                                                <th className="py-2 px-3">Klient / Poznámka</th>
+                                                                                            </tr>
+                                                                                        </thead>
+                                                                                        <tbody className="divide-y divide-stone-100">
+                                                                                            {p.bookings.map((b) => (
+                                                                                                <tr key={b.id} className="hover:bg-stone-50/50">
+                                                                                                    <td className="py-2 px-3 font-medium text-stone-900">
+                                                                                                        {formatLocalDate(b.date)} v {b.time}
+                                                                                                    </td>
+                                                                                                    <td className="py-2 px-3">
+                                                                                                        <span className={`px-1.5 py-0.5 rounded font-bold text-[10px] ${
+                                                                                                            b.room === 1 ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'
+                                                                                                        }`}>
+                                                                                                            {b.room === 1 ? 'M1 (Malá)' : 'M2 (Velká)'}
+                                                                                                        </span>
+                                                                                                    </td>
+                                                                                                    <td className="py-2 px-3 text-stone-600">
+                                                                                                        {b.equipment === 'futon' ? 'Futon' : b.equipment === 'none' ? 'Bez' : 'Lehátko'}
+                                                                                                    </td>
+                                                                                                    <td className="py-2 px-3 text-stone-700">
+                                                                                                        {b.durationMinutes} min
+                                                                                                    </td>
+                                                                                                    <td className="py-2 px-3 text-right font-bold text-stone-900">
+                                                                                                        {b.price} Kč
+                                                                                                    </td>
+                                                                                                    <td className="py-2 px-3">
+                                                                                                        <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                                                                                            ['paid', 'completed'].includes(b.status)
+                                                                                                                ? 'bg-emerald-100 text-emerald-800'
+                                                                                                                : 'bg-amber-100 text-amber-800'
+                                                                                                        }`}>
+                                                                                                            {b.status === 'paid' ? 'Zaplaceno' : b.status === 'completed' ? 'Dokončeno' : 'Čeká'}
+                                                                                                        </span>
+                                                                                                    </td>
+                                                                                                    <td className="py-2 px-3 text-stone-500 truncate max-w-[180px]">
+                                                                                                        {b.clientName || b.note || '—'}
+                                                                                                    </td>
+                                                                                                </tr>
+                                                                                            ))}
+                                                                                        </tbody>
+                                                                                    </table>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    </td>
+                                                                </tr>
+                                                            )}
+                                                        </React.Fragment>
+                                                    );
+                                                })
+                                            )}
+                                        </tbody>
+
+                                        {/* Patička tabulky se součty (CELKEM STUDIO) */}
+                                        {selectedBIReport && (
+                                            <tfoot>
+                                                <tr className="bg-stone-100 font-bold text-stone-900 border-t-2 border-stone-300 text-xs">
+                                                    <td className="py-3 px-3.5 uppercase tracking-wide">
+                                                        Celkem studio ({selectedBIReport.label})
+                                                    </td>
+                                                    <td className="py-3 px-3.5 text-right font-black text-sm text-indigo-950">
+                                                        {selectedBIReport.totalRevenue.toLocaleString()} Kč
+                                                    </td>
+                                                    <td className="py-3 px-3.5 text-right font-black text-sm text-emerald-800">
+                                                        {selectedBIReport.totalReservedHours.toLocaleString('cs-CZ')} h
+                                                    </td>
+                                                    <td className="py-3 px-3.5">
+                                                        <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-900 text-xs font-black">
+                                                            100 % (obsazenost {selectedBIReport.overallStudioOccupancyPercent} %)
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-3 px-3.5 text-right font-bold">
+                                                        {selectedBIReport.totalBookingCount}×
+                                                    </td>
+                                                    <td className="py-3 px-3.5 text-right font-bold">
+                                                        {selectedBIReport.averagePricePerHour} Kč/h
+                                                    </td>
+                                                    <td></td>
+                                                </tr>
+                                            </tfoot>
+                                        )}
+                                    </table>
                                 </div>
                             </div>
 

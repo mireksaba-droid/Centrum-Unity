@@ -119,6 +119,16 @@ Administrátorský dashboard obsahuje dedikované analytické a kontrolní modul
   - **Sledování časového předstihu:** Kategorizuje přesuny na pozdní (< 24 h), rizikové v 6denním okně (24 h – 7 dní) a včasné (> 7 dní).
   - **Přehled per lektor:** Sleduje četnost přesunů u jednotlivých lektorů při zachování striktního řazení lektorů dle `sortPractitioners`.
   - **Kompletní auditní záznam:** Zobrazuje původní termín ➔ nový termín, posun v čase (+X dní), kdo a kdy změnu provedl, důvod přesunu a finanční vyčíslení.
+- **Měsíční BI přehled lektorů (Tržby, Hodiny a Podíl na obsazenosti):**
+  - **Měsíční rozpad per lektor:** Umožňuje přepínat mezi jednotlivými měsíci (např. Listopad 2026, Říjen 2026...) i sledovat „Celé období“.
+  - **Sledované metriky:**
+    1. *Přinesené peníze:* Celková tržba z pronájmu sálu v Kč + podíl lektora na celkových tržbách studia (%).
+    2. *Rezervované hodiny:* Součet odpracovaných hodin v sálech (s rozpadem na M1 Malá a M2 Velká).
+    3. *Podíl na obsazenosti:* Podíl lektora na celkově rezervovaném čase studia (%) a absolutní využití teoretické kapacity studia (2 sály × 16 h/den × počet dní).
+    4. *Počet rezervací a průměrná cena:* Počet odučených lekcí a průměrný výnos za 1 hodinu (Kč/h).
+  - **Interaktivní řazení a filtry:** Dodržuje striktní řazení lektorů dle Pravidla 1 (`sortPractitioners`), umožňuje přepínat mezi „Jen aktivní lektoři“ a „Všichni“, i seřadit dle tržby, hodin či obsazenosti.
+  - **Drill-down detail:** Rozkliknutí řádku lektora zobrazí konkrétní lekce v daném měsíci (datum, čas, sál, délka, cena, stav a klient).
+  - **Export do BI (CSV):** Jedním kliknutím stáhne formátované CSV (s UTF-8 BOM a oddělovačem `;`), připravené pro Google Sheets, PowerBI nebo Excel.
 - **Sjednocení jmen lektorů a hostů:** Všechny rezervace vytvořené pod profilem `guest` nebo se jménem `mirek` / `host` / `externista` jsou v BI grafech automaticky sjednoceny a prezentovány pod jednotným označením **„Host / Externista“**.
 - **Naplněnost místností (% využití kapacity):** Počítá celkové procento blokovaného času místností (M1 a M2) z celkové provozní kapacity (08:00–24:00 = 16 h/den × počet dní v měsíci). Do celkového procenta jsou započteny **jak čisté hodiny rezervací, tak povinné sanitární pauzy** na úklid a větrání (30 min stejný lektor / 60 min střídání).
 - **Zrealizované & Proběhlé Rezervace:** Speciální podsekce počítá a vizualizuje počet a celkovou finanční hodnotu všech úspěšně proběhlých rezervací (stavy `paid` nebo `completed` s datem v minulosti).

@@ -182,3 +182,45 @@ export interface ReferralStats {
   lastReferralAt?: string;
   recent: ReferralLog[];
 }
+
+export interface PractitionerBIMetrics {
+  practitionerId: string;
+  name: string;
+  avatarUrl?: string;
+  role?: string;
+  colorCode?: string;
+  isCustomPhoto?: boolean;
+  realizedRevenue: number;
+  pendingRevenue: number;
+  totalRevenue: number;
+  revenueSharePercent: number;
+  durationMinutes: number;
+  reservedHours: number;
+  hoursSharePercent: number;
+  absoluteStudioOccupancyPercent: number;
+  bookingCount: number;
+  averagePricePerHour: number;
+  averageDurationMinutes: number;
+  room1Hours: number;
+  room2Hours: number;
+  bookings: Booking[];
+}
+
+export interface MonthlyBIReport {
+  key: string;
+  label: string;
+  year: number;
+  month: number;
+  isCurrent: boolean;
+  daysInMonth: number;
+  totalTheoreticalCapacityHours: number;
+  totalRealizedRevenue: number;
+  totalPendingRevenue: number;
+  totalRevenue: number;
+  totalReservedHours: number;
+  totalBookingCount: number;
+  overallStudioOccupancyPercent: number;
+  averagePricePerHour: number;
+  activePractitionersCount: number;
+  practitioners: PractitionerBIMetrics[];
+}

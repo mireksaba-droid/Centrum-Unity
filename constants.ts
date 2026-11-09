@@ -721,7 +721,7 @@ export const RAW_PRACTITIONERS: Practitioner[] = [
 ];
 
 
-const isCustomPractitionerImage = (url?: string): boolean => {
+export const isCustomPractitionerImage = (url?: string): boolean => {
   if (!url || url.trim().length <= 5) return false;
   const cleanUrl = url.trim();
   // Lokální soubory z /public nebo data URL jsou vždy vlastní fotografie
