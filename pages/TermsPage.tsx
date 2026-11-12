@@ -56,7 +56,11 @@ const TermsPage: React.FC = () => {
                     </ul>
                     <div className="mt-4 p-3.5 bg-amber-50/80 border border-amber-200/80 rounded-xl text-stone-700">
                         <strong>Garance 1× bezplatného přesunu termínu (od 1. listopadu 2026):</strong><br/>
-                        U každé rezervace je nově umožněn jeden přesun na jiný volný termín v rezervačním systému. Pokud vám například onemocní klient, můžete ho bezplatně přeobjednat a rezervace vám nepropadne. Každou rezervaci lze bezplatně přesunout pouze 1×.
+                        U každé rezervace je nově umožněn jeden bezplatný přesun na jiný volný termín v rezervačním systému (až <strong>60 dní do budoucna</strong>). Pokud vám například onemocní klient, můžete ho bezplatně přeobjednat a rezervace vám nepropadne. Každou rezervaci lze bezplatně přesunout pouze 1×.
+                    </div>
+                    <div className="mt-3 p-3.5 bg-blue-50/80 border border-blue-200/80 rounded-xl text-stone-700 text-xs">
+                        <strong>Zrušení ze strany studia (ochrana lektora):</strong><br/>
+                        Dojde-li ke zrušení rezervace ze strany provozovatele studia (např. havárie, neplánovaná odstávka prostor či technické důvody), lektorovi se bez ohledu na čas storna vrací <strong>100 % zaplacené částky</strong> zpět na platební kartu bez uplatnění jakéhokoliv storno poplatku.
                     </div>
 
                     <h3>5. Dodání služby (Plnění)</h3>

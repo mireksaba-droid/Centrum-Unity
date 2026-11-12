@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams, Link } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import { CreditCard, CheckCircle, AlertTriangle, Loader2 } from 'lucide-react';
 import Button from '../components/Button';
@@ -180,18 +180,26 @@ const PaymentPage: React.FC = () => {
                         <p className="text-sm text-green-700">Tato rezervace je již zaplacena. Děkujeme!</p>
                     </div>
                 ) : (
-                    <Button 
-                        onClick={handlePay} 
-                        disabled={isProcessing}
-                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white flex justify-center items-center py-4"
-                    >
-                        {isProcessing ? (
-                            <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                        ) : (
-                            <CreditCard className="w-5 h-5 mr-2" />
-                        )}
-                        {isProcessing ? 'Zpracovávám...' : 'Zaplatit online přes GoPay'}
-                    </Button>
+                    <>
+                        <Button 
+                            onClick={handlePay} 
+                            disabled={isProcessing}
+                            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white flex justify-center items-center py-4 shadow-sm"
+                        >
+                            {isProcessing ? (
+                                <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                            ) : (
+                                <CreditCard className="w-5 h-5 mr-2" />
+                            )}
+                            {isProcessing ? 'Zpracovávám...' : 'Zaplatit online přes GoPay'}
+                        </Button>
+                        <div className="text-xs text-stone-500 text-center mt-2.5">
+                            Platbou souhlasíte se{' '}
+                            <Link to="/obchodni-podminky" target="_blank" rel="noopener noreferrer" className="underline hover:text-stone-800 font-medium">
+                                storno podmínkami studia
+                            </Link>.
+                        </div>
+                    </>
                 )}
                 
                 <div className="mt-6 text-center">

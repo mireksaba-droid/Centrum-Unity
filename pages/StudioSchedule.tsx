@@ -1176,14 +1176,22 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                     </div>
                                 </div>
                                 {paymentUrl ? (
-                                    <a
-                                        href={paymentUrl}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-white px-6 w-full md:w-auto bg-emerald-600 hover:bg-emerald-700 py-2 rounded-xl font-medium text-center shadow-sm"
-                                    >
-                                        Pokračovat na platební bránu
-                                    </a>
+                                    <div className="flex flex-col items-center md:items-end gap-1.5 w-full md:w-auto">
+                                        <a
+                                            href={paymentUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-white px-6 w-full md:w-auto bg-emerald-600 hover:bg-emerald-700 py-2 rounded-xl font-medium text-center shadow-sm"
+                                        >
+                                            Pokračovat na platební bránu
+                                        </a>
+                                        <div className="text-[11px] text-stone-500 text-center md:text-right">
+                                            Platbou souhlasíte se{' '}
+                                            <Link to="/obchodni-podminky" target="_blank" rel="noopener noreferrer" className="underline hover:text-stone-800 font-medium">
+                                                storno podmínkami
+                                            </Link>
+                                        </div>
+                                    </div>
                                 ) : (() => {
                                     const colInfo = checkBookingCollision({
                                         newDate: selectedSlot.date,
@@ -1196,13 +1204,21 @@ const StudioSchedule: React.FC<StudioScheduleProps> = ({
                                     const isBtnDisabled = isProcessing || colInfo.hasCollision || (!!colInfo.warning && !confirmParallel);
 
                                     return (
-                                        <Button
-                                            onClick={adminForPractitioner ? handleAdminPaymentBooking : handleConfirmBooking}
-                                            disabled={isBtnDisabled}
-                                            className={`text-white px-6 w-full md:w-auto ${isBtnDisabled ? 'bg-stone-300 text-stone-500 cursor-not-allowed hover:bg-stone-300' : 'bg-indigo-600 hover:bg-indigo-700'}`}
-                                        >
-                                            {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : (adminForPractitioner ? 'Odeslat výzvu k platbě' : 'Zaplatit online')}
-                                        </Button>
+                                        <div className="flex flex-col items-center md:items-end gap-1.5 w-full md:w-auto">
+                                            <Button
+                                                onClick={adminForPractitioner ? handleAdminPaymentBooking : handleConfirmBooking}
+                                                disabled={isBtnDisabled}
+                                                className={`text-white px-6 w-full md:w-auto ${isBtnDisabled ? 'bg-stone-300 text-stone-500 cursor-not-allowed hover:bg-stone-300' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                                            >
+                                                {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : (adminForPractitioner ? 'Odeslat výzvu k platbě' : 'Zaplatit online')}
+                                            </Button>
+                                            <div className="text-[11px] text-stone-500 text-center md:text-right">
+                                                Odesláním souhlasíte se{' '}
+                                                <Link to="/obchodni-podminky" target="_blank" rel="noopener noreferrer" className="underline hover:text-stone-800 font-medium">
+                                                    storno podmínkami
+                                                </Link>
+                                            </div>
+                                        </div>
                                     );
                                 })()}
                             </div>
