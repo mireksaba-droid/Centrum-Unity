@@ -6,6 +6,7 @@
 **Název:** Centrum Unity (Coworking Space pro wellness)
 **Adresa studia:** Šmilovského 10, Vinohrady, Praha 2, 120 00
 **Provozovatel:** Eva Kadlecová - Centrum Unity (IČO: 73750565)
+**Autor a vývojář softwaru:** Miroslav Sába (© 2026 Miroslav Sába)
 **Popis:** Platforma pro správu coworkingového wellness centra. Lektoři (terapeuti, kouči, maséři) si rezervují místnosti, správce (Eva) spravuje kalendář, profily, skupinové události a platby. Součástí jsou online platby přes GoPay a e-mailové notifikace.
 
 ## 2. Technologický Stack

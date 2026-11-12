@@ -62,8 +62,15 @@ export const Footer: React.FC = () => {
                 </div>
 
             </div>
-            <div className="max-w-7xl mx-auto px-4 mt-12 pt-6 border-t border-[#d8cfc0] text-center text-xs text-stone-500">
-                © 2026 Centrum Unity. Všechna práva vyhrazena.
+            <div className="max-w-7xl mx-auto px-4 mt-12 pt-6 border-t border-[#d8cfc0] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-stone-500">
+                <div>
+                    © 2026 Centrum Unity. Všechna práva vyhrazena.
+                </div>
+                <div className="flex items-center gap-1.5 text-stone-600 font-medium">
+                    <span>Rezervační systém</span>
+                    <span>•</span>
+                    <span>Vývoj & © 2026 Miroslav Sába</span>
+                </div>
             </div>
         </footer>
     );

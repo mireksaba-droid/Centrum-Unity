@@ -81,10 +81,13 @@ const TermsPage: React.FC = () => {
                         V případě oprávněné reklamace má kupující nárok na slevu z pronájmu, nebo vrácení plné částky (při nemožnosti prostor užívat).
                     </p>
 
-                    <h3>7. Závěrečná ustanovení</h3>
+                    <h3>7. Závěrečná ustanovení a autorská práva</h3>
                     <p>
                         Tyto aktualizované obchodní a storno podmínky nabývají platnosti a účinnosti dnem <strong>1. listopadu 2026</strong>.<br/>
                         Provozovatel si vyhrazuje právo obchodní podmínky měnit a doplňovat.
+                    </p>
+                    <p className="mt-4 p-3.5 bg-stone-50 border border-stone-200 rounded-xl text-stone-600 text-xs leading-relaxed">
+                        <strong>Autorská práva k softwaru:</strong> Tento rezervační systém, jeho programový kód, softwarová architektura a uživatelské rozhraní jsou autorským dílem <strong>Miroslava Sáby</strong> (© 2026 Miroslav Sába) a jsou chráněny zákonem č. 121/2000 Sb., o právu autorském, v platném znění.
                     </p>
                 </div>
             </div>

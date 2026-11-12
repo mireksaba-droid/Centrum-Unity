@@ -174,8 +174,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         </div>
       )}
       
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-stone-400 text-xs text-center w-full">
-          © 2026 Centrum Unity
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-stone-400 text-xs text-center w-full px-4">
+          © 2026 Centrum Unity · Rezervační systém © Miroslav Sába
       </div>
     </div>
   );
