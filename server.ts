@@ -1472,7 +1472,7 @@ async function startServer() {
       const paymentPayload = {
         payer: {
           default_payment_instrument: "PAYMENT_CARD",
-          allowed_payment_instruments: ["PAYMENT_CARD", "BANK_ACCOUNT", "GPAY", "APPLE_PAY"]
+          allowed_payment_instruments: ["PAYMENT_CARD", "GPAY", "APPLE_PAY"]
         },
         amount: amountHaler,
         currency: "CZK",
@@ -1497,9 +1497,7 @@ async function startServer() {
           { name: "bookingId", value: String(bookingId) },
           { name: "isExtension", value: "true" },
           { name: "extraMinutes", value: String(extraMinutes) },
-          { name: "newTotalMinutes", value: String(newTotalMinutes) },
-          { name: "newTotalPrice", value: String(newTotalPrice) },
-          { name: "extensionAmountHaler", value: String(amountHaler) }
+          { name: "newTotalPrice", value: String(newTotalPrice) }
         ],
         lang: "CS"
       };

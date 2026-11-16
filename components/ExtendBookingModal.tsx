@@ -124,7 +124,6 @@ export const ExtendBookingModal: React.FC<ExtendBookingModalProps> = ({
     setErrorMsg(null);
 
     try {
-      const cleanBase = window.location.origin;
       const res = await fetch('/api/create-extension-payment', {
         method: 'POST',
         headers: {
@@ -134,11 +133,17 @@ export const ExtendBookingModal: React.FC<ExtendBookingModalProps> = ({
         body: JSON.stringify({
           bookingId: booking.id,
           extraMinutes: selectedOption.extraMinutes,
-          returnUrl: window.location.href
+          returnUrl: window.location.origin + window.location.pathname
         })
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(`Neočekávaná odpověď serveru (${res.status}): ${text.slice(0, 120)}`);
+      }
       if (!res.ok) {
         throw new Error(data.error || 'Nepodařilo se vytvořit platbu za prodloužení.');
       }
