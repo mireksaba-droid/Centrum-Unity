@@ -1489,6 +1489,10 @@ async function startServer() {
           return_url: retUrl,
           notification_url: `${cleanBase}/api/gopay/notify`
         },
+        target: {
+          type: "ACCOUNT",
+          goid: process.env.GOPAY_GOID
+        },
         additional_params: [
           { name: "bookingId", value: String(bookingId) },
           { name: "isExtension", value: "true" },

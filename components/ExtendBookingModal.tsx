@@ -264,7 +264,7 @@ export const ExtendBookingModal: React.FC<ExtendBookingModalProps> = ({
           {errorMsg && (
             <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 text-rose-800 flex items-start gap-3">
               <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-              <div className="text-sm">{errorMsg}</div>
+              <div className="text-sm min-w-0 flex-1 break-words">{errorMsg}</div>
             </div>
           )}
 
