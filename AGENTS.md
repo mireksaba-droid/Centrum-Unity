@@ -18,9 +18,14 @@
 
 4. **GoPay Integrace:**
    - V AI Studio (a obecně v iframech) nefunguje inline GoPay brána kvůli `X-Frame-Options`. Platba musí být otevírána do nového okna `window.open(url, '_blank')` nebo natvrdo přes `window.location.href`.
-   - Backendové API pro GoPay refundace (`/api/refund`) vrací někdy `text/plain` při chybách, proto je nutné parsovat odpovědi obezřetně (`res.text()` a v bloku `try/catch` zkusit `JSON.parse`).
+   - **Povinný `target` v payloadu platby:** Každé volání `POST /payments/payment` (včetně doplatků za prodloužení `/api/create-extension-payment`) **musí** obsahovat objekt `target: { type: "ACCOUNT", goid: process.env.GOPAY_GOID }`. Bez něj GoPay vytvoření platby odmítne (`field: target mandatory`).
+   - **Přísný limit `additional_params` (max 4 položky):** GoPay REST API povoluje v poli `additional_params` **maximálně 4 položky** (klíč–hodnota). Při odeslání 5 a více položek GoPay platbu zamítne (`field: additional_params`). Další metadata pro webhook/rekonciliaci ukládejte do Firestore (např. `pendingExtension`).
+   - **Povolené platební nástroje a `returnUrl`:** Všude sjednoceně posílat `allowed_payment_instruments: ["PAYMENT_CARD", "GPAY", "APPLE_PAY"]` a `returnUrl: window.location.origin + window.location.pathname`.
+   - Backendové API pro GoPay refundace (`/api/refund`) i klientské volání (`/api/create-extension-payment`) musí parsovat odpovědi obezřetně (`res.text()` a v bloku `try/catch` zkusit `JSON.parse`), protože brána či proxy mohou při chybě vrátit `text/plain` nebo HTML.
    - GoPay očekává částky v **haléřích** (`amount * 100`).
+   - **Manuální refundace při chybě brány (kód 330):** Pokud automatická refundace přes GoPay selže (typicky chyba 330 – nedostatečný zůstatek na peněžence GoPay po denním převodu na účet), termín v sále se přesto uvolní a na rezervaci se nastaví `manualRefundRequired: true`, `manualRefundSettled: false`, aby administrátorka mohla částku vyplatit z bankovního účtu v `AdminDashboard.tsx`.
    - **Přednost stavu PAID (zpracování webhooku):** Pokud z GoPay dorazí notifikace se stavem `PAID` (úspěšná úhrada), má absolutní přednost a rezervaci vždy aktivuje do stavu `paid` (smaže případné `cancelledAt`/`cancellationReason` a zapíše `paidAt`), i kdyby byl předchozí pokus o platbu stornován či vypršel.
+   - **Bankovní zúčtování vratek:** Jakmile GoPay hlásí stav `REFUNDED`, peníze už z brány odešly; jejich připsání na kartu klienta trvá standardně 3–5 pracovních dnů a v bankovnictví se často zobrazí se zpětným datem původní platby.
 
 5. **Odesílání e-mailů (SMTP přes webkitty.eu):**
    - E-maily se posílají přes SMTP pomocí `nodemailer` z backendu (`server.ts`, endpoint `/api/send-email` a pozadí). Konfigurace přes proměnné `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `FROM_EMAIL` (viz `.env.example`).

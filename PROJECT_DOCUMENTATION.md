@@ -26,7 +26,8 @@
 ```
 /
 ├── components/           # UI komponenty (Button, Footer, PractitionerCard,
-│                         #   RescheduleModal, Toast, MiniCalendar)
+│                         #   RescheduleModal, ExtendBookingModal, ShortenBookingModal,
+│                         #   Toast, MiniCalendar)
 ├── contexts/
 │   └── ToastContext.tsx  # Správa toast zpráv
 ├── pages/                # Login, StudioSchedule, AdminDashboard,
@@ -127,7 +128,7 @@ Administrátorský dashboard obsahuje dedikované analytické a kontrolní modul
     2. *Rezervované hodiny:* Součet odpracovaných hodin v sálech (s rozpadem na M1 Malá a M2 Velká).
     3. *Podíl na obsazenosti:* Podíl lektora na celkově rezervovaném čase studia (%) a absolutní využití teoretické kapacity studia (2 sály × 16 h/den × počet dní).
     4. *Počet rezervací a průměrná cena:* Počet odučených lekcí a průměrný výnos za 1 hodinu (Kč/h).
-  - **Interaktivní řazení a filtry:** Dodržuje striktní řazení lektorů dle Pravidla 1 (`sortPractitioners`), umožňuje přepínat mezi „Jen aktivní lektoři“ a „Všichni“, i seřadit dle tržby, hodin či obsazenosti.
+  - **Interaktivní řazení a filtry:** Výchozí řazení v Měsíčním BI přehledu lektorů je vždy **sestupně od největší tržby po nejmenší** (umožňuje přepnout řazení dle hodin, obsazenosti či výchozího pořadí `sortPractitioners`) a přepínat mezi „Jen aktivní lektoři“ a „Všichni“.
   - **Drill-down detail:** Rozkliknutí řádku lektora zobrazí konkrétní lekce v daném měsíci (datum, čas, sál, délka, cena, stav a klient).
   - **Export do BI (CSV):** Jedním kliknutím stáhne formátované CSV (s UTF-8 BOM a oddělovačem `;`), připravené pro Google Sheets, PowerBI nebo Excel.
 - **Sjednocení jmen lektorů a hostů:** Všechny rezervace vytvořené pod profilem `guest` nebo se jménem `mirek` / `host` / `externista` jsou v BI grafech automaticky sjednoceny a prezentovány pod jednotným označením **„Host / Externista“**.
@@ -217,7 +218,11 @@ Konfigurace je v `firebase-applet-config.json`. Klient i server používají web
 - **Doporučení pro lektory:** Pro okamžité ověření volné kapacity a objednávání je vždy závazná webová aplikace Centrum Unity napojená na živou databázi.
 
 ### GoPay (platby a refundace)
-- Vytváření plateb: `/api/create-payment` (auth) a `/api/public-payment` (veřejné, rate-limit).
+- Vytváření plateb: `/api/create-payment` (auth), `/api/public-payment` (veřejné, rate-limit) a `/api/create-extension-payment` (auth, doplatky za prodloužení rezervace).
+- **Technická omezení GoPay REST API (kritické):**
+  - Každý požadavek na vytvoření platby **musí** obsahovat objekt `target: { type: "ACCOUNT", goid: process.env.GOPAY_GOID }`.
+  - Pole `additional_params` smí obsahovat **maximálně 4 položky** (např. u prodloužení pouze `bookingId`, `isExtension`, `extraMinutes`, `newTotalPrice`; další data jako `newTotalMinutes` se ukládají do objektu `pendingExtension` ve Firestore). Odeslání ≥ 5 položek GoPay zamítne chybou validace.
+  - Povolené platební metody jednotně: `["PAYMENT_CARD", "GPAY", "APPLE_PAY"]`.
 - Webhook: `/api/gopay/notify` asynchronně aktualizuje stav rezervace (`PAID` → `paid`, `CANCELED`/`TIMEOUTED` → `cancelled`, `REFUNDED` → `refunded`).
 - **Priorita úspěšné platby (`PAID`):** Pokud klient provedl opakovaný pokus a z brány dorazí stav `PAID`, systém tento stav bezpodmínečně aplikuje (i kdyby předchozí pokus byl stornován či vypršel), odstraní případné `cancelledAt`/`cancellationReason` a zapíše `paidAt`.
 - Ověření stavu po návratu: `/api/gopay/status`.
@@ -226,7 +231,13 @@ Konfigurace je v `firebase-applet-config.json`. Klient i server používají web
   - Více než 7 dní předem: 100% částky vráceno na kartu přes GoPay REST API.
   - 7 dní až 24 h předem: 50% částky vráceno na kartu (50 % storno poplatek centru).
   - Méně než 24 h předem: storno poplatek 100 %, GoPay refundace neprobíhá (0 Kč), termín se pouze uvolní.
+  - Při selhání automatické GoPay refundace (chyba 330 – nedostatečný zůstatek po denním převodu na účet) systém uvolní termín a označí rezervaci `manualRefundRequired: true` pro vyplacení z banky v `AdminDashboard.tsx`.
   - Všechny částky pro GoPay API se striktně převádějí na haléře (`amount * 100`).
+
+### Obchodní podmínky, souhlas před platbou a autorská práva
+- **Stránka podmínek (`/obchodni-podminky`, `TermsPage.tsx`):** Obsahuje 3-pásmová storno pravidla od 1. 11. 2026, garanci 1× bezplatného přesunu až 60 dní dopředu, ochranu lektora (100% vrácení při zrušení správcem) i ustanovení o autorských právech k softwaru.
+- **Souhlas při platbě:** Přímé prokliky na storno podmínky jsou zobrazeny přímo před tlačítkem platby v `StudioSchedule.tsx` i na stránce `PaymentPage.tsx`.
+- **Autorská práva (Copyright):** Označení autora **Miroslav Sába (© 2026)** je uvedeno v patičce (`Footer.tsx`), na přihlašovací obrazovce (`Login.tsx`), v obchodních podmínkách (`TermsPage.tsx`), v HTML meta hlavičce (`index.html`) i v této dokumentaci.
 
 ### SMTP (webkitty.eu)
 Viz sekce 6. Doporučeno založit samostatnou schránku pro odesílání; `FROM_EMAIL` musí být na vlastní doméně.
@@ -293,11 +304,12 @@ Cílem je kontejnerové prostředí (např. Google Cloud Run):
 - **Automatická testovací sada (`npm test`):**
   - Implementováno v `scripts/test_cancellation_and_reschedule.ts`.
   - Spouští se příkazem `npm test`.
-  - Obsahuje 17 automatických unit a integračních testů:
-    1. *Storno pásma a přechodné pravidlo:* Testování chování před 1. 11. 2026 (> 24 h = 100 % refund) i po 1. 11. 2026 (> 7 dní = 100 % refund / 0 % poplatek, 24 h – 7 dní = 50 % refund / 50 % poplatek, < 24 h = 0 % refund / 100 % poplatek). Zaokrouhlování na celé koruny a nulové rezervace.
+  - Obsahuje **25 automatických unit a integračních testů**:
+    1. *Storno pásma, přechodné pravidlo a admin výjimka:* Testování chování před 1. 11. 2026 (> 24 h = 100 % refund), od 1. 11. 2026 (> 7 dní = 100 % refund / 0 % poplatek, 24 h – 7 dní = 50 % refund / 50 % poplatek, < 24 h = 0 % refund / 100 % poplatek) i 100% vrácení při zrušení administrátorkou Evou bez ohledu na čas.
     2. *Garance 1× bezplatného přesunu:* Povolení 1. přesunu lektorem (`rescheduleCount = 0`), uzamčení dalších samoobslužných přesunů (`rescheduleCount = 1`) a neomezené právo administrátorky Evy.
     3. *Kolizní ochrana při přesunu:* Detekce kolizí s obsazeným slotem, dodržení 60minutové hygienické pauzy při střídání lektorů a povolení přesunu na bezpečný slot.
-    4. *E-mailové šablony:* Ověření textu nových storno podmínek i garance přesunu v potvrzovacím e-mailu a přesného finančního rozpisu v e-mailu o stornu.
+    4. *E-mailové šablony:* Ověření textu nových storno podmínek i garance přesunu v potvrzovacím e-mailu a přesného finančního rozpisu v e-mailu o stornu i admin výjimce.
+    5. *Zkracování rezervací s refundací rozdílu:* Přepočet rozdílu ceny po zkrácení délky lekce správcem a ověření e-mailu o vrácení rozdílu.
 - **Manuální checklist:** přihlášení (platný/neplatný PIN), vytvoření rezervace (blokace slotu), skloňované oslovení v potvrzení, vybavení v e-mailu, test SMTP přes `/api/test-email`, storno po vypršení 24 h, audit přesunů a detekce podezřelých storen, admin rezervace zdarma, reset dat.
 
 ## 12. Analytika a oddělení Google Analytics (GA4)
