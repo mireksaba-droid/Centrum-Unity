@@ -121,6 +121,11 @@ Administrátorský dashboard obsahuje dedikované analytické a kontrolní modul
   - **Sledování časového předstihu:** Kategorizuje přesuny na pozdní (< 24 h), rizikové v 6denním okně (24 h – 7 dní) a včasné (> 7 dní).
   - **Přehled per lektor:** Sleduje četnost přesunů u jednotlivých lektorů při zachování striktního řazení lektorů dle `sortPractitioners`.
   - **Kompletní auditní záznam:** Zobrazuje původní termín ➔ nový termín, posun v čase (+X dní), kdo a kdy změnu provedl, důvod přesunu a finanční vyčíslení.
+- **Audit storna a storno poplatků (Záložka „Audit storna“):**
+  - Přehled zrušených a refundovaných rezervací rozpadnutý podle 3-pásmových storno pravidel od 1. 11. 2026: **0 % poplatek** (> 7 dní předem, 100 % vráceno), **50 % poplatek** (24 h – 7 dní, půl na půl) a **100 % poplatek** (< 24 h, propadá studiu), včetně samostatného vyčlenění storen **správcem Evou (`🛡️ 0 %`)**.
+  - **Oddělení od nedokončených plateb:** Expirované či opuštěné pokusy o online platbu (`payment_expired` / `payment_cancelled` bez `paidAt`) jsou automaticky odfiltrovány ze základních finančních statistik (lze zobrazit volitelným přepínačem).
+  - **Detekce anomálií a ručních vratek (`⚠️ Ke kontrole`):** Automaticky zvýrazňuje stornované placené rezervace bez zaznamenané vratky/poplatku (`price > 0`, `fee = 0`, `refund = 0`) i čekající ruční bankovní vratky (GoPay kód 330) s možností potvrzení vyplacení přímo v detailu řádku.
+  - **Měsíční přepínání, rozpad per lektor a CSV export:** Filtrování po měsících provedení storna či za celé období, rozpad per lektor řazený dle `sortPractitioners` a export do CSV (`UTF-8 BOM`, `;`).
 - **Měsíční BI přehled lektorů (Tržby, Hodiny a Podíl na obsazenosti):**
   - **Měsíční rozpad per lektor:** Umožňuje přepínat mezi jednotlivými měsíci (např. Listopad 2026, Říjen 2026...) i sledovat „Celé období“.
   - **Sledované metriky:**

@@ -14,6 +14,7 @@ import { useStore } from '../store/useStore';
 import { isDemoMode } from '../services/firebase';
 import { generatePaymentRequestEmail } from '../utils/emailTemplates';
 import { isPreviewEnvironment } from '../utils/env';
+import { calculateCancellationPolicy } from '../utils/cancellationPolicy';
 
 // Testovací / ignorovaná jména – nezobrazují se ve statistikách, aktivitě ani seznamu objednávek.
 // Normalizace = malá písmena + odstranění diakritiky + sjednocení mezer, ať to chytne i "MIREK SABA", "Mírek  Sába" apod.
@@ -71,7 +72,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     onLogout
 }) => {
     const { addToast } = useToast();
-    const [activeTab, setActiveTab] = useState<'calendar' | 'analytics' | 'reschedules' | 'schedule' | 'team' | 'events'>('calendar');
+    const [activeTab, setActiveTab] = useState<'calendar' | 'analytics' | 'reschedules' | 'cancellations' | 'schedule' | 'team' | 'events'>('calendar');
     const [searchQuery, setSearchQuery] = useState('');
     const [scheduleFilter, setScheduleFilter] = useState<'all' | 'today' | 'upcoming'>('all');
     const [masterCalUrl, setMasterCalUrl] = useState<string>('');
@@ -120,6 +121,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     const toggleRescheduleRow = (id: string) => {
         setExpandedRescheduleRows(prev => ({ ...prev, [id]: !prev[id] }));
+    };
+
+    // === AUDIT STORNA & POPLATKŮ (0 % / 50 % / 100 %) ===
+    const [stornoAuditMonth, setStornoAuditMonth] = useState<string>('current');
+    const [stornoAuditFilterType, setStornoAuditFilterType] = useState<'all' | 'zero' | 'half' | 'full' | 'admin' | 'review'>('all');
+    const [stornoAuditPractitionerFilter, setStornoAuditPractitionerFilter] = useState<string>('all');
+    const [stornoAuditSearch, setStornoAuditSearch] = useState<string>('');
+    const [stornoAuditIncludeExpired, setStornoAuditIncludeExpired] = useState<boolean>(false);
+    const [expandedStornoAuditRows, setExpandedStornoAuditRows] = useState<Record<string, boolean>>({});
+
+    const toggleStornoAuditRow = (id: string) => {
+        setExpandedStornoAuditRows(prev => ({ ...prev, [id]: !prev[id] }));
     };
 
     const loadReferrals = async () => {
@@ -1423,6 +1436,364 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         return list;
     }, [rescheduleAuditData, rescheduleFilterType, reschedulePractitionerFilter, rescheduleSearch]);
 
+    const stornoAuditData = useMemo(() => {
+        const now = new Date();
+        const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+        // Pořadí lektorů striktně dle AGENTS.md (sortPractitioners)
+        const sortedPracts = sortPractitioners(practitioners);
+        const practitionerRankMap = new Map<string, number>();
+        sortedPracts.forEach((p, idx) => {
+            practitionerRankMap.set(p.name, idx);
+            if (p.id === 'guest') {
+                practitionerRankMap.set('Host / Externista', idx);
+            }
+        });
+
+        const rawCancelled = allBookings.filter(b => {
+            if (isIgnoredName(b.bookedByName)) return false;
+            return b.status === 'cancelled' || b.status === 'refunded';
+        });
+
+        type StornoTierCategory = 'zero' | 'half' | 'full' | 'admin' | 'review' | 'expired';
+
+        const allItems = rawCancelled.map(b => {
+            const price = Math.max(0, Number(b.price) || 0);
+            const isAdminCancel = !!(
+                b.adminCancellationOverride ||
+                b.cancellationReason === 'cancelled_by_admin_full_refund' ||
+                b.cancelledBy === 'admin'
+            );
+            const isUnpaidExpired = (
+                ((b.cancellationReason === 'payment_expired' || b.cancellationReason === 'payment_cancelled') && !b.paidAt) ||
+                (b.paymentMethod === 'online' && !b.paidAt && !b.paymentId && b.refundAmount === undefined && b.cancellationFee === undefined && b.status === 'cancelled' && !isAdminCancel)
+            );
+
+            const cancelledAtIso = b.cancelledAt || (b as any).updatedAt || b.createdAt || (b.date ? `${b.date}T00:00:00` : undefined);
+            const cancelledDateObj = cancelledAtIso ? new Date(cancelledAtIso) : null;
+            const validCancelledDate = cancelledDateObj && !isNaN(cancelledDateObj.getTime()) ? cancelledDateObj : null;
+
+            const lessonStart = parseLocalDate(b.date, b.time);
+            const leadHours = validCancelledDate
+                ? (lessonStart.getTime() - validCancelledDate.getTime()) / (1000 * 60 * 60)
+                : null;
+
+            const monthKey = validCancelledDate
+                ? `${validCancelledDate.getFullYear()}-${String(validCancelledDate.getMonth() + 1).padStart(2, '0')}`
+                : (b.date ? b.date.slice(0, 7) : currentMonthKey);
+
+            let feeAmount = 0;
+            let refundAmount = 0;
+            let feePercent = 0;
+            let tierCategory: StornoTierCategory = 'zero';
+            let isAnomaly = false;
+            let isRetroactiveEstimate = false;
+
+            if (isUnpaidExpired) {
+                tierCategory = 'expired';
+                feeAmount = 0;
+                refundAmount = 0;
+                feePercent = 0;
+            } else if (isAdminCancel) {
+                tierCategory = 'admin';
+                feeAmount = b.cancellationFee !== undefined ? Math.max(0, Number(b.cancellationFee) || 0) : 0;
+                refundAmount = b.refundAmount !== undefined ? Math.max(0, Number(b.refundAmount) || 0) : price;
+                feePercent = 0;
+            } else if (b.cancellationFee !== undefined || b.refundAmount !== undefined) {
+                feeAmount = Math.max(0, Number(b.cancellationFee ?? 0));
+                refundAmount = b.refundAmount !== undefined
+                    ? Math.max(0, Number(b.refundAmount) || 0)
+                    : Math.max(0, price - feeAmount);
+
+                if (price > 0 && feeAmount === 0 && refundAmount === 0) {
+                    tierCategory = 'review';
+                    isAnomaly = true;
+                    feePercent = 0;
+                } else if (feeAmount === 0) {
+                    tierCategory = 'zero';
+                    feePercent = 0;
+                } else if (refundAmount > 0 && feeAmount < price) {
+                    tierCategory = 'half';
+                    feePercent = price > 0 ? Math.round((feeAmount / price) * 100) : 50;
+                } else {
+                    tierCategory = 'full';
+                    feePercent = 100;
+                }
+            } else if (b.status === 'refunded' || b.cancellationReason === 'cancelled_by_guest_refunded') {
+                tierCategory = 'zero';
+                feeAmount = 0;
+                refundAmount = price;
+                feePercent = 0;
+            } else if (price === 0) {
+                tierCategory = 'zero';
+                feeAmount = 0;
+                refundAmount = 0;
+                feePercent = 0;
+            } else {
+                isRetroactiveEstimate = true;
+                const policy = calculateCancellationPolicy(
+                    b.date,
+                    b.time,
+                    price,
+                    validCancelledDate || new Date(),
+                    false
+                );
+                feeAmount = policy.feeAmount;
+                refundAmount = policy.refundAmount;
+                feePercent = policy.feePercentage;
+                tierCategory = policy.tier === 'full_refund' ? 'zero' : policy.tier === 'half_fee' ? 'half' : 'full';
+            }
+
+            const isManualPending = !!(b.manualRefundRequired && !b.manualRefundSettled);
+            const practitionerName = resolvePractitionerDisplayName(b, practitioners);
+
+            return {
+                booking: b,
+                id: b.id,
+                practitionerName,
+                practitionerId: b.bookedByUserId,
+                monthKey,
+                cancelledAtIso,
+                cancelledTimestamp: validCancelledDate ? validCancelledDate.getTime() : 0,
+                leadHours,
+                price,
+                feeAmount,
+                refundAmount,
+                feePercent,
+                tierCategory,
+                isUnpaidExpired,
+                isAdminCancel,
+                isManualPending,
+                isAnomaly,
+                isRetroactiveEstimate,
+                needsReview: isAnomaly || isManualPending,
+                wasRescheduledBeforeCancel: !!(b.rescheduledAt || (b.rescheduleCount && b.rescheduleCount > 0))
+            };
+        }).sort((a, b) => b.cancelledTimestamp - a.cancelledTimestamp);
+
+        // Dostupné měsíce pro výběr (od nejnovějšího)
+        const monthKeysSet = new Set<string>([currentMonthKey]);
+        allItems.forEach(it => {
+            if (it.monthKey && /^\d{4}-\d{2}$/.test(it.monthKey)) {
+                monthKeysSet.add(it.monthKey);
+            }
+        });
+
+        const monthOptions = Array.from(monthKeysSet)
+            .sort((a, b) => b.localeCompare(a))
+            .map(key => {
+                const [yy, mm] = key.split('-').map(Number);
+                const d = new Date(yy, (mm || 1) - 1, 1);
+                const rawLabel = d.toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' });
+                const cap = rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1);
+                return {
+                    key,
+                    label: key === currentMonthKey ? `${cap} (Tento měsíc)` : cap,
+                    isCurrent: key === currentMonthKey
+                };
+            });
+
+        const resolvedMonthKey = stornoAuditMonth === 'current' ? currentMonthKey : stornoAuditMonth;
+        const selectedMonthLabel = resolvedMonthKey === 'all'
+            ? 'Celé období (Vše)'
+            : (monthOptions.find(m => m.key === resolvedMonthKey)?.label || resolvedMonthKey);
+
+        const monthItems = resolvedMonthKey === 'all'
+            ? allItems
+            : allItems.filter(it => it.monthKey === resolvedMonthKey);
+
+        const paidMonthItems = monthItems.filter(it => !it.isUnpaidExpired);
+        const expiredMonthItems = monthItems.filter(it => it.isUnpaidExpired);
+
+        const zeroItems = paidMonthItems.filter(it => it.tierCategory === 'zero');
+        const halfItems = paidMonthItems.filter(it => it.tierCategory === 'half');
+        const fullItems = paidMonthItems.filter(it => it.tierCategory === 'full');
+        const adminItems = paidMonthItems.filter(it => it.tierCategory === 'admin');
+        const reviewItems = paidMonthItems.filter(it => it.needsReview);
+
+        const zeroCount = zeroItems.length;
+        const zeroRefundTotal = zeroItems.reduce((s, it) => s + it.refundAmount, 0);
+        const halfCount = halfItems.length;
+        const halfFeeTotal = halfItems.reduce((s, it) => s + it.feeAmount, 0);
+        const halfRefundTotal = halfItems.reduce((s, it) => s + it.refundAmount, 0);
+        const fullCount = fullItems.length;
+        const fullFeeTotal = fullItems.reduce((s, it) => s + it.feeAmount, 0);
+        const adminCount = adminItems.length;
+        const adminRefundTotal = adminItems.reduce((s, it) => s + it.refundAmount, 0);
+        const reviewCount = reviewItems.length;
+        const expiredCount = expiredMonthItems.length;
+
+        const totalPaidCount = paidMonthItems.length;
+        const totalOriginalValue = paidMonthItems.reduce((s, it) => s + it.price, 0);
+        const totalStudioKept = paidMonthItems.reduce((s, it) => s + it.feeAmount, 0);
+        const totalRefunded = paidMonthItems.reduce((s, it) => s + it.refundAmount, 0);
+
+        // Rozpad per lektor (striktně řazený dle sortPractitioners)
+        const pMap = new Map<string, {
+            name: string;
+            total: number;
+            zero: number;
+            half: number;
+            full: number;
+            admin: number;
+            review: number;
+            totalFee: number;
+            totalRefunded: number;
+        }>();
+
+        paidMonthItems.forEach(it => {
+            if (!pMap.has(it.practitionerName)) {
+                pMap.set(it.practitionerName, {
+                    name: it.practitionerName,
+                    total: 0,
+                    zero: 0,
+                    half: 0,
+                    full: 0,
+                    admin: 0,
+                    review: 0,
+                    totalFee: 0,
+                    totalRefunded: 0
+                });
+            }
+            const rec = pMap.get(it.practitionerName)!;
+            rec.total += 1;
+            if (it.tierCategory === 'zero') rec.zero += 1;
+            if (it.tierCategory === 'half') rec.half += 1;
+            if (it.tierCategory === 'full') rec.full += 1;
+            if (it.tierCategory === 'admin') rec.admin += 1;
+            if (it.needsReview) rec.review += 1;
+            rec.totalFee += it.feeAmount;
+            rec.totalRefunded += it.refundAmount;
+        });
+
+        const practitionerSummary = Array.from(pMap.values()).sort((a, b) => {
+            const rankA = practitionerRankMap.has(a.name) ? practitionerRankMap.get(a.name)! : 9999;
+            const rankB = practitionerRankMap.has(b.name) ? practitionerRankMap.get(b.name)! : 9999;
+            if (rankA !== rankB) return rankA - rankB;
+            return a.name.localeCompare(b.name, 'cs');
+        });
+
+        return {
+            monthOptions,
+            resolvedMonthKey,
+            selectedMonthLabel,
+            monthItems,
+            zeroCount,
+            zeroRefundTotal,
+            halfCount,
+            halfFeeTotal,
+            halfRefundTotal,
+            fullCount,
+            fullFeeTotal,
+            adminCount,
+            adminRefundTotal,
+            reviewCount,
+            expiredCount,
+            totalPaidCount,
+            totalOriginalValue,
+            totalStudioKept,
+            totalRefunded,
+            practitionerSummary
+        };
+    }, [allBookings, practitioners, stornoAuditMonth]);
+
+    const filteredStornoAuditItems = useMemo(() => {
+        let list = stornoAuditIncludeExpired
+            ? stornoAuditData.monthItems
+            : stornoAuditData.monthItems.filter(it => !it.isUnpaidExpired);
+
+        if (stornoAuditFilterType === 'zero') {
+            list = list.filter(it => it.tierCategory === 'zero');
+        } else if (stornoAuditFilterType === 'half') {
+            list = list.filter(it => it.tierCategory === 'half');
+        } else if (stornoAuditFilterType === 'full') {
+            list = list.filter(it => it.tierCategory === 'full');
+        } else if (stornoAuditFilterType === 'admin') {
+            list = list.filter(it => it.tierCategory === 'admin');
+        } else if (stornoAuditFilterType === 'review') {
+            list = list.filter(it => it.needsReview);
+        }
+
+        if (stornoAuditPractitionerFilter !== 'all') {
+            list = list.filter(it =>
+                it.practitionerName === stornoAuditPractitionerFilter ||
+                it.practitionerId === stornoAuditPractitionerFilter
+            );
+        }
+
+        if (stornoAuditSearch.trim()) {
+            const q = normalizeName(stornoAuditSearch);
+            list = list.filter(it =>
+                normalizeName(it.practitionerName).includes(q) ||
+                normalizeName(it.booking.date).includes(q) ||
+                normalizeName(it.booking.clientName).includes(q) ||
+                normalizeName(it.booking.cancellationReason).includes(q) ||
+                normalizeName(it.id).includes(q)
+            );
+        }
+
+        return list;
+    }, [
+        stornoAuditData,
+        stornoAuditIncludeExpired,
+        stornoAuditFilterType,
+        stornoAuditPractitionerFilter,
+        stornoAuditSearch
+    ]);
+
+    const handleExportStornoAuditCSV = () => {
+        const delimiter = ';';
+        const headers = [
+            'Lektor',
+            'Datum lekce',
+            'Čas',
+            'Místnost',
+            'Kdy zrušeno',
+            'Předstih (h)',
+            'Pásmo storna',
+            'Poplatek (%)',
+            'Původní cena (Kč)',
+            'Poplatek studia (Kč)',
+            'Vráceno lektorovi (Kč)',
+            'Důvod / Poznámka',
+            'ID rezervace'
+        ];
+        const tierLabels: Record<string, string> = {
+            zero: '0 % poplatek (100 % vráceno)',
+            half: '50 % poplatek (24h–7 dní)',
+            full: '100 % poplatek (< 24h)',
+            admin: 'Zrušeno správcem (0 % poplatek)',
+            review: 'Ke kontrole (0 Kč poplatek i vratka)',
+            expired: 'Nedokončená platba (vypršela)'
+        };
+        const rows = filteredStornoAuditItems.map(it => [
+            `"${(it.practitionerName || '').replace(/"/g, '""')}"`,
+            it.booking.date,
+            it.booking.time,
+            it.booking.room === 1 ? 'M1 (Malá)' : 'M2 (Velká)',
+            `"${formatCzechDateTime(it.cancelledAtIso)}"`,
+            it.leadHours !== null ? Math.round(it.leadHours * 10) / 10 : '',
+            `"${tierLabels[it.tierCategory] || it.tierCategory}"`,
+            it.feePercent,
+            it.price,
+            it.feeAmount,
+            it.refundAmount,
+            `"${(it.booking.cancellationReason || it.booking.note || '').replace(/"/g, '""')}"`,
+            it.id
+        ]);
+        const csvContent = "\uFEFF" + [headers.join(delimiter), ...rows.map(r => r.join(delimiter))].join("\r\n");
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `unity-audit-storna-${stornoAuditData.resolvedMonthKey}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        addToast('success', 'Export hotov', `Audit storna (${stornoAuditData.selectedMonthLabel}) byl stažen do CSV.`);
+    };
+
     // Feed poslední aktivity: nové rezervace (dle createdAt) a zrušení (dle cancelledAt)
     // Poslední aktivita seskupená podle lektora – jeden řádek na rezervaci (ne na akci),
     // aby se admin vyznal, i když 20 lektorů nadělá spoustu rezervací a zrušení.
@@ -1793,24 +2164,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             {/* Navigation Tabs */}
-            <div className="flex overflow-x-auto gap-2 border-b border-stone-200 pb-1">
+            <div className="flex flex-wrap gap-1.5 sm:gap-2 border-b border-stone-200 pb-2">
                 <button 
                     onClick={() => setActiveTab('calendar')}
-                    className={`px-6 py-3 font-medium text-sm flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === 'calendar' ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-800'}`}
+                    className={`px-3.5 sm:px-5 py-2.5 font-medium text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 rounded-lg transition-colors whitespace-nowrap ${activeTab === 'calendar' ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-800 hover:bg-white/60'}`}
                 >
-                    <Calendar className="w-4 h-4" /> Master Kalendář
+                    <Calendar className="w-4 h-4 shrink-0" /> Master Kalendář
                 </button>
                 <button 
                     onClick={() => setActiveTab('analytics')}
-                    className={`px-6 py-3 font-medium text-sm flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === 'analytics' ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-800'}`}
+                    className={`px-3.5 sm:px-5 py-2.5 font-medium text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 rounded-lg transition-colors whitespace-nowrap ${activeTab === 'analytics' ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-800 hover:bg-white/60'}`}
                 >
-                    <TrendingUp className="w-4 h-4" /> BI & Statistiky
+                    <TrendingUp className="w-4 h-4 shrink-0" /> BI & Statistiky
                 </button>
                 <button 
                     onClick={() => setActiveTab('reschedules')}
-                    className={`px-6 py-3 font-medium text-sm flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === 'reschedules' ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-800'}`}
+                    className={`px-3.5 sm:px-5 py-2.5 font-medium text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 rounded-lg transition-colors whitespace-nowrap ${activeTab === 'reschedules' ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-800 hover:bg-white/60'}`}
                 >
-                    <RefreshCw className="w-4 h-4" /> Audit přesunů
+                    <RefreshCw className="w-4 h-4 shrink-0" /> Audit přesunů
                     {pendingManualRefunds.length > 0 ? (
                         <span className="px-1.5 py-0.5 text-xs font-bold bg-amber-500 text-white rounded-full flex items-center gap-0.5 animate-pulse">
                             ⚠️ {pendingManualRefunds.length} k vrácení
@@ -1826,22 +2197,37 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     ) : null}
                 </button>
                 <button 
-                    onClick={() => setActiveTab('schedule')}
-                    className={`px-6 py-3 font-medium text-sm flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === 'schedule' ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-800'}`}
+                    onClick={() => setActiveTab('cancellations')}
+                    className={`px-3.5 sm:px-5 py-2.5 font-medium text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 rounded-lg transition-colors whitespace-nowrap ${activeTab === 'cancellations' ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-800 hover:bg-white/60'}`}
                 >
-                    <Calendar className="w-4 h-4" /> Master Schedule
+                    <Percent className="w-4 h-4 shrink-0" /> Audit storna
+                    {stornoAuditData.reviewCount > 0 ? (
+                        <span className="px-1.5 py-0.5 text-xs font-bold bg-amber-100 text-amber-800 rounded-full border border-amber-300 flex items-center gap-0.5">
+                            ⚠️ {stornoAuditData.reviewCount}
+                        </span>
+                    ) : stornoAuditData.totalPaidCount > 0 ? (
+                        <span className="px-1.5 py-0.5 text-xs font-semibold bg-stone-100 text-stone-600 rounded-full">
+                            {stornoAuditData.totalPaidCount}
+                        </span>
+                    ) : null}
+                </button>
+                <button 
+                    onClick={() => setActiveTab('schedule')}
+                    className={`px-3.5 sm:px-5 py-2.5 font-medium text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 rounded-lg transition-colors whitespace-nowrap ${activeTab === 'schedule' ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-800 hover:bg-white/60'}`}
+                >
+                    <Calendar className="w-4 h-4 shrink-0" /> Master Schedule
                 </button>
                 <button 
                     onClick={() => setActiveTab('team')}
-                    className={`px-6 py-3 font-medium text-sm flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === 'team' ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-800'}`}
+                    className={`px-3.5 sm:px-5 py-2.5 font-medium text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 rounded-lg transition-colors whitespace-nowrap ${activeTab === 'team' ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-800 hover:bg-white/60'}`}
                 >
-                    <Users className="w-4 h-4" /> Správa Týmu
+                    <Users className="w-4 h-4 shrink-0" /> Správa Týmu
                 </button>
                 <button 
                     onClick={() => setActiveTab('events')}
-                    className={`px-6 py-3 font-medium text-sm flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === 'events' ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-800'}`}
+                    className={`px-3.5 sm:px-5 py-2.5 font-medium text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 rounded-lg transition-colors whitespace-nowrap ${activeTab === 'events' ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm' : 'text-stone-500 hover:text-stone-800 hover:bg-white/60'}`}
                 >
-                    <Megaphone className="w-4 h-4" /> Skupinové Události
+                    <Megaphone className="w-4 h-4 shrink-0" /> Skupinové Události
                 </button>
             </div>
 
@@ -3178,8 +3564,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                             </p>
                                         </div>
 
-                                        {/* Výběr měsíce */}
-                                        <div className="flex items-center gap-2">
+                                        {/* Výběr měsíce & odkaz na Audit storna */}
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <button
+                                                onClick={() => setActiveTab('cancellations')}
+                                                className="text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+                                            >
+                                                <Percent className="w-3.5 h-3.5" /> Detailní Audit (0% / 50% / 100%)
+                                            </button>
                                             <select
                                                 value={stornoSelectedMonth}
                                                 onChange={(e) => {
@@ -3853,6 +4245,559 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                                         ) : (
                                                                             <div className="p-2 bg-emerald-50 border border-emerald-200 rounded text-emerald-900 text-[11px] leading-relaxed">
                                                                                 <strong>✅ Standardní přesun:</strong> Přeobjednáno s dostatečným předstihem, bez následných storen.
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    )}
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* === CANCELLATION AUDIT & FEE BREAKDOWN TAB (0% / 50% / 100%) === */}
+            {activeTab === 'cancellations' && (
+                <div className="space-y-6 animate-in slide-in-from-bottom-2 fade-in">
+                    {/* Header Banner */}
+                    <div className="bg-gradient-to-r from-stone-900 via-rose-950 to-stone-900 text-white p-6 rounded-2xl shadow-md border border-rose-800/40 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                        <div>
+                            <div className="flex flex-wrap items-center gap-2 mb-2">
+                                <span className="bg-rose-400 text-stone-950 text-[11px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full shadow-xs">
+                                    Finanční přehled storen
+                                </span>
+                                <span className="text-rose-200 text-xs">
+                                    Rozpad dle 3-pásmových storno pravidel od 1. 11. 2026 (dle data provedení storna)
+                                </span>
+                            </div>
+                            <h2 className="text-2xl font-bold font-heading flex items-center gap-2.5">
+                                <Percent className="w-6 h-6 text-rose-400" />
+                                Audit storna a storno poplatků (0 % / 50 % / 100 %)
+                            </h2>
+                            <p className="text-stone-300 text-xs mt-1.5 max-w-2xl leading-relaxed">
+                                Přesný přehled, kolik zaplacených rezervací bylo zrušeno zdarma (0 % poplatek, vráceno 100 %), s polovičním stornem (50 % poplatek studiu / 50 % vráceno) nebo na poslední chvíli (100 % poplatek), odděleně od nedokončených plateb.
+                            </p>
+                        </div>
+
+                        <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 border-t lg:border-t-0 lg:border-l border-rose-800/50 pt-4 lg:pt-0 lg:pl-6">
+                            <div>
+                                <div className="text-[10px] uppercase tracking-wider text-rose-200/80 font-bold mb-1">Období (měsíc storna)</div>
+                                <select
+                                    value={stornoAuditMonth}
+                                    onChange={(e) => setStornoAuditMonth(e.target.value)}
+                                    className="bg-white/10 hover:bg-white/15 border border-white/20 text-white text-xs font-bold rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-rose-400 [&>option]:text-stone-900"
+                                >
+                                    <option value="all">Celé období (Vše)</option>
+                                    {stornoAuditData.monthOptions.map(m => (
+                                        <option key={m.key} value={m.isCurrent && stornoAuditMonth === 'current' ? 'current' : m.key}>
+                                            {m.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="text-left sm:text-right px-3">
+                                <div className="text-2xl font-extrabold text-amber-300 font-heading">
+                                    +{stornoAuditData.totalStudioKept.toLocaleString()} Kč
+                                </div>
+                                <div className="text-[11px] text-rose-200">
+                                    Příjem ze storno poplatků ({stornoAuditData.totalPaidCount}× storno)
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={handleExportStornoAuditCSV}
+                                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white text-stone-900 hover:bg-rose-50 rounded-lg text-xs font-bold shadow-xs transition-colors shrink-0"
+                            >
+                                <Download className="w-3.5 h-3.5" /> Export CSV
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* 4 KPI Cards: 0% / 50% / 100% / Admin & Review */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {/* 0% poplatek */}
+                        <div
+                            onClick={() => setStornoAuditFilterType(stornoAuditFilterType === 'zero' ? 'all' : 'zero')}
+                            className={`p-4 rounded-xl border shadow-xs cursor-pointer transition-all ${
+                                stornoAuditFilterType === 'zero'
+                                    ? 'bg-emerald-50 border-emerald-400 ring-2 ring-emerald-200'
+                                    : 'bg-white border-stone-200 hover:border-emerald-300'
+                            }`}
+                        >
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-emerald-700 uppercase tracking-wide flex items-center gap-1.5">
+                                    <CheckCircle className="w-3.5 h-3.5" /> 0 % poplatek (&gt; 7 dní)
+                                </span>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                                    100 % vráceno
+                                </span>
+                            </div>
+                            <div className="text-3xl font-extrabold text-stone-900 mt-2 font-heading">
+                                {stornoAuditData.zeroCount}×
+                            </div>
+                            <div className="text-xs text-emerald-700 font-semibold mt-1">
+                                Vráceno lektorům: {stornoAuditData.zeroRefundTotal.toLocaleString()} Kč
+                            </div>
+                        </div>
+
+                        {/* 50% poplatek */}
+                        <div
+                            onClick={() => setStornoAuditFilterType(stornoAuditFilterType === 'half' ? 'all' : 'half')}
+                            className={`p-4 rounded-xl border shadow-xs cursor-pointer transition-all ${
+                                stornoAuditFilterType === 'half'
+                                    ? 'bg-amber-50 border-amber-400 ring-2 ring-amber-200'
+                                    : 'bg-white border-stone-200 hover:border-amber-300'
+                            }`}
+                        >
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-amber-800 uppercase tracking-wide flex items-center gap-1.5">
+                                    <Clock className="w-3.5 h-3.5" /> 50 % poplatek (24h–7d)
+                                </span>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                                    Napůl 50 / 50
+                                </span>
+                            </div>
+                            <div className="text-3xl font-extrabold text-stone-900 mt-2 font-heading">
+                                {stornoAuditData.halfCount}×
+                            </div>
+                            <div className="text-xs text-amber-900 font-semibold mt-1 flex items-center justify-between gap-2">
+                                <span>Studium: <strong>{stornoAuditData.halfFeeTotal.toLocaleString()} Kč</strong></span>
+                                <span className="text-stone-500">Vráceno: {stornoAuditData.halfRefundTotal.toLocaleString()} Kč</span>
+                            </div>
+                        </div>
+
+                        {/* 100% poplatek */}
+                        <div
+                            onClick={() => setStornoAuditFilterType(stornoAuditFilterType === 'full' ? 'all' : 'full')}
+                            className={`p-4 rounded-xl border shadow-xs cursor-pointer transition-all ${
+                                stornoAuditFilterType === 'full'
+                                    ? 'bg-red-50 border-red-400 ring-2 ring-red-200'
+                                    : 'bg-white border-stone-200 hover:border-red-300'
+                            }`}
+                        >
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-red-700 uppercase tracking-wide flex items-center gap-1.5">
+                                    <XCircle className="w-3.5 h-3.5" /> 100 % poplatek (&lt; 24h)
+                                </span>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800">
+                                    Propadá studiu
+                                </span>
+                            </div>
+                            <div className="text-3xl font-extrabold text-stone-900 mt-2 font-heading">
+                                {stornoAuditData.fullCount}×
+                            </div>
+                            <div className="text-xs text-red-700 font-semibold mt-1">
+                                Poplatek studia: {stornoAuditData.fullFeeTotal.toLocaleString()} Kč
+                            </div>
+                        </div>
+
+                        {/* Admin & Ke kontrole + Celková bilance */}
+                        <div
+                            onClick={() => setStornoAuditFilterType(stornoAuditFilterType === 'review' ? 'all' : (stornoAuditData.reviewCount > 0 ? 'review' : 'admin'))}
+                            className={`p-4 rounded-xl border shadow-xs cursor-pointer transition-all ${
+                                stornoAuditData.reviewCount > 0
+                                    ? 'bg-amber-50/70 border-amber-300 ring-1 ring-amber-300'
+                                    : 'bg-white border-stone-200 hover:border-indigo-300'
+                            }`}
+                        >
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-indigo-800 uppercase tracking-wide flex items-center gap-1.5">
+                                    <ShieldCheck className="w-3.5 h-3.5" /> Správcem &amp; Kontrola
+                                </span>
+                                {stornoAuditData.reviewCount > 0 && (
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500 text-white">
+                                        ⚠️ {stornoAuditData.reviewCount} ke kontrole
+                                    </span>
+                                )}
+                            </div>
+                            <div className="flex items-baseline gap-3 mt-2">
+                                <span className="text-2xl font-extrabold text-indigo-900 font-heading">
+                                    {stornoAuditData.adminCount}×
+                                </span>
+                                <span className="text-xs text-stone-600">
+                                    správcem (vráceno {stornoAuditData.adminRefundTotal.toLocaleString()} Kč)
+                                </span>
+                            </div>
+                            <div className="text-[11px] text-stone-600 mt-1.5 pt-1.5 border-t border-stone-200/70 flex items-center justify-between">
+                                <span>Celkem vráceno: <strong>{stornoAuditData.totalRefunded.toLocaleString()} Kč</strong></span>
+                                <span className="text-stone-400">z {stornoAuditData.totalOriginalValue.toLocaleString()} Kč</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Practitioner Summary Grid (strictly sorted via sortPractitioners) */}
+                    {stornoAuditData.practitionerSummary.length > 0 && (
+                        <div className="bg-white p-5 rounded-xl border border-stone-200 shadow-xs space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <h3 className="text-sm font-bold text-stone-900 flex items-center gap-2">
+                                    <Users className="w-4 h-4 text-rose-600" />
+                                    Rozpad storen podle lektorů ({stornoAuditData.selectedMonthLabel})
+                                </h3>
+                                {stornoAuditPractitionerFilter !== 'all' && (
+                                    <button
+                                        onClick={() => setStornoAuditPractitionerFilter('all')}
+                                        className="text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+                                    >
+                                        Zobrazit všechny lektory
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                                {stornoAuditData.practitionerSummary.map(ps => (
+                                    <div
+                                        key={ps.name}
+                                        onClick={() => setStornoAuditPractitionerFilter(stornoAuditPractitionerFilter === ps.name ? 'all' : ps.name)}
+                                        className={`p-3 rounded-xl border transition-all cursor-pointer ${
+                                            stornoAuditPractitionerFilter === ps.name
+                                                ? 'bg-rose-50/70 border-rose-400 ring-2 ring-rose-200'
+                                                : 'bg-stone-50/60 border-stone-200 hover:bg-stone-100/70'
+                                        }`}
+                                    >
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className="font-bold text-stone-900 text-xs truncate">
+                                                {ps.name}
+                                            </span>
+                                            <span className="text-xs font-extrabold px-2 py-0.5 bg-white rounded-md border border-stone-200 text-rose-700 shrink-0">
+                                                {ps.total}×
+                                            </span>
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[11px]">
+                                            <span className="px-1.5 py-0.5 rounded bg-emerald-100/80 text-emerald-800 font-semibold">0%: {ps.zero}</span>
+                                            <span className="px-1.5 py-0.5 rounded bg-amber-100/80 text-amber-800 font-semibold">50%: {ps.half}</span>
+                                            <span className="px-1.5 py-0.5 rounded bg-red-100/80 text-red-800 font-semibold">100%: {ps.full}</span>
+                                            {ps.admin > 0 && (
+                                                <span className="px-1.5 py-0.5 rounded bg-indigo-100/80 text-indigo-800 font-semibold">🛡️ {ps.admin}</span>
+                                            )}
+                                            {ps.review > 0 && (
+                                                <span className="px-1.5 py-0.5 rounded bg-amber-500 text-white font-bold">⚠️ {ps.review}</span>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-stone-200/60 text-[11px] text-stone-600">
+                                            <span>Poplatek: <strong className="text-stone-900">{ps.totalFee.toLocaleString()} Kč</strong></span>
+                                            <span className="text-emerald-700">Vráceno: {ps.totalRefunded.toLocaleString()} Kč</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Filter Toolbar */}
+                    <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-xs flex flex-col xl:flex-row gap-3 items-stretch xl:items-center justify-between">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                            <button
+                                onClick={() => setStornoAuditFilterType('all')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                                    stornoAuditFilterType === 'all'
+                                        ? 'bg-stone-900 text-white shadow-xs'
+                                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                }`}
+                            >
+                                Všechna ({stornoAuditData.totalPaidCount})
+                            </button>
+                            <button
+                                onClick={() => setStornoAuditFilterType('zero')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                                    stornoAuditFilterType === 'zero'
+                                        ? 'bg-emerald-600 text-white shadow-xs'
+                                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                }`}
+                            >
+                                🟢 0 % poplatek ({stornoAuditData.zeroCount})
+                            </button>
+                            <button
+                                onClick={() => setStornoAuditFilterType('half')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                                    stornoAuditFilterType === 'half'
+                                        ? 'bg-amber-600 text-white shadow-xs'
+                                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                }`}
+                            >
+                                🟡 50 % poplatek ({stornoAuditData.halfCount})
+                            </button>
+                            <button
+                                onClick={() => setStornoAuditFilterType('full')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                                    stornoAuditFilterType === 'full'
+                                        ? 'bg-red-600 text-white shadow-xs'
+                                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                }`}
+                            >
+                                🔴 100 % poplatek ({stornoAuditData.fullCount})
+                            </button>
+                            <button
+                                onClick={() => setStornoAuditFilterType('admin')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                                    stornoAuditFilterType === 'admin'
+                                        ? 'bg-indigo-600 text-white shadow-xs'
+                                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                }`}
+                            >
+                                🛡️ Správcem ({stornoAuditData.adminCount})
+                            </button>
+                            <button
+                                onClick={() => setStornoAuditFilterType('review')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                                    stornoAuditFilterType === 'review'
+                                        ? 'bg-amber-600 text-white shadow-xs'
+                                        : stornoAuditData.reviewCount > 0
+                                            ? 'bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200'
+                                            : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                }`}
+                            >
+                                ⚠️ Ke kontrole ({stornoAuditData.reviewCount})
+                            </button>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2.5">
+                            <label className="flex items-center gap-1.5 text-xs text-stone-600 cursor-pointer select-none bg-stone-50 px-2.5 py-1.5 rounded-lg border border-stone-200">
+                                <input
+                                    type="checkbox"
+                                    checked={stornoAuditIncludeExpired}
+                                    onChange={(e) => setStornoAuditIncludeExpired(e.target.checked)}
+                                    className="rounded border-stone-300 text-indigo-600 focus:ring-indigo-500"
+                                />
+                                <span>Včetně nedokončených plateb ({stornoAuditData.expiredCount})</span>
+                            </label>
+
+                            <select
+                                value={stornoAuditPractitionerFilter}
+                                onChange={(e) => setStornoAuditPractitionerFilter(e.target.value)}
+                                className="px-3 py-1.5 border border-stone-300 rounded-lg text-xs bg-white text-stone-700 outline-none focus:ring-2 focus:ring-indigo-500"
+                            >
+                                <option value="all">Všichni lektoři</option>
+                                {sortedPractitionersForFilter.map(p => (
+                                    <option key={p.id} value={p.name}>{p.name}</option>
+                                ))}
+                            </select>
+
+                            <div className="relative">
+                                <Search className="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                <input
+                                    type="text"
+                                    value={stornoAuditSearch}
+                                    onChange={(e) => setStornoAuditSearch(e.target.value)}
+                                    placeholder="Hledat lektora, datum..."
+                                    className="pl-8 pr-3 py-1.5 border border-stone-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500 w-44 sm:w-52"
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Audit Storna Table */}
+                    <div className="bg-white rounded-xl border border-stone-200 shadow-xs overflow-hidden">
+                        {filteredStornoAuditItems.length === 0 ? (
+                            <div className="p-12 text-center">
+                                <div className="w-12 h-12 bg-stone-100 rounded-full flex items-center justify-center mx-auto mb-3 text-stone-400">
+                                    <Percent className="w-6 h-6" />
+                                </div>
+                                <h4 className="text-base font-bold text-stone-800 mb-1">
+                                    Žádná storna neodpovídají vybranému období nebo filtru
+                                </h4>
+                                <p className="text-xs text-stone-500 max-w-md mx-auto">
+                                    Zkuste změnit měsíc v horní liště, zrušit filtr pásma nebo zapnout zobrazení nedokončených plateb.
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left text-xs">
+                                    <thead className="bg-stone-50 text-stone-600 font-bold border-b border-stone-200">
+                                        <tr>
+                                            <th className="py-3 px-4">Lektor</th>
+                                            <th className="py-3 px-4">Termín lekce</th>
+                                            <th className="py-3 px-4">Kdy zrušeno &amp; Předstih</th>
+                                            <th className="py-3 px-4">Pásmo / Typ storna</th>
+                                            <th className="py-3 px-4 text-right">Cena</th>
+                                            <th className="py-3 px-4 text-right">Poplatek studia</th>
+                                            <th className="py-3 px-4 text-right">Vráceno</th>
+                                            <th className="py-3 px-4 text-center">Detail</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-stone-100">
+                                        {filteredStornoAuditItems.map(item => {
+                                            const isExpanded = !!expandedStornoAuditRows[item.id];
+                                            return (
+                                                <React.Fragment key={item.id}>
+                                                    <tr className={`hover:bg-stone-50/70 transition-colors ${
+                                                        item.needsReview ? 'bg-amber-50/40' : item.isUnpaidExpired ? 'opacity-70 bg-stone-50/40' : ''
+                                                    }`}>
+                                                        <td className="py-3 px-4">
+                                                            <div className="font-bold text-stone-900">{item.practitionerName}</div>
+                                                            <div className="text-[11px] text-stone-400">
+                                                                {item.booking.room === 1 ? 'M1 (Malá)' : 'M2 (Velká)'} · {item.booking.durationMinutes} min
+                                                            </div>
+                                                        </td>
+
+                                                        <td className="py-3 px-4 font-mono text-stone-800 font-semibold">
+                                                            {formatCzechDate(item.booking.date)} {item.booking.time}
+                                                            {item.wasRescheduledBeforeCancel && (
+                                                                <div className="font-sans text-[10px] font-bold text-red-600 mt-0.5">
+                                                                    🚨 Po předchozím přesunu
+                                                                </div>
+                                                            )}
+                                                        </td>
+
+                                                        <td className="py-3 px-4">
+                                                            <div className="text-stone-800 font-medium">
+                                                                {formatCzechDateTime(item.cancelledAtIso)}
+                                                            </div>
+                                                            <div className="text-[11px] text-stone-500 mt-0.5">
+                                                                {item.leadHours === null ? '—' : item.leadHours < 0
+                                                                    ? 'Po začátku lekce'
+                                                                    : item.leadHours >= 48
+                                                                        ? `${Math.round((item.leadHours / 24) * 10) / 10} dní předem`
+                                                                        : `${Math.round(item.leadHours * 10) / 10} h předem`}
+                                                            </div>
+                                                        </td>
+
+                                                        <td className="py-3 px-4">
+                                                            {item.tierCategory === 'expired' && (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-stone-200 text-stone-700">
+                                                                    ⌛ Nedokončená platba
+                                                                </span>
+                                                            )}
+                                                            {item.tierCategory === 'zero' && (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                                                    🟢 0 % poplatek (100 % zpět)
+                                                                </span>
+                                                            )}
+                                                            {item.tierCategory === 'half' && (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-200">
+                                                                    🟡 50 % poplatek (24h–7d)
+                                                                </span>
+                                                            )}
+                                                            {item.tierCategory === 'full' && (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-800 border border-red-200">
+                                                                    🔴 100 % poplatek (&lt; 24h)
+                                                                </span>
+                                                            )}
+                                                            {item.tierCategory === 'admin' && (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                                                                    🛡️ Správcem (0 % poplatek)
+                                                                </span>
+                                                            )}
+                                                            {item.tierCategory === 'review' && (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500 text-white">
+                                                                    ⚠️ Ke kontrole (0 Kč vratka i poplatek)
+                                                                </span>
+                                                            )}
+                                                            {item.isManualPending && (
+                                                                <div className="text-[10px] font-bold text-amber-800 mt-1">
+                                                                    ⚠️ Čeká na ruční vyplacení z banky
+                                                                </div>
+                                                            )}
+                                                            {item.isRetroactiveEstimate && (
+                                                                <div className="text-[10px] text-stone-400 mt-0.5">
+                                                                    Dopočteno dle data storna
+                                                                </div>
+                                                            )}
+                                                        </td>
+
+                                                        <td className="py-3 px-4 text-right font-semibold text-stone-700">
+                                                            {item.price.toLocaleString()} Kč
+                                                        </td>
+
+                                                        <td className="py-3 px-4 text-right font-bold text-stone-900">
+                                                            {item.feeAmount > 0 ? (
+                                                                <span className="text-amber-800">+{item.feeAmount.toLocaleString()} Kč</span>
+                                                            ) : (
+                                                                <span className="text-stone-400">0 Kč</span>
+                                                            )}
+                                                        </td>
+
+                                                        <td className="py-3 px-4 text-right font-bold">
+                                                            {item.refundAmount > 0 ? (
+                                                                <span className="text-emerald-700">{item.refundAmount.toLocaleString()} Kč</span>
+                                                            ) : (
+                                                                <span className="text-stone-400">0 Kč</span>
+                                                            )}
+                                                        </td>
+
+                                                        <td className="py-3 px-4 text-center">
+                                                            <button
+                                                                onClick={() => toggleStornoAuditRow(item.id)}
+                                                                className="p-1 rounded hover:bg-stone-200 text-stone-500 hover:text-stone-800 transition-colors"
+                                                                title="Rozbalit detail"
+                                                            >
+                                                                {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+
+                                                    {isExpanded && (
+                                                        <tr className="bg-stone-50/80">
+                                                            <td colSpan={8} className="p-4 border-b border-stone-200 text-xs">
+                                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                                    <div className="space-y-1">
+                                                                        <div className="font-bold text-stone-700">Identifikace &amp; platba:</div>
+                                                                        <div className="text-stone-600">
+                                                                            ID: <code className="text-[11px] bg-white px-1 rounded border border-stone-200">{item.id}</code>
+                                                                        </div>
+                                                                        <div className="text-stone-600">
+                                                                            GoPay ID: <code className="text-[11px] bg-white px-1 rounded border border-stone-200">{item.booking.paymentId || '—'}</code>
+                                                                        </div>
+                                                                        <div className="text-stone-600">
+                                                                            Stav v DB: <strong>{item.booking.status}</strong> · Metoda: {item.booking.paymentMethod}
+                                                                        </div>
+                                                                        {item.booking.paidAt && (
+                                                                            <div className="text-stone-600">Uhrazeno: {formatCzechDateTime(item.booking.paidAt)}</div>
+                                                                        )}
+                                                                    </div>
+
+                                                                    <div className="space-y-1">
+                                                                        <div className="font-bold text-stone-700">Důvod storna &amp; klient:</div>
+                                                                        <div className="text-stone-600">
+                                                                            Kód důvodu: <code className="text-[11px] bg-white px-1 rounded border border-stone-200">{item.booking.cancellationReason || '—'}</code>
+                                                                        </div>
+                                                                        {item.booking.cancelledByName && (
+                                                                            <div className="text-stone-600">Provedl(a): <strong>{item.booking.cancelledByName}</strong></div>
+                                                                        )}
+                                                                        {item.booking.clientName && (
+                                                                            <div className="text-stone-600">Klient: <strong>{item.booking.clientName}</strong> ({item.booking.clientEmail || 'bez e-mailu'})</div>
+                                                                        )}
+                                                                        {item.booking.note && (
+                                                                            <div className="mt-1 p-2 bg-white rounded border border-stone-200 text-stone-700 text-[11px] whitespace-pre-wrap">
+                                                                                {item.booking.note}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+
+                                                                    <div className="space-y-2">
+                                                                        <div className="font-bold text-stone-700">Finanční kontrola:</div>
+                                                                        {item.isManualPending ? (
+                                                                            <div className="p-2.5 bg-amber-100/80 border border-amber-300 rounded-lg text-amber-950 space-y-2">
+                                                                                <div className="text-[11px] leading-relaxed">
+                                                                                    <strong>⚠️ Vyžaduje ruční bankovní vratku:</strong> Automatická GoPay refundace selhala{item.booking.gopayRefundError ? ` (${item.booking.gopayRefundError})` : ''}. Částka k odeslání: <strong>{item.refundAmount.toLocaleString()} Kč</strong>.
+                                                                                </div>
+                                                                                <button
+                                                                                    onClick={() => handleSettleRefund(item.id)}
+                                                                                    disabled={settlingRefundId === item.id}
+                                                                                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-md text-[11px] font-bold transition-colors disabled:opacity-50"
+                                                                                >
+                                                                                    {settlingRefundId === item.id ? 'Ukládám…' : 'Označit jako vyplacené z banky'}
+                                                                                </button>
+                                                                            </div>
+                                                                        ) : item.isAnomaly ? (
+                                                                            <div className="p-2.5 bg-amber-50 border border-amber-300 rounded-lg text-amber-950 text-[11px] leading-relaxed">
+                                                                                <strong>⚠️ Pozor ke kontrole:</strong> Rezervace má cenu {item.price.toLocaleString()} Kč, ale eviduje storno poplatek 0 Kč i vrácenou částku 0 Kč. Doporučujeme ověřit stav v GoPay administraci.
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div className="p-2.5 bg-white border border-stone-200 rounded-lg text-stone-700 text-[11px] leading-relaxed">
+                                                                                Poplatek studia: <strong>{item.feeAmount.toLocaleString()} Kč ({item.feePercent} %)</strong> · Vráceno: <strong>{item.refundAmount.toLocaleString()} Kč</strong>.
+                                                                                {item.booking.manualRefundSettled && (
+                                                                                    <div className="text-emerald-700 font-semibold mt-1">
+                                                                                        ✅ Vyplaceno ručně z banky ({formatCzechDateTime(item.booking.manualRefundSettledAt)})
+                                                                                    </div>
+                                                                                )}
                                                                             </div>
                                                                         )}
                                                                     </div>
